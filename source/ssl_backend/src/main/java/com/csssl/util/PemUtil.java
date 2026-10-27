@@ -96,6 +96,21 @@ public final class PemUtil {
         }
     }
 
+    /** PEM 文本 → 公钥（SPKI 格式，走 BC PEMParser；BC provider 支持 SM2 国密曲线公钥 OID） */
+    public static java.security.PublicKey parsePublicKey(String pem) {
+        try (PEMParser parser = new PEMParser(new StringReader(pem))) {
+            Object obj = parser.readObject();
+            if (obj instanceof org.bouncycastle.asn1.x509.SubjectPublicKeyInfo spki) {
+                return new JcaPEMKeyConverter().setProvider("BC").getPublicKey(spki);
+            }
+            throw new IllegalArgumentException("公钥PEM解析失败：不支持的格式（应为 SPKI 公钥）");
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("公钥PEM解析失败: " + e.getMessage(), e);
+        }
+    }
+
     /** 字节数组 → UTF-8 文本（下载场景） */
     public static String utf8(byte[] data) {
         return new String(data, StandardCharsets.UTF_8);

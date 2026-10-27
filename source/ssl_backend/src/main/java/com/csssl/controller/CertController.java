@@ -64,6 +64,14 @@ public class CertController {
                 req.getSan(), req.getDescription(), username, clientIp(request)));
     }
 
+    /** 公钥签发（RA 场景）：申请方自持私钥，仅提交 Subject DN + 公钥 PEM（HIS 医生签名证书对接） */
+    @PostMapping("/certs/public-key")
+    public Result<CertVo> issueWithPublicKey(@RequestBody com.csssl.dto.PublicKeyIssueRequest req,
+                                             HttpServletRequest request) {
+        String username = (String) request.getAttribute("ssl.username");
+        return Result.success("公钥签发成功", certService.issueWithPublicKey(req, username, clientIp(request)));
+    }
+
     /** 吊销证书 */
     @PostMapping("/certs/{id}/revoke")
     public Result<CertVo> revoke(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,

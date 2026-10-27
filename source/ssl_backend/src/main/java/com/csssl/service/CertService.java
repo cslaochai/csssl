@@ -132,6 +132,45 @@ public class CertService {
         return CertVo.from(row);
     }
 
+    /**
+     * 公钥签发（RA 场景）：申请方本地生成密钥对后只提交 Subject DN 与公钥，私钥自持不落盘。
+     * 用于 HIS 等业务系统对接（医生签名证书等）。
+     */
+    public CertVo issueWithPublicKey(com.csssl.dto.PublicKeyIssueRequest req, String username, String ip) {
+        String dn = req.getSubjectDn() == null ? "" : req.getSubjectDn().trim();
+        if (dn.isEmpty()) {
+            throw new IllegalArgumentException("主体DN不能为空（如 CN=张三,O=医院,OU=门诊部）");
+        }
+        if (req.getPublicKeyPem() == null || req.getPublicKeyPem().isBlank()) {
+            throw new IllegalArgumentException("公钥PEM不能为空（申请方自持私钥，仅提交公钥）");
+        }
+        String type = (req.getCertType() == null ? "CLIENT" : req.getCertType()).toUpperCase();
+        if (!TYPES.contains(type)) {
+            throw new IllegalArgumentException("不支持的证书类型: " + req.getCertType() + "（仅支持 SERVER / CLIENT / SUB_CA）");
+        }
+        int days = resolveValidityDays(req.getValidityDays());
+
+        X509Certificate caCert = caService.signingCert();
+        PrivateKey caKey = caService.signingKey();
+        X509Certificate cert = CertUtil.issuePublicKey(dn, req.getPublicKeyPem(), caCert, caKey,
+                type, days, null, crlUrl(), ocspUrl());
+
+        String serial = cert.getSerialNumber().toString(16);
+        // 申请方自持私钥，不落盘
+        persistFiles(serial, null, PemUtil.certToPem(cert));
+        String cn = CertUtil.subjectCn(cert);
+        String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
+                ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
+
+        CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, null,
+                req.getDescription(), username);
+        certMapper.insert(row);
+        auditService.record(username, "CERT_PUBKEY_ISSUE", String.valueOf(row.getId()),
+                "公钥签发 " + type + " 证书：" + cn, ip);
+        log.info("[公钥签发] id={}, cn={}, type={}, algorithm={}, serial={}", row.getId(), cn, type, algorithm, serial);
+        return CertVo.from(row);
+    }
+
     /** 吊销证书 */
     public CertVo revoke(Long id, String reason, String username, String ip) {
         CaCert row = findById(id);

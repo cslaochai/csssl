@@ -139,6 +139,25 @@ public final class CertUtil {
         }
     }
 
+    /**
+     * 用签发CA签发证书（RA 公钥申请场景：主体 DN 与公钥由申请方提供，私钥自持不落盘）。
+     * subjectDn 为 RFC2253 格式（如 "CN=张三,O=医院,OU=门诊部"）。
+     */
+    public static X509Certificate issuePublicKey(String subjectDn, String publicKeyPem,
+                                                 X509Certificate caCert, PrivateKey caKey,
+                                                 String certType, int validityDays, String san,
+                                                 String crlUrl, String ocspUrl) {
+        try {
+            PublicKey pub = PemUtil.parsePublicKey(publicKeyPem);
+            X500Name subject = new X500Name(subjectDn);
+            return issue(subject, pub, caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("公钥/DN 解析失败: " + e.getMessage(), e);
+        }
+    }
+
     /** 签发通用入口：主体 X500Name + 公钥 + 吊销分发点(CDP)/OCSP访问点(AIA) */
     private static X509Certificate issue(X500Name subject, PublicKey subjectPub,
                                           X509Certificate caCert, PrivateKey caKey,
