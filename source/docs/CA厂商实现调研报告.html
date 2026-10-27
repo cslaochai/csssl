@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>国内CA/PKI厂商实现方式调研报告 —— 对照 csssl 设计评估</title>
+<style>
+  :root{
+    --ink:#1f2937; --sub:#5b6572; --line:#d9dee5; --bg:#f6f8fa;
+    --brand:#0e5a8a; --brand-soft:#e8f1f8; --ok:#0f7b4d; --warn:#a15c00; --bad:#b02a37;
+    --chip-v:#0e5a8a; --chip-s:#6b4fa1;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;color:var(--ink);margin:0;background:var(--bg);line-height:1.65;}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px;}
+  header.hero{background:linear-gradient(135deg,#0e5a8a 0%,#123f63 100%);color:#fff;border-radius:12px;padding:30px 34px;margin-bottom:26px;}
+  header.hero h1{margin:0 0 10px;font-size:26px;line-height:1.35;}
+  header.hero p{margin:4px 0;color:#dbe7f1;font-size:14px;}
+  .tag{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);border-radius:20px;padding:2px 12px;font-size:12px;margin-right:8px;}
+  h2{font-size:21px;margin:38px 0 14px;padding:10px 14px;border-left:5px solid var(--brand);background:var(--brand-soft);border-radius:4px;}
+  h3{font-size:16.5px;margin:24px 0 10px;}
+  h4{font-size:14.5px;margin:16px 0 8px;color:var(--sub);}
+  p{font-size:14px;}
+  table{border-collapse:collapse;width:100%;margin:10px 0 18px;font-size:13px;background:#fff;box-shadow:0 1px 3px rgba(16,42,67,.08);}
+  th{background:#eef3f8;color:#123f63;text-align:left;padding:8px 10px;border:1px solid var(--line);font-weight:600;white-space:nowrap;}
+  td{padding:8px 10px;border:1px solid var(--line);vertical-align:top;}
+  tr:nth-child(even) td{background:#fafcfd;}
+  .dim th{background:#123f63;color:#fff;}
+  .note{background:#fff8e6;border:1px solid #ecd9a8;border-radius:6px;padding:10px 14px;font-size:13px;margin:12px 0;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px 20px;margin:14px 0;}
+  .pill{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;margin-right:6px;}
+  .v{background:#e5f4ec;color:var(--ok);border:1px solid #bfe3d0;}
+  .s{background:#f3ecfb;color:var(--chip-s);border:1px solid #dcc9ef;}
+  .n{background:#fdeef0;color:var(--bad);border:1px solid #f2c4c9;}
+  .p0{background:#fdeef0;color:var(--bad);border:1px solid #f2c4c9;border-radius:4px;padding:1px 8px;font-size:12px;}
+  .p1{background:#fff3e0;color:var(--warn);border:1px solid #f0d9a8;border-radius:4px;padding:1px 8px;font-size:12px;}
+  .p2{background:#e8f1f8;color:var(--brand);border:1px solid #c5dcee;border-radius:4px;padding:1px 8px;font-size:12px;}
+  .p3{background:#f0f2f5;color:var(--sub);border:1px solid #d5dae0;border-radius:4px;padding:1px 8px;font-size:12px;}
+  ul.tight{margin:6px 0;padding-left:22px;} ul.tight li{font-size:13.5px;margin:4px 0;}
+  .src{font-size:12px;color:var(--sub);}
+  .src a{color:var(--brand);text-decoration:none;word-break:break-all;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:800px){.grid2{grid-template-columns:1fr;}}
+  .toc{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px 20px;font-size:14px;}
+  .toc a{color:var(--brand);text-decoration:none;}
+  .toc li{margin:3px 0;}
+  footer{margin-top:40px;font-size:12.5px;color:var(--sub);border-top:1px solid var(--line);padding-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>国内 CA / PKI 厂商实现方式调研报告</h1>
+  <p><span class="tag">调研日期 2026-10-27</span><span class="tag">简体中文</span><span class="tag">分组 + 表格对比</span></p>
+  <p>调研目的：对照国内真实厂商（持证 CA 机构、商用密码/安全厂商、医疗电子签名与医保落地厂商）的通行做法，评估并改进自研 <b>csssl</b>（院内 CA 根认证中心：根 CA 自签、证书签发、CRL 吊销、证书链在线校验、SM2 口令加密登录、SM4 工具，Java + BouncyCastle 实现，私钥只落盘不落库）的设计。</p>
+  <p>可追溯约定：正文关键结论以 <b>[已查证]</b> / <b>[厂商自述]</b> 标注来源可信度；文末列出主要来源 URL，完整 144 条来源清单见同目录三份原始调研 Markdown（国家级与区域CA / 商用密码厂商 / 医疗医保行业）。查无权威来源的条目已在正文明确标注"未查到权威来源"。</p>
+</header>
+
+<div class="toc">
+<b>目录</b>
+<ol>
+  <li><a href="#s1">行业格局总览：谁在合法发证、三类玩家的分工</a></li>
+  <li><a href="#s2">法定准入资质（许可体系）</a></li>
+  <li><a href="#s3">厂商全景对比表（三组）</a></li>
+  <li><a href="#s4">代表厂商 / 方案五维度详析</a></li>
+  <li><a href="#s5">合规依据（法规 / 标准原文要点）</a></li>
+  <li><a href="#s6">对 csssl 的借鉴建议（现状对照 + 优先级行动清单）</a></li>
+  <li><a href="#s7">主要来源清单</a></li>
+</ol>
+</div>
+
+<h2 id="s1">一、行业格局总览</h2>
+
+<div class="card">
+<h3>1.1 准入与规模</h3>
+<p>在中国从事面向社会公众的电子认证服务，机构须同时持有工信部《电子认证服务许可证》与国家密码管理局《电子认证服务使用密码许可证》；从事政务 CA 另须《电子政务电子认证服务机构资质》。<span class="pill v">已查证</span>工信部公示全国持证 CA 机构共 <b>55 家</b>（国有/国有控股 25 家、民营/民营控股 34 家）；<b>证书签发量前 5 名的 CA 合计占全国 93.2%</b>，头部高度集中，长尾区域 CA 主要服务本省政务与招投标。<span class="src">[工信部 55 家名单 PDF · 工信部 2025 年电子认证服务业运行情况]</span></p>
+</div>
+
+<h3>1.2 三类玩家的分工定位</h3>
+<table>
+<tr><th style="width:18%">类别</th><th style="width:38%">代表主体</th><th>定位与典型产品形态</th></tr>
+<tr>
+  <td><b>国家级 / 区域性持证 CA</b></td>
+  <td>CFCA（金融级）、中国电子口岸数据中心 CA（行业级）、北京CA/数字认证、上海CA、GDCA、浙江CA、山东CA、江苏智慧CA、湖南CA、天津CA、福建CA 等</td>
+  <td>面向公众/机构发证的运营型 CA：离线根 CA + 在线二级 CA + 分布 RA；双证书（签名+加密）、KMC 密钥托管；CRL+OCSP；以 USBKey/智能密码钥匙为介质</td>
+</tr>
+<tr>
+  <td><b>商用密码 / 安全厂商</b></td>
+  <td>三未信安、吉大正元、电科网安（卫士通）、格尔软件、数字认证、信安世纪、中安网脉、江南天安</td>
+  <td>CA/PKI <b>产品化系统与密码设备</b>：数字证书认证系统（CA+RA+KMC+OCSP）、服务器密码机/HSM、签名验签服务器、时间戳服务器、USBKey；全栈国密（SM2/SM3/SM4），产品须过商密产品认证</td>
+</tr>
+<tr>
+  <td><b>医疗电子签名 / 医保落地</b></td>
+  <td>持牌CA（数字认证、上海CA、深圳CA、苏州CA、国富安、CFCA）+ 签章中间件（金格 iSignature、医信签）+ HIS 厂商内置（卫宁健康等）；医保侧为国家医保信息平台电子凭证体系</td>
+  <td>医护数字证书 + USBKey/移动签名；时间戳 + 归档签名；医疗国密标准 WS/T 847—2024 强制 SM2/SM3；医保电子凭证为国家平台集中签发，接口强制 SM2/SM3 签名 + SM4 加密双向验签</td>
+</tr>
+</table>
+
+<div class="note"><b>对 csssl 的第一层定位判断：</b>csssl 属于"院内自用 CA"——不对外发证则不触碰工信部许可红线，但国内厂商在<b>根CA离线化、私钥不出密码机、双证书+KMC、OCSP 双通道、审计三权分立、时间戳</b>等做法，恰好是 csssl 现阶段的主要差距点（详见第六节）。</div>
+
+<h2 id="s2">二、法定准入资质（许可体系）</h2>
+<table>
+<tr><th>资质</th><th>发证机关</th><th>法律依据</th><th>说明</th></tr>
+<tr><td>《电子认证服务许可证》（有效期 5 年）</td><td>工业和信息化部</td><td>《电子签名法》第 17/18/25 条、《电子认证服务管理办法》第 6/10/14 条</td><td>面向社会公众发证的准入门槛；申请须提交符合国家安全标准的技术设备凭证 + 国家密码管理机构同意使用密码的证明文件</td></tr>
+<tr><td>《电子认证服务使用密码许可证》</td><td>国家密码管理局</td><td>《商用密码管理条例》</td><td>CA 使用密码技术的许可（如山东 CA 许可证号 0001，2025-05 至 2030-04，国家密码管理局行政审批公示）</td></tr>
+<tr><td>《电子政务电子认证服务机构资质》</td><td>国家密码管理局</td><td>《电子政务电子认证服务管理办法》</td><td>从事政务 CA 另需（如中国电子口岸数据中心，编号 ZWRZ-1120101003，有效期至 2027-09-22）</td></tr>
+<tr><td>商密产品认证（CA系统/密码机/USBKey 等）</td><td>国家密码管理局认定的检测机构</td><td>《密码法》第 26 条、《商用密码管理条例》第 13/39 条</td><td>CA 系统、服务器密码机、签名验签服务器、智能密码钥匙均属商密产品，须检测认证合格方可销售</td></tr>
+</table>
+<p class="src"><span class="pill v">已查证</span>《电子签名法》第十三条"可靠电子签名"四条件（制作数据专有于签名人 / 签署时仅由签名人控制 / 签署后签名任何改动可被发现 / 签署后数据电文任何改动可被发现），第十四条：可靠的电子签名与手写签名或盖章具有同等法律效力。来源：中国人大网电子签名法全文；国家密码管理局转载全文。</p>
+
+<h2 id="s3">三、厂商全景对比表（三组）</h2>
+
+<h3>3.1 国家级 / 区域性持证 CA（均在工信部 55 家名单内）</h3>
+<table>
+<tr><th>机构（名单序号）</th><th>性质</th><th>资质</th><th>证书体系 / 算法</th><th>密钥管理 / 硬件</th><th>生命周期</th><th>主要落地</th></tr>
+<tr><td>CFCA 中金金融认证中心（1）</td><td>央行牵头、银联控股</td><td>工信部许可 + 国密双证 + 电子政务资质；五大根库入根、WebTrust</td><td>根CA→二级业务CA→RA；个人/机构/设备/SSL/代码签名；RSA 2048/4096 + SM2/SM3/SM4</td><td>自有 KMC（密钥备份与恢复）；根密钥运行于经许可的硬件密码模块（型号未公开）</td><td>签发/更新/rekey/吊销 CRL+在线查询/归档</td><td>网银、支付、票据、招投标电子钥匙、移动签名</td></tr>
+<tr><td>北京CA·数字认证（3）</td><td>北京市国资控股、创业板 300579</td><td>工信部许可 + 商密产品认证 + 电子政务资质</td><td>自研 CA（RA+CA 两子系统）；多级/虚拟 CA；SM2(SM2 根下发 EV/OV/IV/DV)+RSA 1024/2048</td><td>对接经认证密码机/智能密码钥匙；私钥默认不出介质</td><td>在线申请/审核/签发/更新/吊销；5年服务周期免费升级算法</td><td>政务一证通（150万+法人用户）、部委、非税电子票据</td></tr>
+<tr><td>上海CA（31）</td><td>1998 年国企、上海数据集团成员</td><td>工信部许可 + 国密双证 + 电子政务资质；WebTrust/CMMI3</td><td>根CA→中级CA→订阅者分层；个人/机构/服务器/设备；RSA + SM2/SM3/SM4</td><td>密码模块符合 GM/T 15135/FIPS 140-2 L3；2026 年自研"芯密"服务器密码机（商密安全二级）</td><td>CRL/OCSP 标准配置</td><td>一网通办、一证通、招投标、医疗/金融</td></tr>
+<tr><td>GDCA 数安时代（15）</td><td>2005 年全国首批 8 家持证</td><td>工信部许可 + 国密双证 + 电子政务资质；粤港跨境互认</td><td>3 个 EV 根 + 中级 CA，不签发外部中级；国密 HTTPS 证书 SM2/SM3/SM4</td><td>认证服务器密码机/HSM；介质以智能密码钥匙为主</td><td>申请/审核/制作/签发/撤销全流程 CPS 覆盖</td><td>广东政务、公共资源交易 CA 互认、粤港互认</td></tr>
+<tr><td>浙江CA（37）</td><td>省经信厅国有控股</td><td>工信部许可 + 国密双证 + 电子政务资质</td><td>个人/机构/服务器/设备；全面支持 SM2/SM3/SM4 + 兼容 RSA</td><td>系统通过等保三级测评；密码机细节未公开</td><td>在线申请/更新/吊销；OCSP/CRL 标准</td><td>浙江政务服务网、电子印章中心（与 e签宝合办）</td></tr>
+<tr><td>山东CA（33）</td><td>区域国资</td><td>国密局使用密码许可证号 0001（2025-05 至 2030-04）；新版电子政务资质</td><td>个人/机构/服务器；国密 + RSA</td><td>密码机保护根钥</td><td>CRL/OCSP 标准</td><td>山东政务、招投标</td></tr>
+<tr><td>江苏智慧CA（20）</td><td>区域</td><td>国密双证 + 电子政务资质</td><td>国密 + RSA</td><td>密码机</td><td>标准</td><td><b>智慧医疗</b>、智慧政务、数字商务</td></tr>
+<tr><td>湖南CA（26）</td><td>省内唯一</td><td>2009 年获证；首批卫生部合规 6 家之一</td><td>数字/服务器/移动证书；国密 + RSA</td><td>密码机</td><td>标准</td><td>不动产登记、公积金、社保</td></tr>
+<tr><td>天津CA（29/30）</td><td>区域</td><td>国密双证 + 电子政务资质</td><td>国密 + RSA</td><td>密码机</td><td>标准</td><td>天津市统一身份认证平台指定 CA</td></tr>
+<tr><td>福建CA（54）</td><td>凯特科技旗下国资</td><td>2025 年换发新版电子政务资质</td><td>国密 + RSA</td><td>密码机</td><td>标准</td><td>福建政务、企业</td></tr>
+<tr><td>中国电子口岸数据中心 CA（行业）</td><td>海关总署直属事业单位</td><td>电子政务 CA（ZWRZ-1120101003，至 2027-09-22），不在 55 家商业名单</td><td>企业法人卡/操作员卡；完整 CP/业务规则公开</td><td>—</td><td>数字证书全生命周期管理</td><td>进出口企业电子口岸、海关执法</td></tr>
+</table>
+<p class="src">来源：工信部 55 家名单 <a href="https://www.miit.gov.cn/cms_files/filemanager/1226211233/attach/20228/82a5f16114024635b75fbaf4497278b6.pdf">PDF</a>；各 CA 官网资质页 / 属地密码管理局公示；国家密码管理局行政审批公示（山东 CA）。详见原始调研《国家级与区域CA》。</p>
+
+<h3>3.2 商用密码 / 安全厂商（CA·PKI 产品与密码设备）</h3>
+<table>
+<tr><th>厂商</th><th>性质</th><th>CA/PKI 产品</th><th>密码设备</th><th>国密支持</th><th>来源可信度</th></tr>
+<tr><td>三未信安（688489）</td><td>科创板上市</td><td>SecCert-CA 数字证书认证系统（2U 一体机，百万级证书，支持自有/第三方 OCSP+KMC，CPMv2/REST）</td><td>服务器密码机、云服务器密码机、签名验签服务器等近 200 款商密认证产品</td><td>SM1/SM2/SM3/SM4/SM7/SM9/ZUC + RSA/ECDSA</td><td><span class="pill v">已查证</span>上市/年报<span class="pill s">厂商自述</span>产品页</td></tr>
+<tr><td>吉大正元（003029）</td><td>深交所上市</td><td>电子证书认证系统（CA）、一体化 CA、RA 受理点、目录服务器、证书自助服务</td><td>服务器密码机、云密码机、金融数据密码机、签名/时间戳服务器、智能密码钥匙</td><td>SSF33/SM1/SM2/SM3/SM4；"密钥不落地"</td><td><span class="pill v">已查证</span>上市<span class="pill s">厂商自述</span>产品页</td></tr>
+<tr><td>电科网安（原卫士通，002268）</td><td>央企控股（中国电科）</td><td>数字证书认证系统：典型部署"根证书签发系统<b>离线部署</b> + 核心区/管理区/服务区三区分离"，RA 界面支持双证书/签名证书/加密证书选择</td><td>服务器密码机、金融数据密码机、PCI-E 密码卡、云密码机</td><td>SM1/SM2/SM3/SM4/SM9/ZUC</td><td><span class="pill v">已查证</span>央企官网/股权公告<span class="pill s">厂商自述</span>产品页</td></tr>
+<tr><td>格尔软件（603232）</td><td>上交所主板上市</td><td>根证书签发系统/数字证书认证系统：CA+RA+LDAP+OCSP+TSA；企业版/大客户版/运营中心版（≥500 万张）</td><td>服务器密码机、云密码机、签名验签服务器</td><td>SM2/SM3/SM4 + RSA1024/2048；分块/增量 CRL、HTTP CRL 发布</td><td><span class="pill v">已查证</span>上市<span class="pill s">厂商自述</span>产品页</td></tr>
+<tr><td>数字认证 BJCA（300579）</td><td>北京市国资控股</td><td>RA+CA 核心子系统；个人/机构/设备/车联网证书；HTTPS/SCEP/MQTT/CMP 集成协议；明确"符合三级等保和密评"</td><td>密钥管理系统 KMS、密码服务管理平台</td><td>SM2/SM3 证书体系（商密产品认证、信创目录）</td><td><span class="pill v">已查证</span>上市<span class="pill s">厂商自述</span>产品页</td></tr>
+<tr><td>信安世纪（688201）</td><td>科创板上市（ST 信安）</td><td>NetCert 证书认证系统（CA+RA+KMC+OCSP）</td><td>NetSign 签名验签服务器、UCypher 服务器密码机</td><td>国密证书签发、CIPS 国密改造</td><td><span class="pill v">已查证</span>上市<span class="pill s">厂商自述</span>产品页</td></tr>
+<tr><td>中安网脉</td><td>北京电子科技学院发起控股</td><td>未查到独立商品化 CA 系统权威资料（如实标注）</td><td>SJJ1524 服务器密码机、传真密码机</td><td>SJJ 系列商密整机</td><td><span class="pill n">未查到权威来源</span>（CA 产品）</td></tr>
+<tr><td>江南天安</td><td>民营</td><td>未查到商品化 CA 系统（以密码整机为主）</td><td>CryptoEngine L3 服务器密码机（GM/T 0028 三级）、云密码机 SJJ1528、密码卡</td><td>商密认证；参与国内首个商业银行国密改造</td><td><span class="pill s">厂商自述</span>；整机参数可查</td></tr>
+</table>
+
+<h3>3.3 医疗电子签名与医保落地（方案 / 体系）</h3>
+<table>
+<tr><th>主体</th><th>性质</th><th>医疗/医保做法要点</th><th>来源可信度</th></tr>
+<tr><td>数字认证（BJCA）</td><td>持牌 CA</td><td>医院全流程无纸化：医技护强身份认证 + 业务环节电子签名+时间戳 + 患者手写签名 + 移动终端 CA + 电子病案可信归档；自述服务超五成通过电子病历五级评价的医疗机构</td><td><span class="pill v">已查证</span>电子病历分级评价条款<span class="pill s">厂商自述</span>方案页</td></tr>
+<tr><td>上海CA</td><td>持牌 CA</td><td>胸科医院/瑞金医院移动 CA：手机 APP 数字证书替代 USBKey，PC 扫码签名/移动端签名；承建上海市卫健委市级电子认证体系（整合医师联网注册考核系统做身份核验）</td><td><span class="pill s">厂商自述</span>案例页；市级体系属政府采购事实</td></tr>
+<tr><td>深圳CA</td><td>持牌 CA</td><td>"91云签"医疗电子签名平台（证书+时间戳+生物识别）；"巨鼎医疗数字证书"用于检验报告签名盖章</td><td><span class="pill s">厂商自述</span></td></tr>
+<tr><td>金格 iSignature</td><td>签章中间件商</td><td>医护技/患者可信签署、数字笔迹表达患者意愿、电子病案归档；OFD 后台签章演示环境为 SM2 钥匙盘；证书由对接的第三方 CA 签发</td><td><span class="pill s">厂商自述</span>；SM2 演示环境可查证</td></tr>
+<tr><td>医信签（深圳小信科技）</td><td>移动 CA 签名产品</td><td>移动 CA 证书签发管理（由具卫生资质的 CA 签发）、医护/患者端移动签名、小程序签名；2026 年姚安县医共体项目中标</td><td><span class="pill v">已查证</span>政府采购中标公告</td></tr>
+<tr><td>卫宁健康</td><td>HIS/EMR 厂商</td><td>CIS 产品手册明确"支持 CA 认证、电子签名、权限分级管理"，即 EMR 内置签名能力、对接外部 CA 证书</td><td><span class="pill v">已查证</span>产品手册原文</td></tr>
+<tr><td>卫生行业 CA 体系</td><td>行业监管体系</td><td>卫办综发〔2010〕74号：卫生部数字证书服务管理平台 + 省级遴选 CA，互信互认一证多用；CA 须持工信部许可证；配套格式/介质/集成 5 项规范</td><td><span class="pill v">已查证</span>国家卫健委官网原文</td></tr>
+<tr><td>医保电子凭证体系</td><td>国家医保信息平台</td><td>凭证由国家平台集中生成（SM4 加密 + SM3 签名产生 64 位标识码），一人一码；接口强制 SM2/SM3 签名 + SM2/SM4 加密、双向验签；第三方渠道（微信/支付宝）备案制 + 安全测评；两定机构经 https 接口或 NationECCode.dll 接入</td><td><span class="pill v">已查证</span>XJ-D01-2019 技术规范 PDF、国家医保局官方发布</td></tr>
+</table>
+
+<h2 id="s4">四、代表厂商 / 方案五维度详析</h2>
+
+<h3>4.1 代表厂商详析（国家级/区域 CA + 商密厂商）</h3>
+<table class="dim">
+<tr><th style="width:12%">维度</th><th>CFCA</th><th>北京CA（数字认证）</th><th>三未信安 SecCert-CA</th><th>电科网安（卫士通）</th><th>格尔软件</th></tr>
+<tr><td><b>① 架构与证书体系</b></td>
+<td>根CA→二级业务CA→RA；授权合作机构为 RA 并发布《注册机构运营管理规范》管控密钥全周期；个人/机构/设备/SSL/代码签名证书</td>
+<td>自研 CA=RA+CA 两子系统；多级/虚拟 CA；SM2 根（国家密码管理局下发）下设北京 SM2 CA 签发 EV/OV/IV/DV 服务器证书</td>
+<td>2U 硬件一体机、百万级证书容量；三级人员管理；LDAP 目录发布；CPMv2/REST 接口</td>
+<td>满足《数字证书认证系统建设规范》；典型部署<b>根证书签发系统离线部署</b>，核心/管理/服务三区分离；RA 支持双证书/签名/加密单选项</td>
+<td>CA+RA+LDAP+OCSP+TSA 完整 PKI；按容量企业版/大客户版/运营中心版三档；支持 CA 树状信任、多级扩展认证</td></tr>
+<tr><td><b>② 密码算法</b></td>
+<td>国际线 RSA 2048/4096；国密线 SM2/SM3/SM4，金融 IC 卡国密改造技术支撑单位</td>
+<td>双算法并行：SM2/SM3/SM4 + RSA 1024/2048；遵循国密数字证书格式规范</td>
+<td>SM2/RSA/ECDSA + SM1/SM2/SM3/SM4（年报口径至 SM7/SM9/ZUC/抗量子）</td>
+<td>服务器密码机支持 SM1/SM2/SM3/SM4/SM9/ZUC</td>
+<td>SM2/SM3/SM4 + RSA；SM3withSM2 证书签发；国内首批通过国密局审查的 SM2 PKI 厂商（2009）</td></tr>
+<tr><td><b>③ 密钥管理与硬件</b></td>
+<td>自有 KMC：密钥备份与恢复（介质损坏/忘记口令时经 CA 转发恢复申请、安全发还）；Global-Trust CP 设 Key Escrow &amp; Recovery 条款；根密钥在经许可硬件密码模块</td>
+<td>对接经认证密码机/智能密码钥匙；私钥默认不出介质；KMC 细节未公开</td>
+<td>CA 根密钥及系统密钥由<b>自研服务器密码机生成管理</b>（符合 GM/T 0018 接口）；配套云密码机/金融密码机</td>
+<td>核心区设非对称密钥管理系统 + KMC 数据库 + 密码机；密钥产生分发由系统完成</td>
+<td>支持外接 SJY42C 等加密机；MofN 安全登录、管理与审计独立的二线三层权限、双人制管理</td></tr>
+<tr><td><b>④ 证书生命周期</b></td>
+<td>RA 受理→资质审核→签发→写介质；到期前自动/主动更新、rekey；CRL+在线状态查询；归档（年限未公开）</td>
+<td>在线申请/审核/签发/更新/吊销全流程；5 年周期免费升级算法自动续期；毫秒级故障切换</td>
+<td>申请/发布/下载/注销/更新/冻结解冻/延期/密钥恢复；CRL 管理、安全审计、备份归档</td>
+<td>证书制作/签发发布/管理/查询下载/验证/密钥管理/管理员管理/日志审计归档</td>
+<td>注册/签发/更新/恢复/废除/重发；<b>分块 CRL 与增量 CRL、HTTP CRL 发布</b>；批量操作；SYSLOG 外发</td></tr>
+<tr><td><b>⑤ 行业落地</b></td>
+<td>网银/支付/票据/保单；国家电网 SG186 招投标电子钥匙；云证通移动签名、司法存证</td>
+<td>北京"法人一证通"（150万+法人、30多单位50多系统）；教育部/卫健委/财政部等部委；非税电子票据、国密改造</td>
+<td>电子商务、电子政务、企业信息化；网银/网上证券</td>
+<td>首批商密研发/生产/销售资质、涉密集成甲级；中国电科/中国网安上市平台</td>
+<td>参与国内 20 多个第三方数字认证中心建设、2 次国家科技进步二等奖；国产化平滑升级（达梦/金仓等）</td></tr>
+</table>
+
+<h3>4.2 医疗 / 医保代表方案五维度详析</h3>
+<table class="dim">
+<tr><th style="width:12%">维度</th><th>数字认证医疗签名方案</th><th>金格 iSignature（中间件）</th><th>医保电子凭证体系</th><th>医院 HIS 集成 CA 案例（上海CA移动CA）</th><th>卫生行业 CA 体系</th></tr>
+<tr><td><b>① 架构与证书体系</b></td>
+<td>持牌 CA 自签体系；医技护强身份认证→业务签名→患者手写签名→移动终端 CA→电子病案可信归档全链条</td>
+<td>签章中间件而非 CA：文档级签章/手写签名/印章管理；数字证书由对接第三方 CA（含卫生资质）签发</td>
+<td>非传统双证书 PKI：国家平台集中生成 64 位标识码凭证；业务中台国家/省级两级；机构以机构编码+20 位终端备案号标识；渠道备案制（APPID/SECRET/数字密钥）</td>
+<td>移动 APP 数字证书替代 USBKey（胸科/瑞金医院），PC 扫码或移动端签名，数字身份与手机绑定；广州开发区医院 2025 年独立采购 CA 电子签名系统</td>
+<td>卫生部数字证书服务管理平台 + 省级遴选 CA；互信互认一证多用；机构/医生/护士为证书主体；上海实践整合《医师联网注册考核系统》作 RA 身份核验</td></tr>
+<tr><td><b>② 密码算法</b></td>
+<td>以国产密码为核心建密码基础设施（签名验签/时间戳/签章产品线）；逐项算法矩阵未公开【未查到】</td>
+<td>OFD API 后台签章演示环境钥匙盘为 SM2 国密（序列号 sm2kinggrid001）</td>
+<td>凭证生成 SM4+SM3；接口 SM2/SM3 签名、SM2/SM4 加密；<b>全栈国密</b></td>
+<td>案例页未披露算法；WS/T 847—2024 实施后新建项目应执行 SM2/SM3【案例页未逐项披露】</td>
+<td>2010 体系文件未限算法；2024 年 WS/T 847—2024 强制 SM2（GB/T 32918）+SM3（GB/T 32905）、证书格式 GM/T 0015</td></tr>
+<tr><td><b>③ 密钥管理与硬件</b></td>
+<td>传统 USBKey + 云签名/移动签名形态；时间戳服务器独立产品；移动签名私钥托管细节未公开（按标准应为密钥分割）</td>
+<td>钥匙盘签章 + 服务端后台批量签章 + 云端 SaaS/API/私有云</td>
+<td>业务加解密密钥由国家局向渠道分配；无 USBKey 形态，用户侧凭二维码/刷脸；支付叠加人脸+实名+实人三重核验，医保专网</td>
+<td>手机 APP 移动证书替代物理 USBKey；按 WS/T 847—2024 移动私钥须密钥分割、介质与服务端联合签名、不得服务端集中托管</td>
+<td>介质须符合《卫生系统数字证书介质技术规范》；WS/T 847—2024：私钥不可导出、生物识别+PIN+设备指纹解锁、移动私钥密钥分割</td></tr>
+<tr><td><b>④ 证书生命周期</b></td>
+<td>持牌 CA 提供签证/更新/吊销/解锁；病案侧覆盖归档/存储/打印/借阅/封存"收管存用"全生命周期</td>
+<td>证书生命周期由对接 CA 负责；金格侧管理印章生命周期（申请/授权/用印留痕）</td>
+<td>凭证随参保基础信息生成、一次激活；姓名/证件变更须重新激活；二维码自动/手动刷新、码值一次有效；授权可撤销</td>
+<td>由上海 CA 提供证书发放/更新/吊销；医院业务系统侧完成签名动作留痕</td>
+<td>服务内容含签证/发放/更新/吊销/解锁；验签校验证书有效期+证书链+吊销列表（CRL；标准文本未明确 OCSP，实现多以 CRL/OCSP 为准）</td></tr>
+<tr><td><b>⑤ 行业落地</b></td>
+<td>与医院业务系统集成实现全流程无纸化；电子病案归档融合 OFD；服务超五成电子病历五级评价机构</td>
+<td>以文档中间件嵌入 HIS/EMR（iWebOffice 病历在线编辑）；患者侧数字笔迹表达意愿；OFD 版式归档</td>
+<td>两定机构 HIS/药店经 https 接口或 NationECCode.dll 接入省级业务中台；扫码→解码→TOKEN 鉴权→结算；2025 年升为国家标准（医保码/移动支付/电子处方/授权查询）</td>
+<td>嵌入院内 HIS/EMR 流程（登录认证/查房/处方/病历签名）；上海 CA 另有"HIS 系统增强解决方案"（身份认证/授权/责任认定/签名验证/时间戳）</td>
+<td>按《卫生系统数字证书应用集成规范》统一接口集成各卫生信息系统；签名服务系统须持《商用密码产品认证证书》</td></tr>
+</table>
+
+<h2 id="s5">五、合规依据（法规 / 标准原文要点）</h2>
+<table>
+<tr><th style="width:26%">法规 / 标准</th><th>与 CA / 医疗医保相关的原文要点</th></tr>
+<tr><td>《电子签名法》（2019 修正）</td><td>第13条：可靠电子签名四条件（制作数据专有、仅签名人控制、签名改动可发现、数据电文改动可发现）；第14条：可靠电子签名与手写签名/盖章同等法律效力；第17/18条：电子认证服务条件与工信部许可。第31条：不遵守认证业务规则/未妥善保存认证信息将吊销许可。</td></tr>
+<tr><td>《电子认证服务管理办法》（工信部令第29号，2015 修订）</td><td>第6条：申请材料（人员/资金场所/国家安全标准技术设备凭证/国密同意使用密码证明）；第10条：许可证有效期 5 年，编号/机构/发证信息公示。</td></tr>
+<tr><td>《密码法》（2020 施行）</td><td>第24条：商密从业单位应符合强制国家标准；第26条：涉国家安全/国计民生/社会公共利益的商密产品须检测认证合格；第27条：关键信息基础设施运营者应使用商用密码并开展商用密码应用安全性评估（密评）；第37条罚则（最高 100 万罚款）。</td></tr>
+<tr><td>《商用密码管理条例》（国务院令第760号，2023）</td><td>第13条：商密检测/密评机构须取得资质；第38条：关基运营者应"同步规划、同步建设、同步运行"密码保障系统，运行后每年至少一次密评并报备；第39条：关基使用的商密产品/服务应检测认证合格，算法/协议/密钥管理机制应通过国密局审查鉴定；第41条：网络运营者按等保要求使用商密。</td></tr>
+<tr><td>《商用密码应用安全性评估管理办法》（国密局令第3号，2023-11-01 施行）</td><td>第17条罚则：规划/建设/运行各阶段未按规定开展密评、未通过密评即运行、未定期密评等情形，责令改正、警告；拒不改正处 10万–100 万罚款。</td></tr>
+<tr><td>等保 2.0（GB/T 22239-2019）</td><td>密码合规以密评落地：密评与等保测评、关基检测评估衔接开展，避免重复评估（商用密码管理条例第42条）。等保原文条款本次未直接调取【已如实标注】。</td></tr>
+<tr><td>《电子病历应用管理规范（试行）》（国卫办医发〔2017〕8号）</td><td>第9条：身份标识与权限；第10条：可靠电子签名与手写签名/盖章同等法律效力；第11条：电子病历系统应当采用权威可靠时间源。</td></tr>
+<tr><td><b>WS/T 847—2024《医学电子文档数字签名技术标准》</b>（2024-10 发布、2025-04 实施）</td><td>①证书须由符合《电子签名法》《卫生系统电子认证服务管理办法》的第三方 CA 签发；②算法<b>强制 SM2（GB/T 32918）+SM3（GB/T 32905）</b>；③证书格式 GM/T 0015+卫生系统格式规范；④私钥不可导出、移动私钥密钥分割不得服务端集中托管；⑤ES-T 带时间戳电子签名（GB/T 25064/25061）；⑥验签校验证书链/有效期/吊销列表；⑦归档/复制/封存/共享各环节签名动作；⑧签名服务系统须持《商用密码产品认证证书》；⑨患者知情同意用事件型证书、私钥当次销毁。</td></tr>
+<tr><td>医保电子凭证技术规范（XJ-D01-2019）</td><td>凭证 SM4 加密+SM3 签名生成 64 位标识码；接口 SM2/SM3 签名、SM4 加密、<b>请求与接收数据均校验签名</b>；渠道备案制 + 安全测评。</td></tr>
+<tr><td>医疗保障信息平台便民服务国家标准（2025-08 发布）</td><td>全国首项医保领域国家标准：统一医保码/医保移动支付/医保电子处方/信息授权查询的接入与安全要求；技术规范要求以 SM2 签名报文实现完整性。</td></tr>
+</table>
+<p class="src"><span class="pill v">已查证</span>以上法规/标准条款来源：中国人大网、中国政府网、国家密码管理局（sca.gov.cn）、国家卫健委（nhc.gov.cn）、国家医保局（nhsa.gov.cn）、广东省/云南省/广西省医保局公开规范 PDF 等（完整 URL 见文末来源清单与三份原始调研）。</p>
+
+<h2 id="s6">六、对 csssl 的借鉴建议</h2>
+
+<h3>6.1 现状对照：csssl 现有能力 vs 国内厂商通行做法</h3>
+<table>
+<tr><th style="width:14%">维度</th><th style="width:32%">csssl 现状</th><th style="width:32%">国内厂商通行做法</th><th>差距判断</th></tr>
+<tr><td>根 CA 安全</td><td>根 CA 自签、随应用在线运行</td><td>根证书签发系统<b>离线/物理隔离部署</b>，仅用于签发下级 CA（卫士通典型架构；根 CA 生命周期 10–20 年）</td><td><span class="p0">P0</span> 根私钥暴露面大</td></tr>
+<tr><td>私钥存储</td><td>私钥文件落盘（只落盘不落库）</td><td>CA 根密钥由<b>服务器密码机/HSM 生成并存储</b>；USBKey 私钥不出介质（GM/T 0027）、"密钥不落地"（吉大正元）</td><td><span class="p0">P0</span> 与厂商差距最大，密评/等保高风险点</td></tr>
+<tr><td>吊销与在线校验</td><td>有 CRL 吊销 + 证书链在线校验（VerifyController）</td><td>CRL 定期签名发布（含分块/增量 CRL、HTTP 发布）+ OCSP 三态在线响应（RFC 2560，7×24）；四川 CA 业务规则：CRL 备份间隔 ≤24h、留存 ≥ 失效后 10 年</td><td><span class="p1">P1</span> 需补 CDP/AIA 扩展与 OCSP responder</td></tr>
+<tr><td>证书体系</td><td>单证书逻辑（SERVER/CLIENT/SUB_CA），SM2 登录</td><td><b>双证书体系</b>（GM/T 0034）：签名证书用户自持不可恢复 + 加密证书 KMC 托管可恢复（SM2 数字信封下发）；CFCA/三未/吉大/卫士通均有 KMC</td><td><span class="p1">P1</span> 缺加密证书 + KMC 托管（医疗场景可先单证书，预留扩展）</td></tr>
+<tr><td>时间戳</td><td>无时间戳服务</td><td>TSA 时间戳为 PKI 标准组件（格尔 CA+RA+LDAP+OCSP+TSA）；医疗强制"权威可靠时间源 + 签名同时打戳"（电子病历规范第11条、WS/T 847—2024）</td><td><span class="p1">P1</span> 缺时间戳，影响电子病历/文书签名法律效力</td></tr>
+<tr><td>生命周期完整度</td><td>签发、CRL 吊销、在线校验</td><td>申请/审核/签发/更新/冻结解冻/延期/密钥恢复/废除 + 归档审计（三未、格尔、卫士通）</td><td><span class="p2">P2</span> 缺更新/冻结/延期/归档年限</td></tr>
+<tr><td>审核与权限</td><td>有审计表与审计接口（AuditLog/AuditController），签发接口待评估</td><td>RA/CA 逻辑分离；管理/审核/审计<b>三权分立</b>、双人制、MofN（格尔二线三层；卫士通日志审计归档）</td><td><span class="p2">P2</span> 需对照三权分立与双人审批</td></tr>
+<tr><td>RA 身份核验</td><td>签发对象为院内系统/用户</td><td>医疗通行：RA 对接<b>医师/护士执业注册库</b>做身份核验（上海CA整合医师联网注册系统）；政务对接法人库</td><td><span class="p2">P2</span> 院内医护身份建议对接执业信息</td></tr>
+<tr><td>算法</td><td>RSA2048 或 SM2、SM3withSM2；SM4 工具</td><td>SM2/SM3/SM4 为区域 CA 标配 + 兼容 RSA 过渡；医疗新标准强制 SM2/SM3；医保接口 SM2/SM3+SM4</td><td>方向正确，建议保留 RSA 兼容桥</td></tr>
+<tr><td>集成接口</td><td>自有 REST API（前后端分离）</td><td>HTTPS/SCEP/CMP/MQTT 标准协议（数字认证）；GM/T 0018 密码设备接口；CPMv2/REST（三未）</td><td><span class="p3">P3</span> 如需对接商用密码设备/HIS 生态，建议补 SCEP/CMP</td></tr>
+</table>
+
+<h3>6.2 优先级行动清单</h3>
+<div class="card">
+<h4><span class="p0">P0 · 安全与合规风险（建议立即处理）</span></h4>
+<ul class="tight">
+  <li><b>根私钥防护升级</b>：私钥文件至少做到「加密落盘（口令派生密钥保护）+ 文件权限最小化 + 仅初始化/签发时在线 + 访问审计」；制定远期路线：引入服务器密码机/HSM（三未/吉大做法，GM/T 0018 接口）实现根密钥不出密码机——这是与国内厂商差距最大、密评最可能被点名的一项。</li>
+  <li><b>根 CA 离线化改造</b>：仿照卫士通"根证书签发系统离线部署"：根 CA 仅在初始化与签发 SUB_CA 时上线，日常签发由二级 CA 完成；院内如不建二级 CA，至少做到根私钥离线保管、签发操作在受控终端进行。</li>
+  <li><b>吊销可发现性</b>：签发的证书写入 <code>cRLDistributionPoints</code>（CDP）与 <code>authorityInfoAccess</code>（AIA-OCSP）扩展；CRL 签名并带 thisUpdate/nextUpdate；补 OCSP responder 三态（good/revoked/unknown）响应（RFC 2560）。否则客户端无法自动发现吊销状态。</li>
+</ul>
+</div>
+<div class="card">
+<h4><span class="p1">P1 · 功能增强（近期）</span></h4>
+<ul class="tight">
+  <li><b>双证书 + KMC 预留</b>：现仅 SM2 登录/签名的单证书即可满足；但架构上把「签名证书（私钥客户端生成、CA 不备份）与加密证书（KMC 生成、托管可恢复）」分离（GM/T 0034），为将来数据加密/历史解密留扩展位。</li>
+  <li><b>时间戳服务（TSA）</b>：自建时间戳服务或对接权威时间源；电子病历/知情同意等文书签名必须"签名+时间戳同时执行"（WS/T 847—2024、电子病历规范第11条）。</li>
+  <li><b>CRL 增量/分块 + 归档</b>：参考格尔增量 CRL/HTTP 发布；建立证书签发/吊销记录归档，留存 ≥ 证书失效后 5–10 年（四川 CA 业务规则口径）。</li>
+  <li><b>生命周期补全</b>：增加证书冻结/解冻、延期（rekey/更新）、批量操作能力（三未/格尔均具备）。</li>
+</ul>
+</div>
+<div class="card">
+<h4><span class="p2">P2 · 流程与管理（中期）</span></h4>
+<ul class="tight">
+  <li><b>RA/CA 逻辑分离</b>：审核与签发拆分为不同角色/流程（当前签发接口宜加"双人审批 + 操作留痕"），对照等保三级"三权分立"（管理/审核/审计）检查现有 AuthInterceptor/权限模型。</li>
+  <li><b>身份核验底座</b>：院内发证对象对接 HIS 用户体系；医护证书可参考卫生行业做法对接医师/护士执业信息，提升证书身份真实性（影响证据力）。</li>
+  <li><b>审计完善</b>：现有 AuditLog 方向正确；补"证书生命周期事件全量审计（签发/吊销/密钥操作）+ 审计日志防篡改（哈希链）"。</li>
+</ul>
+</div>
+<div class="card">
+<h4><span class="p3">P3 · 集成与扩展（按需）</span></h4>
+<ul class="tight">
+  <li><b>标准协议</b>：如需对接 HIS 生态/第三方终端，评估补 SCEP/CMP 证书协议与 GM/T 0018 密码设备接口，降低集成成本（数字认证即提供 HTTPS/SCEP/CMP/MQTT）。</li>
+  <li><b>医保对接协同</b>：医保电子凭证由国家平台集中签发，csssl 不发医保凭证；csssl 的价值定位是院内签名/验签基础能力——为 csmig 医保前置提供 SM2/SM3 签名 + SM4 加密双向验签的院内支撑，与医保局接口规范（XJ-D01-2019/省级接入规范）对齐。</li>
+  <li><b>资质红线</b>：csssl 作为院内自用 CA 不触碰工信部许可红线（许可针对面向社会公众发证）；不得对外商用发证。若未来需对外提供法律效力电子签名，须升级硬件密码设备 + 申请相应资质。</li>
+</ul>
+</div>
+
+<h2 id="s7">七、主要来源清单</h2>
+<p class="src">完整 144 条来源（含逐条【已查证】/【厂商自述】标注）见同目录三份原始调研 Markdown：<code>CA_厂商调研_国家级与区域CA.md</code>、<code>CA_厂商调研_商用密码厂商.md</code>、<code>CA_厂商调研_医疗医保行业.md</code>。以下为核心来源速查。</p>
+<h3>政府公告 / 官方规范（已查证）</h3>
+<ul class="tight src">
+  <li>工信部《许可的 55 家 CA 机构名单》PDF：<a href="https://www.miit.gov.cn/cms_files/filemanager/1226211233/attach/20228/82a5f16114024635b75fbaf4497278b6.pdf">miit.gov.cn</a></li>
+  <li>工信部《2025 年电子认证服务业运行情况》：<a href="https://www.miit.gov.cn/jgsj/xxjsfzs/xyjg/art/2026/art_b09412eea9d74bd3a24ac25ffa31868a.html">miit.gov.cn</a></li>
+  <li>《电子签名法》全文（中国人大网）：<a href="http://www.npc.gov.cn/npc/c2/c30834/201906/t20190608_298038.html">npc.gov.cn</a>；国密局转载：<a href="https://www.sca.gov.cn/sca/ztpd/2004-08/28/content_1002504.shtml">sca.gov.cn</a></li>
+  <li>《商用密码管理条例》全文（中国政府网）：<a href="https://www.gov.cn/zhengce/content/202305/content_6875927.htm">gov.cn</a>；《商用密码应用安全性评估管理办法》：<a href="https://sca.gov.cn/sca/xxgk/2023-10/07/content_1061109.shtml">sca.gov.cn</a></li>
+  <li>卫生部《卫生系统电子认证服务体系建设工作的通知》（卫办综发〔2010〕74号）：<a href="http://www.nhc.gov.cn/zwgkzt/wsbysj/201005/47256.shtml">nhc.gov.cn</a></li>
+  <li>卫健委《电子病历应用管理规范（试行）》：<a href="https://www.nhc.gov.cn/wjw/c100175/201702/90f3de8ae03d488cbddf509dc958f75b.shtml">nhc.gov.cn</a></li>
+  <li>WS/T 847—2024《医学电子文档数字签名技术标准》PDF：<a href="https://www.nhc.gov.cn/fzs/c100048/202411/463d427bef9c4c12a71eaee349d9f605/files/1733125981366_66505.pdf">nhc.gov.cn</a></li>
+  <li>《医疗保障信息平台电子凭证技术规范 XJ-D01-2019》PDF：<a href="http://hsa.gd.gov.cn/attachment/0/383/383585/2865542.pdf">hsa.gd.gov.cn</a></li>
+  <li>国家医保局：首项医疗保障领域国家标准发布（2025-08）：<a href="https://www.nhsa.gov.cn/art/2025/8/12/art_14_17556.html">nhsa.gov.cn</a>；医保码用户超 10 亿：<a href="https://www.nhsa.gov.cn/art/2023/11/24/art_14_11548.html">nhsa.gov.cn</a>；一码付三重核验：<a href="https://www.nhsa.gov.cn/art/2025/8/5/art_14_17506.html">nhsa.gov.cn</a></li>
+  <li>中国电子口岸数据中心《电子政务电子认证业务证书策略》PDF：<a href="https://www.chinaport.gov.cn/tcmsfile/u/cms/www/202505/221142246j1u.pdf">chinaport.gov.cn</a></li>
+  <li>国家密码管理局行政审批公示（山东 CA 使用密码许可证号 0001）：<a href="https://oscca.gov.cn/app-zxfw/xzspsx/syxkdw.jsp?channel_code=c100142">oscca.gov.cn</a></li>
+  <li>IETF Draft《ACME Extension for SM2 Dual-Certificate System》：<a href="https://www.ietf.org/archive/id/draft-geng-acme-sm2dualcert-extension-00.html">ietf.org</a>；RFC 2560 OCSP：<a href="https://www.ietf.org/rfc/rfc2560.txt">ietf.org</a></li>
+  <li>GM/T 0027-2014《智能密码钥匙技术规范》PDF：<a href="http://www.gmbz.org.cn/file/2018-01-10/a76e9a1e-e8fd-4483-bde7-383c9336cb22.pdf">gmbz.org.cn</a></li>
+  <li>上交所/深交所/证券时报（三未信安 688489、格尔软件 603232、数字认证 300579 上市信息）及上市公司年报</li>
+</ul>
+<h3>厂商官网 / 产品页（厂商自述）</h3>
+<ul class="tight src">
+  <li>CFCA：<a href="https://www.cfca.com.cn">cfca.com.cn</a>（CPS V3.4/V5.0、KMC 密钥管理系统、全球信任体系）</li>
+  <li>北京CA/数字认证：<a href="https://www.bjca.cn">bjca.cn</a>（CA 产品页、医疗行业方案、SM2 证书策略）</li>
+  <li>上海CA：<a href="https://www.sheca.com">sheca.com</a>（EV CP、胸科/瑞金案例、市级电子认证体系、UniTrust NHSM）</li>
+  <li>GDCA：<a href="https://www.gdca.com.cn">gdca.com.cn</a>（EV CP V3.2、国密 HTTPS）</li>
+  <li>三未信安：<a href="https://www.sansec.com.cn/product/73.html">sansec.com.cn SecCert-CA 产品页</a></li>
+  <li>吉大正元：<a href="https://www.jit.com.cn/Lists/1.html">jit.com.cn 安全产品列表</a></li>
+  <li>电科网安（CETCCST）：<a href="https://www.cetccst.com.cn/products/11/266.html">数字证书认证系统产品页（三区分离、根离线）</a></li>
+  <li>格尔软件：<a href="http://www.koal.com/product?name=RootCA">koal.com 根证书签发系统</a></li>
+  <li>金格 iSignature：<a href="https://en.isigning.com/appl/yiliao/">医疗行业方案</a>、OFD SM2 演示环境 <a href="http://demo.kinggrid.com/ofdDemo/">demo.kinggrid.com</a></li>
+  <li>深圳CA：<a href="https://www.szca.com/product/details_430_721.html">91云签医疗电子签名平台</a></li>
+  <li>卫宁健康 CIS 产品手册：<a href="http://www.winning.com.cn/datacache/upload/download/2020-05-30/5Li05bqK5L+h5oGv57O757ufQ0k=_EF6SnC.pdf">winning.com.cn PDF</a></li>
+</ul>
+
+<footer>
+本报告由三份并行调研整合而成（国家级/区域 CA 11 家 · 商密厂商 8 家 · 医疗医保方案 20+），共 144 条来源引用；凡查无权威来源的条目已在正文与原始调研中显式标注"未查到权威来源"，未作推测性编造。<br>
+报告路径：E:\work_source\his_cslk\csmig\docs\CA厂商调研\（HTML 整合报告 + 三份原始 Markdown）。调研日期 2026-10-27。
+</footer>
+
+</div>
+</body>
+</html>
