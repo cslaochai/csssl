@@ -87,12 +87,12 @@ const currentTitle = computed(() => route.meta.title || '长沙麓康CA认证中
 const username = computed(() => localStorage.getItem('username') || 'admin')
 const role = computed(() => localStorage.getItem('role') || 'ADMIN')
 const roleText = computed(() =>
-  ({ ADMIN: '系统管理员', OPERATOR: 'CA操作员', APPROVER: '审核员', AUDITOR: '审计员' })[role.value] || role.value
+  ({ ADMIN: '系统管理员', OPERATOR: 'CA操作员', APPROVER: '审核员', AUDITOR: '审计员', SECURITY_ADMIN: '安全管理员', KEY_ADMIN: '密钥管理员' })[role.value] || role.value
 )
 
 // 按角色控制菜单显隐（对应路由 meta.roles）
 function can(menu) {
-  const roles = { applications: ['ADMIN', 'OPERATOR', 'APPROVER'], templates: ['ADMIN', 'OPERATOR'], users: ['ADMIN'] }[menu]
+  const roles = { applications: ['ADMIN', 'OPERATOR', 'APPROVER'], templates: ['ADMIN', 'SECURITY_ADMIN'], users: ['ADMIN'] }[menu]
   return roles.includes(role.value)
 }
 

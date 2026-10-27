@@ -52,7 +52,7 @@ const routes = [
         path: 'templates',
         name: 'templates',
         component: () => import('@/views/Templates.vue'),
-        meta: { title: '证书模板', roles: ['ADMIN', 'OPERATOR'] }
+        meta: { title: '证书模板', roles: ['ADMIN', 'SECURITY_ADMIN'] }
       },
       {
         path: 'applications',

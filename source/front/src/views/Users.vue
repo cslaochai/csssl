@@ -92,7 +92,9 @@ const roles = [
   { value: 'ADMIN', label: '系统管理员' },
   { value: 'OPERATOR', label: 'CA操作员（录入/签发）' },
   { value: 'APPROVER', label: '审核员（审批申请）' },
-  { value: 'AUDITOR', label: '审计员（只读）' }
+  { value: 'AUDITOR', label: '审计员（只读）' },
+  { value: 'SECURITY_ADMIN', label: '安全管理员（证书策略）' },
+  { value: 'KEY_ADMIN', label: '密钥管理员（根密钥门限）' }
 ]
 
 const loading = ref(false)
@@ -108,7 +110,7 @@ function roleText(r) {
   return roles.find(i => i.value === r)?.label || r
 }
 function roleTag(r) {
-  return { ADMIN: 'danger', OPERATOR: '', APPROVER: 'warning', AUDITOR: 'info' }[r] || ''
+  return { ADMIN: 'danger', OPERATOR: '', APPROVER: 'warning', AUDITOR: 'info', SECURITY_ADMIN: 'primary', KEY_ADMIN: 'warning' }[r] || ''
 }
 
 async function load() {

@@ -35,6 +35,20 @@ export function downloadSubCaCert() {
   return request.get('/admin/ca/subca/download')
 }
 
+// ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN） =====
+export function getCaShares() {
+  return request.get('/admin/ca/shares')
+}
+export function migrateCaShares() {
+  return request.post('/admin/ca/shares/migrate')
+}
+export function downloadCaShare(index) {
+  return request.get(`/admin/ca/shares/${index}`)
+}
+export function unsealCaShares(shares) {
+  return request.post('/admin/ca/unseal-shares', { shares })
+}
+
 // ===== 证书管理 =====
 export function pageCerts(params) {
   return request.get('/admin/certs', { params })

@@ -114,6 +114,20 @@ public class KeyVault {
         return Files.exists(sealedFile(relDir, name));
     }
 
+    /**
+     * 删除密钥全部落盘形态（enc/plain/sealed）。
+     * 仅用于「门限份额已完整落盘后删除单点根私钥」等显式安全切换场景，调用方须先确认新形态可用。
+     */
+    public void deleteKey(String relDir, String name) {
+        try {
+            for (Path p : new Path[]{encFile(relDir, name), plainFile(relDir, name), sealedFile(relDir, name)}) {
+                Files.deleteIfExists(p);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("密钥删除失败: " + e.getMessage(), e);
+        }
+    }
+
     private Path encFile(String relDir, String name) {
         return storeDir.resolve(relDir).resolve(name + ".key.pem.enc");
     }

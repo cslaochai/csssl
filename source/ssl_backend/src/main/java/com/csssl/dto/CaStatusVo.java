@@ -31,8 +31,11 @@ public class CaStatusVo {
     /** 状态 */
     private String status;
 
-    /** 根私钥状态：ONLINE（在线）/ SEALED（已封存离线）/ MISSING（缺失） */
+    /** 根私钥状态：ONLINE（在线）/ SEALED（已封存离线）/ SHARES（Shamir(3,5) 门限分持）/ MISSING（缺失） */
     private String rootKeyState;
+
+    /** Shamir(3,5) 门限份额状态：generated / total=5 / threshold=3 / shares=[{index, exists}] */
+    private java.util.Map<String, Object> shareState;
 
     /** 服务签发二级CA（SUB_CA）信息 */
     private SubCaStatus subCa;
