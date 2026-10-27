@@ -7,6 +7,7 @@ import org.bouncycastle.asn1.x509.AuthorityInformationAccess;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.CRLDistPoint;
 import org.bouncycastle.asn1.x509.CRLReason;
+import org.bouncycastle.asn1.x509.CertificatePolicies;
 import org.bouncycastle.asn1.x509.DistributionPoint;
 import org.bouncycastle.asn1.x509.DistributionPointName;
 import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
@@ -15,6 +16,7 @@ import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.GeneralNames;
 import org.bouncycastle.asn1.x509.KeyPurposeId;
 import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.asn1.x509.PolicyInformation;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v2CRLBuilder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
@@ -119,10 +121,78 @@ public final class CertUtil {
         return issue(subject, subjectKey.getPublic(), caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl);
     }
 
+    /**
+     * 按证书模板签发（GM/T 0034 §5.3.4 证书策略管理）：KeyUsage/EKU/策略OID/有效期全部取自模板，
+     * 杜绝手工拼扩展项；certType 也以模板为准。
+     */
+    public static X509Certificate issueByTemplate(X500Name subject, PublicKey subjectPub,
+                                                  X509Certificate caCert, PrivateKey caKey,
+                                                  String certType, int validityDays, String san,
+                                                  String crlUrl, String ocspUrl,
+                                                  String keyUsage, String extKeyUsage, String policyOid) {
+        KeyPurposeId eku = ekuPurpose(extKeyUsage);
+        return issue(subject, subjectPub, caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl,
+                keyUsageBits(keyUsage), eku, policyOid);
+    }
+
+    /** KeyUsage 字符串（逗号分隔）→ BC 位掩码 */
+    public static int keyUsageBits(String keyUsage) {
+        int bits = 0;
+        if (keyUsage == null || keyUsage.isBlank()) {
+            throw new IllegalArgumentException("证书模板必须配置 KeyUsage（如 digitalSignature,keyEncipherment）");
+        }
+        for (String item : keyUsage.split(",")) {
+            switch (item.trim().toLowerCase()) {
+                case "digitalsignature" -> bits |= KeyUsage.digitalSignature;
+                case "nonrepudiation" -> bits |= KeyUsage.nonRepudiation;
+                case "keyencipherment" -> bits |= KeyUsage.keyEncipherment;
+                case "dataencipherment" -> bits |= KeyUsage.dataEncipherment;
+                case "keyagreement" -> bits |= KeyUsage.keyAgreement;
+                case "keycertsign" -> bits |= KeyUsage.keyCertSign;
+                case "crlsign" -> bits |= KeyUsage.cRLSign;
+                case "encipheronly" -> bits |= KeyUsage.encipherOnly;
+                case "decipheronly" -> bits |= KeyUsage.decipherOnly;
+                default -> throw new IllegalArgumentException("不支持的 KeyUsage 项：" + item.trim());
+            }
+        }
+        if (bits == 0) {
+            throw new IllegalArgumentException("KeyUsage 配置结果为空，请检查模板配置");
+        }
+        return bits;
+    }
+
+    /** EKU 字符串 → BC KeyPurposeId（空/null 返回 null 即不加 EKU 扩展） */
+    public static KeyPurposeId ekuPurpose(String extKeyUsage) {
+        if (extKeyUsage == null || extKeyUsage.isBlank()) {
+            return null;
+        }
+        return switch (extKeyUsage.trim().toLowerCase()) {
+            case "serverauth" -> KeyPurposeId.id_kp_serverAuth;
+            case "clientauth" -> KeyPurposeId.id_kp_clientAuth;
+            default -> throw new IllegalArgumentException("不支持的 EKU：" + extKeyUsage + "（仅支持 serverAuth / clientAuth）");
+        };
+    }
+
     /** 用签发CA签发证书（CSR 场景：主体与公钥取自 CSR） */
     public static X509Certificate issueFromCsr(String csrPem, X509Certificate caCert, PrivateKey caKey,
                                                String certType, int validityDays, String san,
                                                String crlUrl, String ocspUrl) {
+        CsrSubject subject = parseCsr(csrPem);
+        return issue(subject.subject(), subject.publicKey(), caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl);
+    }
+
+    /** CSR 签发（模板版）：KeyUsage/EKU/策略OID 显式传入（GM/T 0034 §5.3.4） */
+    public static X509Certificate issueFromCsrByTemplate(String csrPem, X509Certificate caCert, PrivateKey caKey,
+                                                         String certType, int validityDays, String san,
+                                                         String crlUrl, String ocspUrl,
+                                                         String keyUsage, String extKeyUsage, String policyOid) {
+        CsrSubject subject = parseCsr(csrPem);
+        return issue(subject.subject(), subject.publicKey(), caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl,
+                keyUsageBits(keyUsage), ekuPurpose(extKeyUsage), policyOid);
+    }
+
+    /** 解析 CSR 提取主体与公钥 */
+    private static CsrSubject parseCsr(String csrPem) {
         try (PEMParser parser = new PEMParser(new StringReader(csrPem))) {
             Object obj = parser.readObject();
             if (!(obj instanceof PKCS10CertificationRequest csr)) {
@@ -130,13 +200,16 @@ public final class CertUtil {
             }
             PublicKey pub = new org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter()
                     .setProvider("BC").getPublicKey(csr.getSubjectPublicKeyInfo());
-            X500Name subject = csr.getSubject();
-            return issue(subject, pub, caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl);
+            return new CsrSubject(csr.getSubject(), pub);
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException("CSR解析失败: " + e.getMessage(), e);
         }
+    }
+
+    /** CSR 主体记录：subject DN + 公钥 */
+    private record CsrSubject(X500Name subject, PublicKey publicKey) {
     }
 
     /**
@@ -158,11 +231,48 @@ public final class CertUtil {
         }
     }
 
-    /** 签发通用入口：主体 X500Name + 公钥 + 吊销分发点(CDP)/OCSP访问点(AIA) */
+    /** 公钥签发（模板版）：KeyUsage/EKU/策略OID 显式传入（GM/T 0034 §5.3.4） */
+    public static X509Certificate issuePublicKeyByTemplate(String subjectDn, String publicKeyPem,
+                                                           X509Certificate caCert, PrivateKey caKey,
+                                                           String certType, int validityDays, String san,
+                                                           String crlUrl, String ocspUrl,
+                                                           String keyUsage, String extKeyUsage, String policyOid) {
+        try {
+            PublicKey pub = PemUtil.parsePublicKey(publicKeyPem);
+            X500Name subject = new X500Name(subjectDn);
+            return issue(subject, pub, caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl,
+                    keyUsageBits(keyUsage), ekuPurpose(extKeyUsage), policyOid);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("公钥/DN 解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 签发通用入口：主体 X500Name + 公钥 + 吊销分发点(CDP)/OCSP访问点(AIA) + 模板化扩展项 */
     private static X509Certificate issue(X500Name subject, PublicKey subjectPub,
                                           X509Certificate caCert, PrivateKey caKey,
                                           String certType, int validityDays, String san,
                                           String crlUrl, String ocspUrl) {
+        boolean isSubCa = "SUB_CA".equalsIgnoreCase(certType);
+        int legacyBits = isSubCa
+                ? KeyUsage.keyCertSign | KeyUsage.cRLSign
+                : ("CLIENT".equalsIgnoreCase(certType)
+                        ? KeyUsage.digitalSignature
+                        : KeyUsage.digitalSignature | KeyUsage.keyEncipherment);
+        KeyPurposeId legacyEku = isSubCa ? null
+                : ("CLIENT".equalsIgnoreCase(certType)
+                        ? KeyPurposeId.id_kp_clientAuth : KeyPurposeId.id_kp_serverAuth);
+        return issue(subject, subjectPub, caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl,
+                legacyBits, legacyEku, null);
+    }
+
+    /** 签发通用入口（模板化版）：KeyUsage/EKU/策略OID 显式传入 */
+    private static X509Certificate issue(X500Name subject, PublicKey subjectPub,
+                                          X509Certificate caCert, PrivateKey caKey,
+                                          String certType, int validityDays, String san,
+                                          String crlUrl, String ocspUrl,
+                                          int keyUsageBits, KeyPurposeId eku, String policyOid) {
         try {
             BigInteger serial = randomSerial();
             Date notBefore = new Date();
@@ -176,15 +286,14 @@ public final class CertUtil {
             boolean isSubCa = "SUB_CA".equalsIgnoreCase(certType);
             builder.addExtension(Extension.basicConstraints, true,
                     isSubCa ? new BasicConstraints(1) : new BasicConstraints(false));
-            builder.addExtension(Extension.keyUsage, true, new KeyUsage(
-                    "CLIENT".equalsIgnoreCase(certType)
-                            ? KeyUsage.digitalSignature
-                            : KeyUsage.digitalSignature | KeyUsage.keyEncipherment));
-            if (!isSubCa) {
-                builder.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(
-                        "CLIENT".equalsIgnoreCase(certType)
-                                ? KeyPurposeId.id_kp_clientAuth
-                                : KeyPurposeId.id_kp_serverAuth));
+            builder.addExtension(Extension.keyUsage, true, new KeyUsage(keyUsageBits));
+            if (eku != null) {
+                builder.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(eku));
+            }
+            if (policyOid != null && !policyOid.isBlank()) {
+                builder.addExtension(Extension.certificatePolicies, false,
+                        new CertificatePolicies(new PolicyInformation(
+                                new org.bouncycastle.asn1.ASN1ObjectIdentifier(policyOid.trim()))));
             }
             builder.addExtension(Extension.subjectKeyIdentifier, false,
                     utils.createSubjectKeyIdentifier(subjectPub));

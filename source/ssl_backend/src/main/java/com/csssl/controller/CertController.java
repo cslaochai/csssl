@@ -7,6 +7,7 @@ import com.csssl.dto.CsrIssueRequest;
 import com.csssl.dto.IssueCertRequest;
 import com.csssl.service.AuditService;
 import com.csssl.service.CertService;
+import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,35 +49,39 @@ public class CertController {
         return Result.success("查询成功", certService.detail(id));
     }
 
-    /** 在线签发（内部生成密钥对，私钥落盘） */
+    /** 在线签发（内部生成密钥对，私钥落盘；需 CA操作员/系统管理员） */
     @PostMapping("/certs")
     public Result<CertVo> issue(@RequestBody IssueCertRequest req, HttpServletRequest request) {
-        String username = (String) request.getAttribute("ssl.username");
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        String username = RoleCode.currentUser(request);
         return Result.success("签发成功", certService.issue(req, username, clientIp(request)));
     }
 
-    /** CSR 签发（主体与公钥取自 CSR） */
+    /** CSR 签发（主体与公钥取自 CSR；需 CA操作员/系统管理员） */
     @PostMapping("/certs/csr")
     public Result<CertVo> issueFromCsr(@RequestBody CsrIssueRequest req, HttpServletRequest request) {
-        String username = (String) request.getAttribute("ssl.username");
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        String username = RoleCode.currentUser(request);
         return Result.success("CSR签发成功", certService.issueFromCsr(
                 req.getCsrPem(), req.getCertType(), req.getValidityDays(),
                 req.getSan(), req.getDescription(), username, clientIp(request)));
     }
 
-    /** 公钥签发（RA 场景）：申请方自持私钥，仅提交 Subject DN + 公钥 PEM（HIS 医生签名证书对接） */
+    /** 公钥签发（RA 场景）：申请方自持私钥，仅提交 Subject DN + 公钥 PEM（需 CA操作员/系统管理员） */
     @PostMapping("/certs/public-key")
     public Result<CertVo> issueWithPublicKey(@RequestBody com.csssl.dto.PublicKeyIssueRequest req,
                                              HttpServletRequest request) {
-        String username = (String) request.getAttribute("ssl.username");
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        String username = RoleCode.currentUser(request);
         return Result.success("公钥签发成功", certService.issueWithPublicKey(req, username, clientIp(request)));
     }
 
-    /** 吊销证书 */
+    /** 吊销证书（需 CA操作员/系统管理员） */
     @PostMapping("/certs/{id}/revoke")
     public Result<CertVo> revoke(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
                                  HttpServletRequest request) {
-        String username = (String) request.getAttribute("ssl.username");
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        String username = RoleCode.currentUser(request);
         String reason = body == null ? null : body.get("reason");
         return Result.success("吊销成功", certService.revoke(id, reason, username, clientIp(request)));
     }

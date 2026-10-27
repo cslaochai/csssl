@@ -45,7 +45,7 @@ public class AuthService {
             throw new IllegalArgumentException("账号或口令错误");
         }
 
-        String token = jwtUtil.createToken(user.getUsername());
+        String token = jwtUtil.createToken(user.getUsername(), user.getRoleCode());
         user.setLastLoginTime(LocalDateTime.now());
         user.setLastLoginIp(ip);
         userMapper.updateById(user);
@@ -55,6 +55,7 @@ public class AuthService {
         data.put("token", token);
         data.put("username", user.getUsername());
         data.put("realName", user.getRealName());
+        data.put("role", user.getRoleCode());
         return data;
     }
 

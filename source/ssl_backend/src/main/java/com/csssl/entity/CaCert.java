@@ -56,6 +56,9 @@ public class CaCert {
     /** 用途说明 */
     private String description;
 
+    /** 签发所用证书模板ID（GM/T 0034 §5.3.4，可空=直签未走模板） */
+    private Long templateId;
+
     /** 创建人 */
     private String createdBy;
 

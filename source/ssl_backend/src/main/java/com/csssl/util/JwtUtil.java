@@ -24,12 +24,13 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(cssslProperties.getSecurity().getJwt().getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 签发会话令牌：subject=username，默认有效期 24h */
-    public String createToken(String username) {
+    /** 签发会话令牌：subject=username，携带角色 claim，默认有效期 24h */
+    public String createToken(String username, String role) {
         long exp = cssslProperties.getSecurity().getJwt().getExpiration();
         return Jwts.builder()
                 .subject(username)
                 .claim("username", username)
+                .claim("role", role == null ? "" : role)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + exp))
                 .signWith(signingKey())
@@ -39,12 +40,26 @@ public class JwtUtil {
     /** 解析并校验令牌；非法/过期返回 null */
     public String parseUsername(String token) {
         try {
-            Claims claims = Jwts.parser()
+            return Jwts.parser()
                     .verifyWith(signingKey())
                     .build()
                     .parseSignedClaims(token)
-                    .getPayload();
-            return claims.get("username", String.class);
+                    .getPayload()
+                    .get("username", String.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 解析令牌中的角色；非法/过期返回 null */
+    public String parseRole(String token) {
+        try {
+            return Jwts.parser()
+                    .verifyWith(signingKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload()
+                    .get("role", String.class);
         } catch (Exception e) {
             return null;
         }

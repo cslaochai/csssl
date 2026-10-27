@@ -15,7 +15,8 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * 管理接口登录拦截：/admin/** 需要 Authorization: Bearer <token>，未登录返回 401。
- * 拦截成功后把登录用户名写入 request attribute（审计/创建人用）。
+ * 拦截成功后把登录用户名与角色写入 request attribute（审计/权限校验用）。
+ * 角色细分由各接口用 RoleCode.require 二次校验（GM/T 0034 §8.1.3 多级管理员分权）。
  */
 @Slf4j
 @Component
@@ -23,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 public class AuthInterceptor implements HandlerInterceptor {
 
     public static final String ATTR_USERNAME = "ssl.username";
+    public static final String ATTR_ROLE = "ssl.role";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final JwtUtil jwtUtil;
@@ -47,6 +49,8 @@ public class AuthInterceptor implements HandlerInterceptor {
             return false;
         }
         request.setAttribute(ATTR_USERNAME, username);
+        request.setAttribute(ATTR_ROLE,
+                auth != null && auth.startsWith("Bearer ") ? jwtUtil.parseRole(auth.substring(7)) : null);
         return true;
     }
 }

@@ -6,7 +6,9 @@ import com.csssl.config.CssslProperties;
 import com.csssl.dto.CertVo;
 import com.csssl.dto.IssueCertRequest;
 import com.csssl.entity.CaCert;
+import com.csssl.entity.CertTemplate;
 import com.csssl.mapper.CaCertMapper;
+import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.bouncycastle.asn1.x500.X500Name;
+
 /**
  * 证书签发与生命周期管理：在线签发（内部生成密钥对）/ CSR 签发 / 吊销 / 下载 / 概览统计。
  * 签发私钥只落盘（store-dir/issued/{serial}），数据库只存证书与元信息。
@@ -39,6 +43,7 @@ public class CertService {
     private static final int MAX_VALIDITY_DAYS = 36500;
 
     private final CaCertMapper certMapper;
+    private final CertTemplateMapper templateMapper;
     private final CaService caService;
     private final CssslProperties props;
     private final AuditService auditService;
@@ -71,28 +76,35 @@ public class CertService {
         if (cn.isEmpty()) {
             throw new IllegalArgumentException("主体CN不能为空");
         }
-        String type = (req.getCertType() == null ? "SERVER" : req.getCertType()).toUpperCase();
+        CertTemplate tpl = resolveTemplate(req.getTemplateId());
+        // 模板锁定：类型/算法/有效期/KeyUsage/EKU/策略OID 全部以模板为准（GM/T 0034 §5.3.4）
+        String type = tpl != null ? tpl.getCertType() : (req.getCertType() == null ? "SERVER" : req.getCertType()).toUpperCase();
         if (!TYPES.contains(type)) {
-            throw new IllegalArgumentException("不支持的证书类型: " + req.getCertType() + "（仅支持 SERVER / CLIENT / SUB_CA）");
+            throw new IllegalArgumentException("不支持的证书类型: " + type + "（仅支持 SERVER / CLIENT / SUB_CA）");
         }
-        String algorithm = req.getAlgorithm() == null ? CertUtil.ALG_RSA2048 : req.getAlgorithm();
+        String algorithm = tpl != null ? tpl.getAlgorithm() : (req.getAlgorithm() == null ? CertUtil.ALG_RSA2048 : req.getAlgorithm());
         CertUtil.checkAlgorithm(algorithm);
-        int days = resolveValidityDays(req.getValidityDays());
+        int days = tpl != null ? tpl.getValidityDays() : resolveValidityDays(req.getValidityDays());
 
         KeyPair subjectKey = CertUtil.generateKeyPair(algorithm);
         X509Certificate caCert = caService.signingCert();
         PrivateKey caKey = caService.signingKey();
-        X509Certificate cert = CertUtil.issue(subjectKey, caCert, caKey, cn, type, days,
-                req.getSan(), crlUrl(), ocspUrl());
+        X509Certificate cert = tpl != null
+                ? CertUtil.issueByTemplate(
+                        new X500Name("CN=" + cn + ",O=CSSSL"), subjectKey.getPublic(), caCert, caKey,
+                        type, days, req.getSan(), crlUrl(), ocspUrl(),
+                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                : CertUtil.issue(subjectKey, caCert, caKey, cn, type, days,
+                        req.getSan(), crlUrl(), ocspUrl());
 
         String serial = cert.getSerialNumber().toString(16);
         persistFiles(serial, PemUtil.keyToPem(subjectKey.getPrivate()), PemUtil.certToPem(cert));
 
         CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, req.getSan(),
-                req.getDescription(), username);
+                req.getDescription(), username, tpl);
         certMapper.insert(row);
         auditService.record(username, "CERT_ISSUE", String.valueOf(row.getId()),
-                "签发 " + type + " 证书：" + cn + "（" + algorithm + "）", ip);
+                "签发 " + type + " 证书：" + cn + "（" + algorithm + (tpl != null ? "，模板 " + tpl.getTemplateCode() : "") + "）", ip);
         log.info("[证书签发] id={}, cn={}, type={}, algorithm={}, serial={}", row.getId(), cn, type, algorithm, serial);
         return CertVo.from(row);
     }
@@ -100,21 +112,32 @@ public class CertService {
     /** CSR 签发：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
     public CertVo issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip) {
+        return issueFromCsr(csrPem, certType, validityDays, san, description, username, ip, null);
+    }
+
+    /** CSR 签发（支持模板）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
+    public CertVo issueFromCsr(String csrPem, String certType, Integer validityDays,
+                               String san, String description, String username, String ip, Long templateId) {
         if (csrPem == null || csrPem.isBlank()) {
             throw new IllegalArgumentException("CSR内容不能为空");
         }
-        String type = (certType == null ? "SERVER" : certType).toUpperCase();
+        CertTemplate tpl = resolveTemplate(templateId);
+        String type = tpl != null ? tpl.getCertType() : (certType == null ? "SERVER" : certType).toUpperCase();
         if (!TYPES.contains(type)) {
             throw new IllegalArgumentException("不支持的证书类型: " + certType);
         }
-        int days = resolveValidityDays(validityDays);
+        int days = tpl != null ? tpl.getValidityDays() : resolveValidityDays(validityDays);
 
         X509Certificate caCert = caService.signingCert();
         PrivateKey caKey = caService.signingKey();
         String effectiveSan = CertUtil.sanFromCsr(csrPem, san);
         // 证书签名算法跟随签发CA（SUB_CA）密钥类型（RSA SHA256withRSA / 国密 SM3withSM2）
-        X509Certificate cert = CertUtil.issueFromCsr(csrPem, caCert, caKey, type, days,
-                effectiveSan, crlUrl(), ocspUrl());
+        X509Certificate cert = tpl != null
+                ? CertUtil.issueFromCsrByTemplate(csrPem, caCert, caKey, type, days,
+                        effectiveSan, crlUrl(), ocspUrl(),
+                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                : CertUtil.issueFromCsr(csrPem, caCert, caKey, type, days,
+                        effectiveSan, crlUrl(), ocspUrl());
 
         String serial = cert.getSerialNumber().toString(16);
         // CSR 申请方自持私钥，不落盘
@@ -125,10 +148,10 @@ public class CertService {
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
 
         CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, effectiveSan,
-                description, username);
+                description, username, tpl);
         certMapper.insert(row);
         auditService.record(username, "CERT_CSR_ISSUE", String.valueOf(row.getId()),
-                "CSR签发 " + type + " 证书：" + cn, ip);
+                "CSR签发 " + type + " 证书：" + cn + (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : ""), ip);
         return CertVo.from(row);
     }
 
@@ -144,16 +167,21 @@ public class CertService {
         if (req.getPublicKeyPem() == null || req.getPublicKeyPem().isBlank()) {
             throw new IllegalArgumentException("公钥PEM不能为空（申请方自持私钥，仅提交公钥）");
         }
-        String type = (req.getCertType() == null ? "CLIENT" : req.getCertType()).toUpperCase();
+        CertTemplate tpl = resolveTemplate(req.getTemplateId());
+        String type = tpl != null ? tpl.getCertType() : (req.getCertType() == null ? "CLIENT" : req.getCertType()).toUpperCase();
         if (!TYPES.contains(type)) {
-            throw new IllegalArgumentException("不支持的证书类型: " + req.getCertType() + "（仅支持 SERVER / CLIENT / SUB_CA）");
+            throw new IllegalArgumentException("不支持的证书类型: " + type + "（仅支持 SERVER / CLIENT / SUB_CA）");
         }
-        int days = resolveValidityDays(req.getValidityDays());
+        int days = tpl != null ? tpl.getValidityDays() : resolveValidityDays(req.getValidityDays());
 
         X509Certificate caCert = caService.signingCert();
         PrivateKey caKey = caService.signingKey();
-        X509Certificate cert = CertUtil.issuePublicKey(dn, req.getPublicKeyPem(), caCert, caKey,
-                type, days, null, crlUrl(), ocspUrl());
+        X509Certificate cert = tpl != null
+                ? CertUtil.issuePublicKeyByTemplate(dn, req.getPublicKeyPem(), caCert, caKey,
+                        type, days, null, crlUrl(), ocspUrl(),
+                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                : CertUtil.issuePublicKey(dn, req.getPublicKeyPem(), caCert, caKey,
+                        type, days, null, crlUrl(), ocspUrl());
 
         String serial = cert.getSerialNumber().toString(16);
         // 申请方自持私钥，不落盘
@@ -163,10 +191,10 @@ public class CertService {
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
 
         CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, null,
-                req.getDescription(), username);
+                req.getDescription(), username, tpl);
         certMapper.insert(row);
         auditService.record(username, "CERT_PUBKEY_ISSUE", String.valueOf(row.getId()),
-                "公钥签发 " + type + " 证书：" + cn, ip);
+                "公钥签发 " + type + " 证书：" + cn + (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : ""), ip);
         log.info("[公钥签发] id={}, cn={}, type={}, algorithm={}, serial={}", row.getId(), cn, type, algorithm, serial);
         return CertVo.from(row);
     }
@@ -317,7 +345,7 @@ public class CertService {
 
     private CaCert buildRow(String serial, String cn, String type, String algorithm,
                             X509Certificate caCert, X509Certificate cert, String san,
-                            String description, String username) {
+                            String description, String username, CertTemplate tpl) {
         CaCert row = new CaCert();
         row.setSerialHex(serial);
         row.setSubjectCn(cn);
@@ -331,8 +359,21 @@ public class CertService {
         row.setStatus("VALID");
         row.setCertPem(PemUtil.certToPem(cert));
         row.setDescription(description);
+        row.setTemplateId(tpl == null ? null : tpl.getId());
         row.setCreatedBy(username);
         row.setCreatedAt(LocalDateTime.now());
         return row;
+    }
+
+    /** 按ID解析证书模板；templateId 为空返回 null（兼容不走模板的直签） */
+    private CertTemplate resolveTemplate(Long templateId) {
+        if (templateId == null) {
+            return null;
+        }
+        CertTemplate tpl = templateMapper.selectById(templateId);
+        if (tpl == null) {
+            throw new IllegalArgumentException("证书模板不存在（id=" + templateId + "）");
+        }
+        return tpl;
     }
 }

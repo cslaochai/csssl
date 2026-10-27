@@ -20,6 +20,9 @@ public class PublicKeyIssueRequest {
     /** 有效期（天），缺省用系统默认 */
     private Integer validityDays;
 
+    /** 证书模板ID（非空则以模板锁定算法/有效期/KeyUsage/EKU/策略OID） */
+    private Long templateId;
+
     /** 备注 */
     private String description;
 }

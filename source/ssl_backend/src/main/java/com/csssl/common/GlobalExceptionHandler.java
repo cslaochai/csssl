@@ -24,6 +24,12 @@ public class GlobalExceptionHandler {
         return Result.error(500, e.getMessage());
     }
 
+    /** 权限不足（GM/T 0034 多角色分权，返回 403） */
+    @ExceptionHandler(SecurityException.class)
+    public Result<Void> handleSecurity(SecurityException e) {
+        return Result.error(403, e.getMessage());
+    }
+
     /** 兜底异常 */
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {

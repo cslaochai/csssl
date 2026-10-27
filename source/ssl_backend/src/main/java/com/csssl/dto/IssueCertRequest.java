@@ -23,6 +23,9 @@ public class IssueCertRequest {
     /** SAN（逗号分隔，DNS名/IP） */
     private String san;
 
+    /** 证书模板ID（非空则类型/算法/有效期/KeyUsage/EKU/策略OID 全部以模板为准，GM/T 0034 §5.3.4） */
+    private Long templateId;
+
     /** 用途说明（颁发给哪个子系统：cslk/csmig/csmis等） */
     private String description;
 }
