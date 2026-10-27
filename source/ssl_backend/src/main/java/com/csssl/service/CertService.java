@@ -208,14 +208,162 @@ public class CertService {
         if (!"VALID".equals(row.getStatus())) {
             throw new IllegalArgumentException("仅有效状态的证书可以吊销（当前状态：" + row.getStatus() + "）");
         }
-        row.setStatus("REVOKED");
-        row.setRevokeReason(reason == null || reason.isBlank() ? "UNSPECIFIED" : reason.trim());
-        row.setRevokedAt(LocalDateTime.now());
-        certMapper.updateById(row);
+        markRevoked(row, reason, username);
         auditService.record(username, "CERT_REVOKE", String.valueOf(id),
                 "吊销证书：" + row.getSubjectCn() + "，原因：" + row.getRevokeReason(), ip);
         log.info("[证书吊销] id={}, cn={}, reason={}", id, row.getSubjectCn(), row.getRevokeReason());
         return CertVo.from(row);
+    }
+
+    /**
+     * 挂起证书（GM/T 0034 §12.6）：有效期内暂停使用，不销毁。
+     * 挂起期间证书进入 CRL（reason=certificateHold）、OCSP 返回 revoked/on-hold，解除后恢复。
+     */
+    public CertVo suspend(Long id, String reason, String username, String ip) {
+        CaCert row = findById(id);
+        if (CaService.TYPE_ROOT.equals(row.getCertType())) {
+            throw new IllegalArgumentException("根CA证书不支持挂起");
+        }
+        if (!"VALID".equals(row.getStatus())) {
+            throw new IllegalArgumentException("仅有效状态的证书可以挂起（当前状态：" + row.getStatus() + "）");
+        }
+        row.setStatus("FROZEN");
+        row.setRevokeReason(reason == null || reason.isBlank() ? "CERTIFICATE_HOLD" : reason.trim());
+        row.setRevokedAt(LocalDateTime.now());
+        certMapper.updateById(row);
+        auditService.record(username, "CERT_SUSPEND", String.valueOf(id),
+                "挂起证书：" + row.getSubjectCn() + "（CRL certificateHold / OCSP on-hold）", ip);
+        log.info("[证书挂起] id={}, cn={}", id, row.getSubjectCn());
+        return CertVo.from(row);
+    }
+
+    /** 解除挂起（GM/T 0034 §12.7）：恢复有效，从 CRL 移除、OCSP 恢复 good */
+    public CertVo unsuspend(Long id, String username, String ip) {
+        CaCert row = findById(id);
+        if (!"FROZEN".equals(row.getStatus())) {
+            throw new IllegalArgumentException("仅挂起状态的证书可以解除挂起（当前状态：" + row.getStatus() + "）");
+        }
+        row.setStatus("VALID");
+        row.setRevokeReason(null);
+        row.setRevokedAt(null);
+        certMapper.updateById(row);
+        auditService.record(username, "CERT_UNSUSPEND", String.valueOf(id),
+                "解除挂起证书：" + row.getSubjectCn() + "（恢复有效）", ip);
+        log.info("[解除挂起] id={}, cn={}", id, row.getSubjectCn());
+        return CertVo.from(row);
+    }
+
+    /**
+     * 证书更新（GM/T 0034 §12.2 更新）：原证书吊销（SUPERSEDED）+ 以原公钥重签新证书延长有效期。
+     * 适用场景：证书即将到期、主体不变；私钥由申请方自持（CSR/公钥签发）也可安全更新。
+     */
+    public CertVo renew(Long id, Integer validityDays, String username, String ip) {
+        CaCert old = findById(id);
+        if (CaService.TYPE_ROOT.equals(old.getCertType())) {
+            throw new IllegalArgumentException("根CA证书不支持在线更新");
+        }
+        if (!"VALID".equals(old.getStatus()) && !"FROZEN".equals(old.getStatus())) {
+            throw new IllegalArgumentException("仅有效/挂起状态的证书可以更新（当前状态：" + old.getStatus() + "）");
+        }
+        X509Certificate oldCert = PemUtil.parseCert(old.getCertPem());
+        int days = resolveValidityDays(validityDays);
+        CertTemplate tpl = old.getTemplateId() == null ? null : templateMapper.selectById(old.getTemplateId());
+
+        X509Certificate caCert = caService.signingCert();
+        PrivateKey caKey = caService.signingKey();
+        X509Certificate cert = tpl != null
+                ? CertUtil.issueByTemplate(
+                        new X500Name(oldCert.getSubjectX500Principal().getName()),
+                        oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
+                        old.getSan(), crlUrl(), ocspUrl(),
+                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                : CertUtil.issue(
+                        new X500Name(oldCert.getSubjectX500Principal().getName()),
+                        oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
+                        old.getSan(), crlUrl(), ocspUrl());
+
+        markRevoked(old, "SUPERSEDED", username);
+        String serial = cert.getSerialNumber().toString(16);
+        // 同公钥重签：申请方私钥不变，CA 侧不落盘新私钥
+        persistFiles(serial, null, PemUtil.certToPem(cert));
+        String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
+                ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
+        CaCert row = buildRow(serial, old.getSubjectCn(), old.getCertType(), algorithm,
+                caCert, cert, old.getSan(), old.getDescription(), username, tpl);
+        certMapper.insert(row);
+        auditService.record(username, "CERT_RENEW", String.valueOf(row.getId()),
+                "更新证书：" + old.getSubjectCn() + "（原证书 id=" + id + " 已吊销 SUPERSEDED，新证 " + days + " 天）", ip);
+        log.info("[证书更新] 新证 id={}, serial={}, 原证 id={} 已吊销", row.getId(), serial, id);
+        return CertVo.from(row);
+    }
+
+    /**
+     * 密钥更新 rekey（GM/T 0034 §12.2 密钥更新）：重新生成密钥对并签发新证书，原证书吊销。
+     * 仅限内部生成密钥对的在线签发证书（私钥在 CA 侧）；CSR/公钥签发证书私钥由申请方自持，须重新走申请流程。
+     */
+    public CertVo rekey(Long id, Integer validityDays, String username, String ip) {
+        CaCert old = findById(id);
+        if (CaService.TYPE_ROOT.equals(old.getCertType()) || "SUB_CA".equals(old.getCertType())) {
+            throw new IllegalArgumentException("根CA/二级CA不支持在线重签（CA 密钥轮换属系统维护，另走流程）");
+        }
+        if (!"VALID".equals(old.getStatus()) && !"FROZEN".equals(old.getStatus())) {
+            throw new IllegalArgumentException("仅有效/挂起状态的证书可以重签（当前状态：" + old.getStatus() + "）");
+        }
+        if (!caService.issuedKeyExists(old.getSerialHex())) {
+            throw new IllegalArgumentException("该证书私钥由申请方自持（CSR/公钥签发），CA 侧无法重签，请申请方重新走 RA 申请");
+        }
+        X509Certificate oldCert = PemUtil.parseCert(old.getCertPem());
+        int days = resolveValidityDays(validityDays);
+        CertTemplate tpl = old.getTemplateId() == null ? null : templateMapper.selectById(old.getTemplateId());
+        String algorithm = old.getAlgorithm();
+
+        KeyPair kp = CertUtil.generateKeyPair(algorithm);
+        X509Certificate caCert = caService.signingCert();
+        PrivateKey caKey = caService.signingKey();
+        X509Certificate cert = tpl != null
+                ? CertUtil.issueByTemplate(
+                        new X500Name(oldCert.getSubjectX500Principal().getName()),
+                        kp.getPublic(), caCert, caKey, old.getCertType(), days,
+                        old.getSan(), crlUrl(), ocspUrl(),
+                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                : CertUtil.issue(
+                        new X500Name(oldCert.getSubjectX500Principal().getName()),
+                        kp.getPublic(), caCert, caKey, old.getCertType(), days,
+                        old.getSan(), crlUrl(), ocspUrl());
+
+        markRevoked(old, "SUPERSEDED", username);
+        String serial = cert.getSerialNumber().toString(16);
+        persistFiles(serial, PemUtil.keyToPem(kp.getPrivate()), PemUtil.certToPem(cert));
+        CaCert row = buildRow(serial, old.getSubjectCn(), old.getCertType(), algorithm,
+                caCert, cert, old.getSan(), old.getDescription(), username, tpl);
+        certMapper.insert(row);
+        auditService.record(username, "CERT_REKEY", String.valueOf(row.getId()),
+                "密钥更新：" + old.getSubjectCn() + "（原证书 id=" + id + " 已吊销，新密钥对 " + algorithm + "）", ip);
+        log.info("[密钥更新] 新证 id={}, serial={}, 原证 id={} 已吊销", row.getId(), serial, id);
+        return CertVo.from(row);
+    }
+
+    /** 吊销落库（供吊销/更新/重签共用，只改状态与原因，审计由调用方记录） */
+    private void markRevoked(CaCert row, String reason, String username) {
+        row.setStatus("REVOKED");
+        row.setRevokeReason(reason == null || reason.isBlank() ? "UNSPECIFIED" : reason.trim());
+        row.setRevokedAt(LocalDateTime.now());
+        certMapper.updateById(row);
+    }
+
+    /** 过期归档扫描：把已超过有效期的有效证书标记 EXPIRED（幂等；签发记录与文件按策略长期留存） */
+    public int expireScan() {
+        List<CaCert> expired = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
+                .eq(CaCert::getStatus, "VALID")
+                .lt(CaCert::getValidTo, LocalDateTime.now()));
+        for (CaCert c : expired) {
+            c.setStatus("EXPIRED");
+            certMapper.updateById(c);
+        }
+        if (!expired.isEmpty()) {
+            log.info("[归档] 已将 {} 张过期证书标记为 EXPIRED（留存策略见 docs/院内证书策略与KMC豁免声明）", expired.size());
+        }
+        return expired.size();
     }
 
     /**

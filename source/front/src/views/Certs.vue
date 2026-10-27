@@ -11,6 +11,7 @@
           <el-select v-model="query.status" placeholder="状态" clearable style="width: 120px" @change="reload">
             <el-option label="有效" value="VALID" />
             <el-option label="已吊销" value="REVOKED" />
+            <el-option label="已挂起" value="FROZEN" />
             <el-option label="已过期" value="EXPIRED" />
           </el-select>
           <el-input
@@ -51,10 +52,40 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" label="用途说明" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
             <el-button link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
+            <el-button
+              v-if="row.status === 'VALID'"
+              link
+              type="warning"
+              size="small"
+              :disabled="row.certType === 'ROOT'"
+              @click="openSuspend(row)"
+            >挂起</el-button>
+            <el-button
+              v-if="row.status === 'FROZEN'"
+              link
+              type="success"
+              size="small"
+              @click="onUnsuspend(row)"
+            >解除挂起</el-button>
+            <el-button
+              v-if="['VALID', 'FROZEN'].includes(row.status)"
+              link
+              type="primary"
+              size="small"
+              :disabled="row.certType === 'ROOT'"
+              @click="openRenew(row, 'renew')"
+            >更新</el-button>
+            <el-button
+              v-if="['VALID', 'FROZEN'].includes(row.status) && row.certType === 'SERVER'"
+              link
+              type="primary"
+              size="small"
+              @click="openRenew(row, 'rekey')"
+            >重签</el-button>
             <el-button
               link
               type="danger"
@@ -149,6 +180,48 @@
       </template>
     </el-dialog>
 
+    <!-- 挂起 -->
+    <el-dialog v-model="suspendVisible" title="挂起证书（GM/T 0034 §12.6，可解除）" width="460px" :close-on-click-modal="false">
+      <p style="margin-bottom: 12px">
+        确定挂起证书 <b>{{ suspendTarget?.subjectCn }}</b> 吗？挂起期间证书进入 CRL（certificateHold）、OCSP 返回 on-hold，解除后恢复。
+      </p>
+      <el-form label-width="90px">
+        <el-form-item label="原因">
+          <el-select v-model="suspendReason" style="width: 100%">
+            <el-option label="证书挂起（默认）" value="CERTIFICATE_HOLD" />
+            <el-option label="人员离职/待定" value="AFFILIATION_CHANGED" />
+            <el-option label="设备临时停用" value="CESSATION_OF_OPERATION" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="suspendVisible = false">取消</el-button>
+          <el-button type="warning" :loading="submitting" @click="onSuspendConfirm">挂起</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 更新 / 重签 -->
+    <el-dialog v-model="renewVisible" :title="renewAction === 'renew' ? '证书更新（同公钥重签）' : '密钥更新 rekey（新密钥对）'" width="500px" :close-on-click-modal="false">
+      <p style="margin-bottom: 12px">
+        {{ renewAction === 'renew'
+          ? `原证书 ${renewTarget?.subjectCn} 将被吊销（SUPERSEDED），以其公钥重签新证书（私钥仍由持有方自持）。`
+          : `原证书 ${renewTarget?.subjectCn} 将被吊销（SUPERSEDED），由 CA 生成新密钥对重签（仅限私钥在 CA 侧的在线签发证书）。` }}
+      </p>
+      <el-form label-width="110px">
+        <el-form-item label="新有效期(天)">
+          <el-input-number v-model="renewDays" :min="1" :max="36500" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="renewVisible = false">取消</el-button>
+          <el-button type="primary" :loading="submitting" @click="onRenewConfirm">{{ renewAction === 'renew' ? '更新' : '重签' }}</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- 吊销 -->
     <el-dialog v-model="revokeVisible" title="吊销证书" width="460px" :close-on-click-modal="false">
       <p style="margin-bottom: 12px">
@@ -186,6 +259,10 @@ import {
   issueCert,
   issueCertByCsr,
   revokeCert,
+  suspendCert,
+  unsuspendCert,
+  renewCert,
+  rekeyCert,
   downloadCertPem,
   downloadKeyPem
 } from '@/api/system'
@@ -201,6 +278,13 @@ const csrVisible = ref(false)
 const revokeVisible = ref(false)
 const revokeTarget = ref(null)
 const revokeReason = ref('KEY_COMPROMISE')
+const suspendVisible = ref(false)
+const suspendTarget = ref(null)
+const suspendReason = ref('CERTIFICATE_HOLD')
+const renewVisible = ref(false)
+const renewAction = ref('renew')
+const renewTarget = ref(null)
+const renewDays = ref(365)
 const submitting = ref(false)
 
 const defaultDays = 365
@@ -229,10 +313,10 @@ function typeTag(t) {
   return { SERVER: '', CLIENT: 'success', SUB_CA: 'warning', ROOT: 'danger' }[t] || ''
 }
 function statusText(s) {
-  return { VALID: '有效', REVOKED: '已吊销', EXPIRED: '已过期' }[s] || s
+  return { VALID: '有效', REVOKED: '已吊销', FROZEN: '已挂起', EXPIRED: '已过期' }[s] || s
 }
 function statusTag(s) {
-  return { VALID: 'success', REVOKED: 'danger', EXPIRED: 'info' }[s] || ''
+  return { VALID: 'success', REVOKED: 'danger', FROZEN: 'warning', EXPIRED: 'info' }[s] || ''
 }
 
 async function load() {
@@ -316,6 +400,60 @@ function onRevoke(row) {
   revokeTarget.value = row
   revokeReason.value = 'KEY_COMPROMISE'
   revokeVisible.value = true
+}
+
+function openSuspend(row) {
+  suspendTarget.value = row
+  suspendReason.value = 'CERTIFICATE_HOLD'
+  suspendVisible.value = true
+}
+
+async function onSuspendConfirm() {
+  submitting.value = true
+  try {
+    await suspendCert(suspendTarget.value.id, suspendReason.value)
+    ElMessage.success('已挂起（CRL certificateHold / OCSP on-hold）')
+    suspendVisible.value = false
+    load()
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function onUnsuspend(row) {
+  await ElMessageBox.confirm(`确定解除挂起证书 ${row.subjectCn} 吗？解除后恢复有效并移出 CRL。`, '提示', { type: 'warning' })
+  submitting.value = true
+  try {
+    await unsuspendCert(row.id)
+    ElMessage.success('已解除挂起，恢复有效')
+    load()
+  } finally {
+    submitting.value = false
+  }
+}
+
+function openRenew(row, action) {
+  renewTarget.value = row
+  renewAction.value = action
+  renewDays.value = Math.max(1, Math.round((new Date(row.validTo) - new Date(row.validFrom)) / 86400000)) || 365
+  renewVisible.value = true
+}
+
+async function onRenewConfirm() {
+  submitting.value = true
+  try {
+    if (renewAction.value === 'renew') {
+      await renewCert(renewTarget.value.id, renewDays.value)
+      ElMessage.success('证书已更新（原证书吊销 SUPERSEDED）')
+    } else {
+      await rekeyCert(renewTarget.value.id, renewDays.value)
+      ElMessage.success('密钥已更新（新证书签发）')
+    }
+    renewVisible.value = false
+    load()
+  } finally {
+    submitting.value = false
+  }
 }
 
 async function onRevokeConfirm() {

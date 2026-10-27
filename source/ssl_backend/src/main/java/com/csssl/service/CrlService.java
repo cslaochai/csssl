@@ -29,10 +29,10 @@ public class CrlService {
     private final CaCertMapper certMapper;
     private final CaService caService;
 
-    /** 已吊销的终端证书（排除 ROOT/SUB_CA：CA 证书吊销由上一级CA管理） */
+    /** 应纳入 CRL 的证书：已吊销（REVOKED）+ 挂起（FROZEN，reason=certificateHold）；排除 ROOT/SUB_CA（由上一级CA管理） */
     public List<CaCert> revokedList() {
         return certMapper.selectList(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getStatus, "REVOKED")
+                .in(CaCert::getStatus, "REVOKED", "FROZEN")
                 .notIn(CaCert::getCertType, CaService.TYPE_ROOT, CaService.TYPE_SUB_CA)
                 .orderByDesc(CaCert::getRevokedAt));
     }

@@ -114,3 +114,11 @@ SET @c2 = (SELECT COUNT(*) FROM information_schema.columns
            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'template_id');
 SET @s2 = IF(@c2 = 0, 'ALTER TABLE ssl_ca_cert ADD COLUMN template_id BIGINT NULL COMMENT ''签发所用证书模板ID'' AFTER description', 'SELECT 1');
 PREPARE s2 FROM @s2; EXECUTE s2; DEALLOCATE PREPARE s2;
+
+-- ===== GM/T 0034 P1 合规增强 =====
+
+-- 幂等加列：审计日志哈希链（上一条记录的签名值，链式防篡改增强，行业实践）
+SET @c3 = (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'prev_sign');
+SET @s3 = IF(@c3 = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN prev_sign VARCHAR(256) NULL COMMENT ''哈希链：上一条审计记录的签名值'' AFTER sign', 'SELECT 1');
+PREPARE s3 FROM @s3; EXECUTE s3; DEALLOCATE PREPARE s3;

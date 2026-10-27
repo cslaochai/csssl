@@ -63,6 +63,7 @@ async function onSubmit() {
     const res = await login({ username: form.username.trim(), passwordCipher: cipher })
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.username)
+    localStorage.setItem('role', res.data.role || 'ADMIN')
     ElMessage.success('登录成功')
     const redirect = route.query.redirect || '/dashboard'
     router.push(redirect)

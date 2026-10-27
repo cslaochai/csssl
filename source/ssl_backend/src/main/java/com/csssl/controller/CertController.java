@@ -86,6 +86,46 @@ public class CertController {
         return Result.success("吊销成功", certService.revoke(id, reason, username, clientIp(request)));
     }
 
+    /** 挂起证书（GM/T 0034 §12.6：暂停使用，CRL certificateHold / OCSP on-hold；需操作员/管理员） */
+    @PostMapping("/certs/{id}/suspend")
+    public Result<CertVo> suspend(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+                                  HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        String username = RoleCode.currentUser(request);
+        String reason = body == null ? null : body.get("reason");
+        return Result.success("已挂起（可解除）", certService.suspend(id, reason, username, clientIp(request)));
+    }
+
+    /** 解除挂起（GM/T 0034 §12.7：恢复有效；需操作员/管理员） */
+    @PostMapping("/certs/{id}/unsuspend")
+    public Result<CertVo> unsuspend(@PathVariable Long id, HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        return Result.success("已解除挂起，恢复有效",
+                certService.unsuspend(id, RoleCode.currentUser(request), clientIp(request)));
+    }
+
+    /** 证书更新（§12.2：原证吊销 + 同公钥重签延长有效期；需操作员/管理员） */
+    @PostMapping("/certs/{id}/renew")
+    public Result<CertVo> renew(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+                                HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        Integer days = body == null || body.get("validityDays") == null
+                ? null : Integer.valueOf(body.get("validityDays"));
+        return Result.success("证书已更新（原证书吊销 SUPERSEDED）",
+                certService.renew(id, days, RoleCode.currentUser(request), clientIp(request)));
+    }
+
+    /** 密钥更新 rekey（§12.2：新密钥对重签，原证吊销；仅限CA侧持有私钥的证书；需操作员/管理员） */
+    @PostMapping("/certs/{id}/rekey")
+    public Result<CertVo> rekey(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+                                HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        Integer days = body == null || body.get("validityDays") == null
+                ? null : Integer.valueOf(body.get("validityDays"));
+        return Result.success("密钥已更新（新证书签发，原证书吊销）",
+                certService.rekey(id, days, RoleCode.currentUser(request), clientIp(request)));
+    }
+
     /** 下载证书 PEM（公钥证书） */
     @GetMapping("/certs/{id}/cert.pem")
     public String downloadCert(@PathVariable Long id, HttpServletRequest request) {

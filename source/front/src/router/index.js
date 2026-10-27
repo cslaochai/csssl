@@ -41,6 +41,24 @@ const routes = [
         name: 'audit',
         component: () => import('@/views/Audit.vue'),
         meta: { title: '审计日志' }
+      },
+      {
+        path: 'users',
+        name: 'users',
+        component: () => import('@/views/Users.vue'),
+        meta: { title: '用户与角色', roles: ['ADMIN'] }
+      },
+      {
+        path: 'templates',
+        name: 'templates',
+        component: () => import('@/views/Templates.vue'),
+        meta: { title: '证书模板', roles: ['ADMIN', 'OPERATOR'] }
+      },
+      {
+        path: 'applications',
+        name: 'applications',
+        component: () => import('@/views/Applications.vue'),
+        meta: { title: 'RA申请审核', roles: ['ADMIN', 'OPERATOR', 'APPROVER'] }
       }
     ]
   },

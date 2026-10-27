@@ -76,11 +76,12 @@ public class OcspService {
             if (row == null) {
                 status = new UnknownStatus();
                 log.info("[OCSP] serial={} -> unknown（非本站证书）", serial);
-            } else if ("REVOKED".equals(row.getStatus())) {
+            } else if ("REVOKED".equals(row.getStatus()) || "FROZEN".equals(row.getStatus())) {
                 Date revokedAt = row.getRevokedAt() == null ? new Date()
                         : Date.from(row.getRevokedAt().atZone(ZoneId.systemDefault()).toInstant());
                 status = new RevokedStatus(revokedAt, CertUtil.crlReasonCode(row.getRevokeReason()));
-                log.info("[OCSP] serial={} -> revoked（{}）", serial, row.getRevokeReason());
+                log.info("[OCSP] serial={} -> revoked（{}）", serial,
+                        "FROZEN".equals(row.getStatus()) ? "CERTIFICATE_HOLD(挂起)" : row.getRevokeReason());
             } else {
                 status = CertificateStatus.GOOD;
                 log.info("[OCSP] serial={} -> good（{}）", serial, row.getSubjectCn());

@@ -32,6 +32,18 @@
           <el-icon><Memo /></el-icon>
           <span>审计日志</span>
         </el-menu-item>
+        <el-menu-item v-if="can('applications')" index="/applications">
+          <el-icon><EditPen /></el-icon>
+          <span>RA申请审核</span>
+        </el-menu-item>
+        <el-menu-item v-if="can('templates')" index="/templates">
+          <el-icon><Collection /></el-icon>
+          <span>证书模板</span>
+        </el-menu-item>
+        <el-menu-item v-if="can('users')" index="/users">
+          <el-icon><User /></el-icon>
+          <span>用户与角色</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -42,6 +54,7 @@
           <span class="user-box">
             <el-icon><UserFilled /></el-icon>
             <span>{{ username }}</span>
+            <el-tag size="small" type="info" effect="plain">{{ roleText }}</el-tag>
             <el-icon><ArrowDown /></el-icon>
           </span>
           <template #dropdown>
@@ -72,6 +85,16 @@ const router = useRouter()
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => route.meta.title || '长沙麓康CA认证中心')
 const username = computed(() => localStorage.getItem('username') || 'admin')
+const role = computed(() => localStorage.getItem('role') || 'ADMIN')
+const roleText = computed(() =>
+  ({ ADMIN: '系统管理员', OPERATOR: 'CA操作员', APPROVER: '审核员', AUDITOR: '审计员' })[role.value] || role.value
+)
+
+// 按角色控制菜单显隐（对应路由 meta.roles）
+function can(menu) {
+  const roles = { applications: ['ADMIN', 'OPERATOR', 'APPROVER'], templates: ['ADMIN', 'OPERATOR'], users: ['ADMIN'] }[menu]
+  return roles.includes(role.value)
+}
 
 async function onCommand(command) {
   if (command === 'logout') {

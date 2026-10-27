@@ -249,11 +249,11 @@ public final class CertUtil {
         }
     }
 
-    /** 签发通用入口：主体 X500Name + 公钥 + 吊销分发点(CDP)/OCSP访问点(AIA) + 模板化扩展项 */
-    private static X509Certificate issue(X500Name subject, PublicKey subjectPub,
-                                          X509Certificate caCert, PrivateKey caKey,
-                                          String certType, int validityDays, String san,
-                                          String crlUrl, String ocspUrl) {
+    /** 签发通用入口：主体 X500Name + 公钥 + 吊销分发点(CDP)/OCSP访问点(AIA)（直签，按 certType 取默认扩展项） */
+    public static X509Certificate issue(X500Name subject, PublicKey subjectPub,
+                                        X509Certificate caCert, PrivateKey caKey,
+                                        String certType, int validityDays, String san,
+                                        String crlUrl, String ocspUrl) {
         boolean isSubCa = "SUB_CA".equalsIgnoreCase(certType);
         int legacyBits = isSubCa
                 ? KeyUsage.keyCertSign | KeyUsage.cRLSign

@@ -6,6 +6,7 @@ import com.csssl.entity.CertTemplate;
 import com.csssl.entity.SysUser;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.mapper.SysUserMapper;
+import com.csssl.service.CertService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -15,8 +16,8 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 
 /**
- * 启动初始化：确保默认管理员账号存在（首次启动创建 admin / 123456，密码 BCrypt 存储），
- * 并初始化内置证书模板（GM/T 0034 §5.3.4：机构通信/医生签名/二级CA 三类，锁定扩展项）。
+ * 启动初始化：确保默认管理员账号存在（首次启动创建 admin / 123456，密码 BCrypt 存储）、
+ * 初始化内置证书模板（GM/T 0034 §5.3.4）、执行过期证书归档扫描（§12 生命周期）。
  */
 @Slf4j
 @Component
@@ -25,6 +26,7 @@ public class DataInitializer implements ApplicationRunner {
 
     private final SysUserMapper userMapper;
     private final CertTemplateMapper templateMapper;
+    private final CertService certService;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -42,6 +44,14 @@ public class DataInitializer implements ApplicationRunner {
             log.warn("[初始化] 已创建默认管理员账号 admin / 123456，请登录后尽快修改口令");
         }
         initTemplates();
+        try {
+            int n = certService.expireScan();
+            if (n > 0) {
+                log.info("[初始化] 过期证书归档：{} 张已标记 EXPIRED", n);
+            }
+        } catch (Exception e) {
+            log.warn("[初始化] 过期归档扫描异常（不影响启动）: {}", e.getMessage());
+        }
     }
 
     /** 内置证书模板（编码唯一，重复启动幂等；KeyUsage/EKU/策略OID 锁定，签发按模板） */

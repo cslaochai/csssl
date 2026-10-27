@@ -32,8 +32,11 @@ public class AuditLog {
     /** 操作来源IP */
     private String ip;
 
-    /** 审计签名（SM3withSM2 hex，canonical=username|action|target|detail|ip|createdAt；GM/T 0034 §10.1/§10.5 防篡改） */
+    /** 审计签名（SM3withSM2 hex，canonical=username|action|target|detail|ip|createdAt[|prevSign]；GM/T 0034 §10.1/§10.5 防篡改） */
     private String sign;
+
+    /** 哈希链：上一条审计记录的签名值（链式防篡改增强，行业实践） */
+    private String prevSign;
 
     /** 创建时间 */
     private LocalDateTime createdAt;
