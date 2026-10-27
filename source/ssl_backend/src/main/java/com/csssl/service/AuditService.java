@@ -23,7 +23,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuditService {
 
-    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    /** 微秒精度：与 created_at DATETIME(6) 列严格对齐，避免毫秒四舍五入导致验签失败 */
+    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
     private final AuditLogMapper auditLogMapper;
     private final AuditSigner auditSigner;
@@ -36,7 +37,10 @@ public class AuditService {
         logRow.setTarget(target);
         logRow.setDetail(detail);
         logRow.setIp(ip);
-        logRow.setCreatedAt(LocalDateTime.now());
+        // 截断到微秒：LocalDateTime.now() 含纳秒，MySQL DATETIME(6) 存储时对第 7 位四舍五入，
+        // 若直接入库会与 canonical 中的 .SSSSSS 截断值差 1 微秒导致验签偶发失败
+        LocalDateTime now = LocalDateTime.now();
+        logRow.setCreatedAt(now.withNano((now.getNano() / 1000) * 1000));
         // 哈希链：取最新一条记录的签名作为本条的链引用（prevSign 为 null 时退化为独立签名，兼容首条与 P0 老记录）
         try {
             AuditLog prev = auditLogMapper.selectOne(new LambdaQueryWrapper<AuditLog>()
@@ -49,6 +53,8 @@ public class AuditService {
         }
         try {
             logRow.setSign(auditSigner.sign(canonical(logRow)));
+            log.debug("[审计] 签名完成 user={} action={} canonical={} sign={}",
+                    logRow.getUsername(), logRow.getAction(), canonical(logRow), logRow.getSign());
         } catch (Exception e) {
             // 签名失败不阻断审计留痕（记录仍入库），仅告警
             log.warn("[审计] 签名失败，记录不带签名入库: {}", e.getMessage());

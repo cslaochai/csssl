@@ -61,7 +61,8 @@ public class AdminUserController {
         String role = body.get("roleCode") == null || body.get("roleCode").isBlank()
                 ? RoleCode.OPERATOR : body.get("roleCode").trim().toUpperCase();
         if (!isSupportedRole(role)) {
-            throw new IllegalArgumentException("不支持的角色：" + role + "（仅支持 ADMIN / OPERATOR / APPROVER / AUDITOR）");
+            throw new IllegalArgumentException("不支持的角色：" + role
+                    + "（仅支持 ADMIN / OPERATOR / APPROVER / AUDITOR / SECURITY_ADMIN / KEY_ADMIN）");
         }
         String password = body.get("password") == null || body.get("password").isBlank()
                 ? "123456" : body.get("password");
@@ -110,6 +111,7 @@ public class AdminUserController {
 
     private boolean isSupportedRole(String role) {
         return RoleCode.ADMIN.equals(role) || RoleCode.OPERATOR.equals(role)
-                || RoleCode.APPROVER.equals(role) || RoleCode.AUDITOR.equals(role);
+                || RoleCode.APPROVER.equals(role) || RoleCode.AUDITOR.equals(role)
+                || RoleCode.SECURITY_ADMIN.equals(role) || RoleCode.KEY_ADMIN.equals(role);
     }
 }

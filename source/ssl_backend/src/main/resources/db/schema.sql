@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS ssl_audit_log (
     target     VARCHAR(128) NULL COMMENT '操作对象（证书ID/序列号等）',
     detail     VARCHAR(500) NULL COMMENT '操作详情',
     ip         VARCHAR(64)  NULL COMMENT '操作来源IP',
-    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '操作时间（微秒精度，审计签名 canonical 含 .SSSSSS，须与列精度严格一致防舍入偏差）',
     PRIMARY KEY (id),
     KEY idx_action_time (action, created_at),
     KEY idx_username_time (username, created_at)
@@ -122,3 +122,12 @@ SET @c3 = (SELECT COUNT(*) FROM information_schema.columns
            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'prev_sign');
 SET @s3 = IF(@c3 = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN prev_sign VARCHAR(256) NULL COMMENT ''哈希链：上一条审计记录的签名值'' AFTER sign', 'SELECT 1');
 PREPARE s3 FROM @s3; EXECUTE s3; DEALLOCATE PREPARE s3;
+
+-- 幂等升级：审计时间列微秒精度（canonical 含 .SSSSSS 与 DATETIME(6) 严格对齐；
+-- 早期 DATETIME 秒精度截断毫秒、DATETIME(3) 对微秒四舍五入都会导致历史记录验签失败）
+SET @c4 = (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'created_at'
+             AND datetime_precision < 6);
+SET @s4 = IF(@c4 > 0, 'ALTER TABLE ssl_audit_log MODIFY created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)',
+             'SELECT 1');
+PREPARE s4 FROM @s4; EXECUTE s4; DEALLOCATE PREPARE s4;
