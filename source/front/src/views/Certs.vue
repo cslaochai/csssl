@@ -40,6 +40,7 @@
         <el-table-column label="算法" width="90">
           <template #default="{ row }">{{ row.algorithm }}</template>
         </el-table-column>
+        <el-table-column prop="issuerCn" label="颁发CA" min-width="170" show-overflow-tooltip />
         <el-table-column prop="serialHex" label="序列号" min-width="150" show-overflow-tooltip />
         <el-table-column label="有效期" width="300">
           <template #default="{ row }">{{ row.validFrom }} ~ {{ row.validTo }}</template>

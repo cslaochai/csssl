@@ -80,10 +80,10 @@ public class CertService {
         int days = resolveValidityDays(req.getValidityDays());
 
         KeyPair subjectKey = CertUtil.generateKeyPair(algorithm);
-        X509Certificate caCert = caService.loadRootCert();
-        PrivateKey caKey = caService.loadRootKey();
+        X509Certificate caCert = caService.signingCert();
+        PrivateKey caKey = caService.signingKey();
         X509Certificate cert = CertUtil.issue(subjectKey, caCert, caKey, cn, type, days,
-                req.getSan());
+                req.getSan(), crlUrl(), ocspUrl());
 
         String serial = cert.getSerialNumber().toString(16);
         persistFiles(serial, PemUtil.keyToPem(subjectKey.getPrivate()), PemUtil.certToPem(cert));
@@ -109,11 +109,12 @@ public class CertService {
         }
         int days = resolveValidityDays(validityDays);
 
-        X509Certificate caCert = caService.loadRootCert();
-        PrivateKey caKey = caService.loadRootKey();
+        X509Certificate caCert = caService.signingCert();
+        PrivateKey caKey = caService.signingKey();
         String effectiveSan = CertUtil.sanFromCsr(csrPem, san);
-        // 证书签名算法跟随根CA密钥类型（RSA根 SHA256withRSA / 国密根 SM3withSM2）
-        X509Certificate cert = CertUtil.issueFromCsr(csrPem, caCert, caKey, type, days, effectiveSan);
+        // 证书签名算法跟随签发CA（SUB_CA）密钥类型（RSA SHA256withRSA / 国密 SM3withSM2）
+        X509Certificate cert = CertUtil.issueFromCsr(csrPem, caCert, caKey, type, days,
+                effectiveSan, crlUrl(), ocspUrl());
 
         String serial = cert.getSerialNumber().toString(16);
         // CSR 申请方自持私钥，不落盘
@@ -150,13 +151,22 @@ public class CertService {
         return CertVo.from(row);
     }
 
-    /** 证书 PEM（公钥证书，可任意下载） */
+    /**
+     * 证书 PEM（公钥证书）：返回证书链（叶子 + 签发SUB_CA），供 TLS 服务端部署/业务系统导入。
+     */
     public String certPem(Long id) {
         CaCert row = findById(id);
-        return row.getCertPem();
+        StringBuilder chain = new StringBuilder(row.getCertPem());
+        if (!CaService.TYPE_ROOT.equals(row.getCertType())) {
+            CaCert subCa = matchingSubCa(row);
+            if (subCa != null) {
+                chain.append(subCa.getCertPem());
+            }
+        }
+        return chain.toString();
     }
 
-    /** 私钥 PEM（受 allow-private-key-download 开关控制，只从落盘读取） */
+    /** 私钥 PEM（受 allow-private-key-download 开关控制，从加密保险库解密读取） */
     public String keyPem(Long id) {
         if (!props.isAllowPrivateKeyDownload()) {
             throw new IllegalArgumentException("私钥下载已关闭（csssl.allow-private-key-download=false）");
@@ -165,15 +175,26 @@ public class CertService {
         if (CaService.TYPE_ROOT.equals(row.getCertType())) {
             throw new IllegalArgumentException("根CA私钥为系统核心密钥，不提供在线下载，请直接操作服务器文件");
         }
-        Path keyFile = caService.issuedDir(row.getSerialHex()).resolve("key.pem");
-        if (!Files.exists(keyFile)) {
+        if (!caService.issuedKeyExists(row.getSerialHex())) {
             throw new IllegalArgumentException("该证书无落盘私钥（CSR签发场景私钥由申请方自持）");
         }
-        try {
-            return Files.readString(keyFile, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new IllegalStateException("私钥读取失败: " + e.getMessage(), e);
+        String keyPem = caService.loadIssuedKey(row.getSerialHex());
+        if (keyPem == null) {
+            throw new IllegalArgumentException("该证书私钥不可用（已封存或缺失）");
         }
+        return keyPem;
+    }
+
+    /** 匹配叶子证书的签发 SUB_CA（按 issuer 精确匹配，找不到时退回当前 SUB_CA） */
+    private CaCert matchingSubCa(CaCert leaf) {
+        if (leaf.getIssuerCn() == null || leaf.getIssuerCn().isBlank()) {
+            return caService.currentSubCa();
+        }
+        List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
+                .eq(CaCert::getCertType, "SUB_CA")
+                .eq(CaCert::getSubjectCn, leaf.getIssuerCn())
+                .orderByDesc(CaCert::getCreatedAt));
+        return subs.isEmpty() ? caService.currentSubCa() : subs.get(0);
     }
 
     /** 概览统计：证书总量/状态分布/类型分布/30天内到期，供仪表盘渲染 */
@@ -237,11 +258,22 @@ public class CertService {
             Files.createDirectories(dir);
             Files.writeString(dir.resolve("cert.pem"), certPem, StandardCharsets.UTF_8);
             if (keyPem != null) {
-                Files.writeString(dir.resolve("key.pem"), keyPem, StandardCharsets.UTF_8);
+                // 私钥经密钥保险库 SM4 加密落盘，不写明文
+                caService.storeIssuedKey(serial, keyPem);
             }
         } catch (IOException e) {
             throw new IllegalStateException("证书落盘失败: " + e.getMessage(), e);
         }
+    }
+
+    /** CRL 分发点 URL（写入证书 CDP 扩展） */
+    private String crlUrl() {
+        return props.getPublicBaseUrl() + "/ca/public/crl";
+    }
+
+    /** OCSP 访问点 URL（写入证书 AIA 扩展） */
+    private String ocspUrl() {
+        return props.getPublicBaseUrl() + "/ca/public/ocsp";
     }
 
     private CaCert buildRow(String serial, String cn, String type, String algorithm,

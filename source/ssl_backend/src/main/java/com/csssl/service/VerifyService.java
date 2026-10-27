@@ -5,6 +5,7 @@ import com.csssl.dto.VerifyRequest;
 import com.csssl.dto.VerifyResult;
 import com.csssl.entity.CaCert;
 import com.csssl.mapper.CaCertMapper;
+import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +20,8 @@ import java.util.Locale;
 
 /**
  * 证书链在线校验：业务系统（cslk / csmig）调用 /ca/public/verify 校验对方证书。
- * 校验项：签发者=本站根CA → 签名有效 → 未过期 → 未吊销 → 用途匹配（TLS/SIGN）。
+ * 支持多级链：叶子 → 服务签发二级CA（SUB_CA）→ 根CA。
+ * 校验项：签发者=本站CA → 逐级验签 → 未过期 → 未吊销 → 用途匹配（TLS/SIGN）。
  */
 @Slf4j
 @Service
@@ -38,42 +40,62 @@ public class VerifyService {
 
         VerifyResult r = new VerifyResult();
         r.setSerialHex(cert.getSerialNumber().toString(16));
-        r.setSubjectCn(extractCn(cert));
+        r.setSubjectCn(CertUtil.subjectCn(cert));
         r.setIssuerCn(cert.getIssuerX500Principal().getName());
         r.setAlgorithm(cert.getSigAlgName());
         r.setValidFrom(cert.getNotBefore().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime());
         r.setValidTo(cert.getNotAfter().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime());
 
-        // 1. 签发者必须是本站根CA（按 RDN 集合比较，规避 X500Principal RFC2253 输出反转导致的判等失真）
         X500Name issuer = X500Name.getInstance(cert.getIssuerX500Principal().getEncoded());
         X500Name rootSubject = X500Name.getInstance(root.getSubjectX500Principal().getEncoded());
-        if (!sameDn(issuer, rootSubject)) {
-            fail(r, "证书签发者不是本站根CA（" + rootSubject + "）");
-            return r;
+
+        if (sameDn(issuer, rootSubject)) {
+            // 链①：叶子直接由根签发（根/早期证书场景）
+            if (!verifySignedBy(cert, root, r, "根CA")) {
+                return r;
+            }
+        } else {
+            // 链②：叶子 → SUB_CA → 根（当前主流签发路径）
+            CaCert subRow = findSubCaByIssuer(issuer);
+            if (subRow == null) {
+                fail(r, "证书签发者不是本站CA（" + cert.getIssuerX500Principal().getName() + "）");
+                return r;
+            }
+            X509Certificate sub = PemUtil.parseCert(subRow.getCertPem());
+            if (!"VALID".equals(subRow.getStatus())) {
+                fail(r, "签发CA（" + subRow.getSubjectCn() + "）当前状态：" + subRow.getStatus() + "，证书链不可信");
+                return r;
+            }
+            // SUB_CA 必须由根签发且签名有效
+            X500Name subIssuer = X500Name.getInstance(sub.getIssuerX500Principal().getEncoded());
+            if (!sameDn(subIssuer, rootSubject)) {
+                fail(r, "签发CA（" + subRow.getSubjectCn() + "）不是本站根CA签发");
+                return r;
+            }
+            if (!verifySignedBy(sub, root, r, "根CA")) {
+                return r;
+            }
+            if (!verifySignedBy(cert, sub, r, "签发CA(" + subRow.getSubjectCn() + ")")) {
+                return r;
+            }
+            r.setMessage("签发CA：" + subRow.getSubjectCn());
         }
-        // 2. 签名验证（SM3withSM2 / SHA256withRSA 由 BC provider 处理）
-        try {
-            cert.verify(root.getPublicKey());
-        } catch (Exception e) {
-            log.warn("[证书校验] 签名验证失败: {}", e.getMessage());
-            fail(r, "证书签名验证失败");
-            return r;
-        }
-        // 3. 有效期
+
+        // 有效期
         try {
             cert.checkValidity();
         } catch (Exception e) {
             fail(r, "证书已过期或未生效");
             return r;
         }
-        // 4. 吊销状态
+        // 吊销状态
         CaCert row = certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getSerialHex, cert.getSerialNumber().toString(16)));
         if (row != null && "REVOKED".equals(row.getStatus())) {
             fail(r, "证书已被吊销（原因：" + row.getRevokeReason() + "）");
             return r;
         }
-        // 5. 用途匹配
+        // 用途匹配
         String purpose = req.getPurpose() == null ? "" : req.getPurpose().trim().toUpperCase(Locale.ROOT);
         if ("TLS".equals(purpose) && !hasEku(cert, KeyPurposeId.id_kp_serverAuth)) {
             fail(r, "证书不具备服务端用途（serverAuth）");
@@ -85,8 +107,35 @@ public class VerifyService {
         }
 
         r.setValid(true);
-        r.setMessage("校验通过：证书可信、未过期、未吊销");
+        String chainInfo = r.getMessage() == null ? "" : "，" + r.getMessage();
+        r.setMessage("校验通过：证书可信、未过期、未吊销" + chainInfo);
         return r;
+    }
+
+    /** 验签：证书由签发者公钥签名（SM3withSM2 / SHA256withRSA 由 BC provider 处理） */
+    private boolean verifySignedBy(X509Certificate cert, X509Certificate issuer, VerifyResult r, String issuerLabel) {
+        try {
+            cert.verify(issuer.getPublicKey(), "BC");
+            return true;
+        } catch (Exception e) {
+            log.warn("[证书校验] {}验签失败: {}", issuerLabel, e.getMessage());
+            fail(r, "证书签名验证失败（签发者" + issuerLabel + "）");
+            return false;
+        }
+    }
+
+    /** 按签发者 DN 查找本站签发的 SUB_CA（按 RDN 集合匹配） */
+    private CaCert findSubCaByIssuer(X500Name issuer) {
+        List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
+                .eq(CaCert::getCertType, CaService.TYPE_SUB_CA)
+                .orderByDesc(CaCert::getCreatedAt));
+        for (CaCert sub : subs) {
+            X509Certificate subCert = PemUtil.parseCert(sub.getCertPem());
+            if (sameDn(X500Name.getInstance(subCert.getSubjectX500Principal().getEncoded()), issuer)) {
+                return sub;
+            }
+        }
+        return null;
     }
 
     /** EKU 扩展缺失时不拦截（根CA/二级CA证书），存在时必须包含目标用途 */
@@ -116,10 +165,6 @@ public class VerifyService {
             }
         }
         return set;
-    }
-
-    private static String extractCn(X509Certificate cert) {
-        return com.csssl.util.CertUtil.subjectCn(cert);
     }
 
     private static void fail(VerifyResult r, String message) {

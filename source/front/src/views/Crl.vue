@@ -21,9 +21,15 @@
       <el-empty v-if="!loading && rows.length === 0" description="暂无吊销记录" />
     </div>
 
-    <!-- CRL 内容预览 -->
+    <!-- CRL 元信息 + 内容预览 -->
     <div class="page-card" v-if="crlPem">
-      <div class="section-title">CRL 内容（PEM，由根CA签名）</div>
+      <div class="section-title">CRL 内容（PEM，由服务签发二级CA签名）</div>
+      <el-descriptions :column="3" border size="small" style="margin: 12px 0">
+        <el-descriptions-item label="签发者（CA）">{{ meta.issuerCn }}</el-descriptions-item>
+        <el-descriptions-item label="本次更新（thisUpdate）">{{ meta.thisUpdate }}</el-descriptions-item>
+        <el-descriptions-item label="下次更新（nextUpdate）">{{ meta.nextUpdate }}</el-descriptions-item>
+        <el-descriptions-item label="吊销条目数">{{ meta.entryCount }}</el-descriptions-item>
+      </el-descriptions>
       <el-input
         :model-value="crlPem"
         type="textarea"
@@ -45,6 +51,7 @@ const loading = ref(false)
 const crlLoading = ref(false)
 const rows = ref([])
 const crlPem = ref('')
+const meta = ref({})
 
 function reasonText(r) {
   const map = {
@@ -67,6 +74,12 @@ async function load() {
     const res = await getCrlView()
     rows.value = res.data.revoked || []
     crlPem.value = res.data.crlPem || ''
+    meta.value = {
+      issuerCn: res.data.issuerCn,
+      thisUpdate: res.data.thisUpdate,
+      nextUpdate: res.data.nextUpdate,
+      entryCount: res.data.entryCount
+    }
   } finally {
     loading.value = false
   }

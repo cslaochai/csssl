@@ -39,20 +39,32 @@ mybatis-plus:
 
 # ===== CA根认证中心业务参数 =====
 csssl:
-  # 证书与私钥落盘目录（根CA密钥、签发的私钥只落盘，不进数据库）
+  # 证书与私钥落盘目录（私钥加密后落盘，不进数据库）
   store-dir: ${SSL_STORE_DIR:./data/certs}
+  # 对外公开基础地址：生成证书 CDP/AIA 扩展与 OCSP URL（业务系统可见地址，需可外访）
+  public-base-url: ${SSL_PUBLIC_BASE_URL:http://localhost:8092/ssl}
   # 根CA
   root-ca:
-    # 根CA标识（证书CN用：CSSSL Root CA v1）
+    # 根CA标识（证书CN用：CSSSL Root CA）
     cn: ${SSL_ROOT_CN:CSSSL Root CA}
     # 算法：RSA2048 / SM2（国密）
     algorithm: ${SSL_ROOT_ALGORITHM:RSA2048}
     # 根证书有效期（天）
     validity-days: ${SSL_ROOT_VALIDITY_DAYS:3650}
+  # 服务签发二级CA（SUB_CA）：日常签发与CRL全部走它，根CA私钥可封存离线
+  sub-ca:
+    cn: ${SSL_SUBCA_CN:CSSSL SubCA - Server Signing}
+    # 二级CA有效期（天）
+    validity-days: ${SSL_SUBCA_VALIDITY_DAYS:730}
+    # 到期前多少天自动用根轮换新SUB_CA
+    renew-before-days: ${SSL_SUBCA_RENEW_DAYS:30}
   # 签发默认值
   issue:
     # 默认证书有效期（天）
     default-validity-days: ${SSL_ISSUE_VALIDITY_DAYS:365}
+  # 私钥加密（SM4）：主密钥32位十六进制，生产必须用环境变量注入；留空则首启生成随机密钥落盘 store-dir/master.key
+  key-vault:
+    master-key: ${SSL_MASTER_KEY:}
   # 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭
   allow-private-key-download: ${SSL_ALLOW_KEY_DOWNLOAD:true}
   # ===== 登录鉴权（对齐 csmig：SM2 口令加密 + BCrypt + JWT） =====

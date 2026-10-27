@@ -25,6 +25,15 @@ export function initCa() {
 export function downloadRootCert() {
   return request.get('/admin/ca/root/download')
 }
+export function sealRootKey() {
+  return request.post('/admin/ca/seal')
+}
+export function unsealRootKey() {
+  return request.post('/admin/ca/unseal')
+}
+export function downloadSubCaCert() {
+  return request.get('/admin/ca/subca/download')
+}
 
 // ===== 证书管理 =====
 export function pageCerts(params) {

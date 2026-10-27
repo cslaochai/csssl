@@ -2,8 +2,13 @@ package com.csssl.util;
 
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.style.BCStyle;
+import org.bouncycastle.asn1.x509.AccessDescription;
+import org.bouncycastle.asn1.x509.AuthorityInformationAccess;
 import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.CRLDistPoint;
 import org.bouncycastle.asn1.x509.CRLReason;
+import org.bouncycastle.asn1.x509.DistributionPoint;
+import org.bouncycastle.asn1.x509.DistributionPointName;
 import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.GeneralName;
@@ -106,16 +111,18 @@ public final class CertUtil {
         }
     }
 
-    /** 用根CA签发服务端/客户端/二级CA证书（内部生成密钥对时调用） */
+    /** 用签发CA签发服务端/客户端/二级CA证书（内部生成密钥对时调用） */
     public static X509Certificate issue(KeyPair subjectKey, X509Certificate caCert, PrivateKey caKey,
-                                        String cn, String certType, int validityDays, String san) {
+                                        String cn, String certType, int validityDays, String san,
+                                        String crlUrl, String ocspUrl) {
         X500Name subject = new X500Name("CN=" + cn + ",O=CSSSL");
-        return issue(subject, subjectKey.getPublic(), caCert, caKey, certType, validityDays, san);
+        return issue(subject, subjectKey.getPublic(), caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl);
     }
 
-    /** 用根CA签发证书（CSR 场景：主体与公钥取自 CSR） */
+    /** 用签发CA签发证书（CSR 场景：主体与公钥取自 CSR） */
     public static X509Certificate issueFromCsr(String csrPem, X509Certificate caCert, PrivateKey caKey,
-                                               String certType, int validityDays, String san) {
+                                               String certType, int validityDays, String san,
+                                               String crlUrl, String ocspUrl) {
         try (PEMParser parser = new PEMParser(new StringReader(csrPem))) {
             Object obj = parser.readObject();
             if (!(obj instanceof PKCS10CertificationRequest csr)) {
@@ -124,7 +131,7 @@ public final class CertUtil {
             PublicKey pub = new org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter()
                     .setProvider("BC").getPublicKey(csr.getSubjectPublicKeyInfo());
             X500Name subject = csr.getSubject();
-            return issue(subject, pub, caCert, caKey, certType, validityDays, san);
+            return issue(subject, pub, caCert, caKey, certType, validityDays, san, crlUrl, ocspUrl);
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
@@ -132,10 +139,11 @@ public final class CertUtil {
         }
     }
 
-    /** 签发通用入口：主体 X500Name + 公钥 */
+    /** 签发通用入口：主体 X500Name + 公钥 + 吊销分发点(CDP)/OCSP访问点(AIA) */
     private static X509Certificate issue(X500Name subject, PublicKey subjectPub,
                                           X509Certificate caCert, PrivateKey caKey,
-                                          String certType, int validityDays, String san) {
+                                          String certType, int validityDays, String san,
+                                          String crlUrl, String ocspUrl) {
         try {
             BigInteger serial = randomSerial();
             Date notBefore = new Date();
@@ -168,6 +176,20 @@ public final class CertUtil {
             if (!names.isEmpty()) {
                 builder.addExtension(Extension.subjectAlternativeName, false,
                         new GeneralNames(names.toArray(new GeneralName[0])));
+            }
+
+            // 吊销可发现性：CRL 分发点（CDP）与 OCSP 访问点（AIA），供依赖方自动发现吊销状态
+            if (crlUrl != null && !crlUrl.isBlank()) {
+                builder.addExtension(Extension.cRLDistributionPoints, false,
+                        new CRLDistPoint(new DistributionPoint[]{
+                                new DistributionPoint(new DistributionPointName(new GeneralNames(
+                                        new GeneralName(GeneralName.uniformResourceIdentifier, crlUrl))), null, null)}));
+            }
+            if (ocspUrl != null && !ocspUrl.isBlank()) {
+                builder.addExtension(Extension.authorityInfoAccess, false,
+                        new AuthorityInformationAccess(new AccessDescription(
+                                AccessDescription.id_ad_ocsp,
+                                new GeneralName(GeneralName.uniformResourceIdentifier, ocspUrl))));
             }
 
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithmForKey(caKey))

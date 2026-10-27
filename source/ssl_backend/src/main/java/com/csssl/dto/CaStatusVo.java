@@ -5,7 +5,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 根CA状态：概览/根CA管理页渲染用。
+ * 根CA状态：概览/根CA管理页渲染用（含 SUB_CA 与根密钥封存状态）。
  */
 @Data
 public class CaStatusVo {
@@ -31,6 +31,31 @@ public class CaStatusVo {
     /** 状态 */
     private String status;
 
+    /** 根私钥状态：ONLINE（在线）/ SEALED（已封存离线）/ MISSING（缺失） */
+    private String rootKeyState;
+
+    /** 服务签发二级CA（SUB_CA）信息 */
+    private SubCaStatus subCa;
+
     /** 未初始化原因（密钥丢失等） */
     private String message;
+
+    /** SUB_CA 状态 */
+    @Data
+    public static class SubCaStatus {
+        /** SUB_CA证书CN */
+        private String cn;
+        /** 序列号 */
+        private String serialHex;
+        /** 算法 */
+        private String algorithm;
+        /** 生效时间 */
+        private LocalDateTime validFrom;
+        /** 过期时间 */
+        private LocalDateTime validTo;
+        /** 状态 */
+        private String status;
+        /** 到期前多少天自动轮换 */
+        private Integer renewBeforeDays;
+    }
 }

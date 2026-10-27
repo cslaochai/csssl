@@ -26,13 +26,18 @@ public class CrlController {
     private final CrlService crlService;
     private final AuditService auditService;
 
-    /** 吊销记录 + 当前 CRL PEM（管理页） */
+    /** 吊销记录 + 当前 CRL PEM + thisUpdate/nextUpdate（管理页） */
     @GetMapping
     public Result<Map<String, Object>> view() {
         List<CaCert> revoked = crlService.revokedList();
+        CrlService.CrlInfo info = crlService.buildCrl();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("revoked", revoked.stream().map(CertVo::from).toList());
-        data.put("crlPem", revoked.isEmpty() ? "" : crlService.buildCrlPem());
+        data.put("crlPem", revoked.isEmpty() ? "" : info.pem());
+        data.put("thisUpdate", revoked.isEmpty() ? null : info.thisUpdate());
+        data.put("nextUpdate", revoked.isEmpty() ? null : info.nextUpdate());
+        data.put("entryCount", info.entries());
+        data.put("issuerCn", info.issuerCn());
         return Result.success("查询成功", data);
     }
 

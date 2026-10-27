@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * csssl 业务配置（证书落盘目录、根CA参数、签发默认值、登录鉴权密钥）。
+ * csssl 业务配置（证书落盘目录、根CA/二级CA参数、密钥加密、签发默认值、登录鉴权密钥）。
  * 对应 application.yml 的 csssl.* 配置段，生产期通过环境变量覆盖。
  */
 @Data
@@ -13,12 +13,19 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "csssl")
 public class CssslProperties {
 
-    /** 证书与私钥落盘目录（根CA密钥、签发私钥只落盘，不进数据库） */
+    /** 证书与私钥落盘目录（私钥加密后落盘，不进数据库） */
     private String storeDir = "./data/certs";
 
     private RootCa rootCa = new RootCa();
 
     private Issue issue = new Issue();
+
+    private SubCa subCa = new SubCa();
+
+    private KeyVault keyVault = new KeyVault();
+
+    /** 对外公开基础地址（用于证书 CDP/AIA 扩展、OCSP URL 生成），如 http://his-ca.example.com/ssl */
+    private String publicBaseUrl = "http://localhost:8092/ssl";
 
     /** 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭 */
     private boolean allowPrivateKeyDownload = true;
@@ -39,6 +46,26 @@ public class CssslProperties {
     public static class Issue {
         /** 签发默认有效期（天） */
         private int defaultValidityDays = 365;
+    }
+
+    @Data
+    public static class SubCa {
+        /** 服务签发二级CA的CN */
+        private String cn = "CSSSL SubCA - Server Signing";
+        /** 二级CA有效期（天） */
+        private int validityDays = 730;
+        /** 二级CA到期前多少天自动轮换（用根签新SUB_CA） */
+        private int renewBeforeDays = 30;
+    }
+
+    @Data
+    public static class KeyVault {
+        /**
+         * 私钥加密主密钥（SM4，32位十六进制=16字节）。
+         * 生产必须通过环境变量 SSL_MASTER_KEY 注入；未配置时首次启动生成随机密钥落盘
+         * store-dir/master.key（仅本机可读，多实例需共享或显式配置）。
+         */
+        private String masterKey = "";
     }
 
     @Data
