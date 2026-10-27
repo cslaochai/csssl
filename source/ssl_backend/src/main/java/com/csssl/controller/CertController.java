@@ -11,6 +11,9 @@ import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -142,6 +145,21 @@ public class CertController {
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
                 "下载私钥：" + certService.detail(id).getSubjectCn(), clientIp(request));
         return certService.keyPem(id);
+    }
+
+    /** 导出 PKCS#12（软件证书场景，PBE 口令加密；私钥由 CA 侧持有的终端证书可导） */
+    @GetMapping("/certs/{id}/export/p12")
+    public ResponseEntity<byte[]> exportP12(@PathVariable Long id,
+                                            @RequestParam String password,
+                                            HttpServletRequest request) {
+        byte[] p12 = certService.exportP12(id, password);
+        String username = (String) request.getAttribute("ssl.username");
+        auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
+                "导出PKCS#12（口令加密）：" + certService.detail(id).getSubjectCn(), clientIp(request));
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/x-pkcs12"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + id + ".p12\"")
+                .body(p12);
     }
 
     /** 概览统计（仪表盘） */

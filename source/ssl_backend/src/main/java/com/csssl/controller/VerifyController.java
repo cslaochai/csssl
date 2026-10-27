@@ -59,6 +59,13 @@ public class VerifyController {
         return crlService.buildCrlPem();
     }
 
+    /** 增量 CRL（dCRL）下载：自最近全量发布以来新增的吊销/挂起条目（RFC 5280 §5.2.4），
+     *  依赖方用 DeltaCRLIndicator 与已缓存的全量 CRL 合并增量同步 */
+    @GetMapping("/crl/delta")
+    public String crlDelta() {
+        return crlService.buildDeltaCrl().pem();
+    }
+
     /** OCSP：POST 请求（Content-Type: application/ocsp-request，DER） */
     @PostMapping(value = "/ocsp", consumes = "application/ocsp-request",
             produces = "application/ocsp-response")

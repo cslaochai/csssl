@@ -52,10 +52,16 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" label="用途说明" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="420" fixed="right">
+        <el-table-column label="操作" width="490" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
             <el-button link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
+            <el-button
+              v-if="['SERVER', 'CLIENT'].includes(row.certType)"
+              link
+              size="small"
+              @click="openExportP12(row)"
+            >导出P12</el-button>
             <el-button
               v-if="row.status === 'VALID'"
               link
@@ -222,6 +228,25 @@
       </template>
     </el-dialog>
 
+    <!-- 导出 PKCS#12 -->
+    <el-dialog v-model="p12Visible" title="导出 PKCS#12（软件证书，PBE 口令加密）" width="460px" :close-on-click-modal="false">
+      <p style="margin-bottom: 12px">
+        导出 <b>{{ p12Target?.subjectCn }}</b> 的证书链（叶子+二级CA+根）与私钥为 .p12 文件，
+        安装到浏览器/业务系统/中间件时输入此口令。私钥由 CA 侧持有方可导出。
+      </p>
+      <el-form label-width="90px">
+        <el-form-item label="口令" required>
+          <el-input v-model="p12Password" type="password" show-password placeholder="至少4位，请妥善保管" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="p12Visible = false">取消</el-button>
+          <el-button type="primary" :loading="submitting" @click="onExportP12">导出</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- 吊销 -->
     <el-dialog v-model="revokeVisible" title="吊销证书" width="460px" :close-on-click-modal="false">
       <p style="margin-bottom: 12px">
@@ -263,6 +288,7 @@ import {
   unsuspendCert,
   renewCert,
   rekeyCert,
+  exportCertP12,
   downloadCertPem,
   downloadKeyPem
 } from '@/api/system'
@@ -285,6 +311,9 @@ const renewVisible = ref(false)
 const renewAction = ref('renew')
 const renewTarget = ref(null)
 const renewDays = ref(365)
+const p12Visible = ref(false)
+const p12Target = ref(null)
+const p12Password = ref('')
 const submitting = ref(false)
 
 const defaultDays = 365
@@ -451,6 +480,35 @@ async function onRenewConfirm() {
     }
     renewVisible.value = false
     load()
+  } finally {
+    submitting.value = false
+  }
+}
+
+function openExportP12(row) {
+  p12Target.value = row
+  p12Password.value = ''
+  p12Visible.value = true
+}
+
+async function onExportP12() {
+  if (!p12Password.value || p12Password.value.length < 4) {
+    ElMessage.warning('口令不能少于4位')
+    return
+  }
+  submitting.value = true
+  try {
+    const blob = await exportCertP12(p12Target.value.id, p12Password.value)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `cert-${p12Target.value.id}.p12`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('PKCS#12 已导出，口令请妥善保管')
+    p12Visible.value = false
   } finally {
     submitting.value = false
   }

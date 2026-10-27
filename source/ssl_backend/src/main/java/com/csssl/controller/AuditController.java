@@ -41,4 +41,10 @@ public class AuditController {
         }
         return Result.success("验签完成", auditService.verifyLog(id));
     }
+
+    /** 审计归档导出（≥5年留存材料）：CSV（UTF-8 BOM）+ 审计报告 SM2 签名，归档文件完整性可验签 */
+    @GetMapping("/export")
+    public Result<Map<String, Object>> export() {
+        return Result.success("导出完成", auditService.exportCsv());
+    }
 }

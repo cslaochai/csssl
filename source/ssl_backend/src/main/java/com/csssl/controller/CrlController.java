@@ -50,6 +50,20 @@ public class CrlController {
         return crlPem;
     }
 
+    /** 增量 CRL（dCRL）：自最近全量发布以来新增的吊销/挂起条目，供依赖方增量同步 */
+    @GetMapping("/delta")
+    public Result<Map<String, Object>> delta() {
+        CrlService.DeltaCrlInfo info = crlService.buildDeltaCrl();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("deltaPem", info.pem());
+        data.put("thisUpdate", info.thisUpdate());
+        data.put("nextUpdate", info.nextUpdate());
+        data.put("entryCount", info.entries());
+        data.put("crlNumber", info.crlNumber());
+        data.put("baseCrlNumber", info.baseCrlNumber());
+        return Result.success("查询成功", data);
+    }
+
     private String clientIp(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {

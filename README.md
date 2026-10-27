@@ -95,6 +95,7 @@ npm run build               # 构建产物 dist/
 | `GET /ssl/ca/public/subca` | 服务签发二级CA（SUB_CA）证书 PEM（中间CA链配置） |
 | `POST /ssl/ca/public/verify` | 证书链在线校验：`{certPem, purpose: TLS/SIGN}` → 叶子→SUB_CA→根 逐级验签/未过期/未吊销/用途匹配 |
 | `GET /ssl/ca/public/crl` | CRL 下载（吊销列表，SUB_CA 签名，含 thisUpdate/nextUpdate） |
+| `GET /ssl/ca/public/crl/delta` | 增量 CRL（dCRL）下载：自最近全量发布以来新增的吊销/挂起条目（RFC 5280 §5.2.4，带 DeltaCRLIndicator） |
 | `POST /ssl/ca/public/ocsp` | OCSP 查询（`application/ocsp-request` DER → `application/ocsp-response`，三态：good/revoked/unknown） |
 | `GET /ssl/ca/public/ocsp/{base64url}` | OCSP 查询 GET 形式（RFC 6960） |
 
@@ -113,22 +114,37 @@ npm run build               # 构建产物 dist/
 | `GET /ssl/admin/certs` | 证书列表（类型/状态/关键字筛选 + 分页） |
 | `POST /ssl/admin/certs` | 签发证书 `{subjectCn, certType, algorithm, validityDays, san, description}` |
 | `POST /ssl/admin/certs/csr` | CSR 签发 `{csrPem, certType, validityDays, san, description}` |
+| `POST /ssl/admin/certs/public-key` | 公钥签发（RA 场景，申请方自持私钥） |
 | `POST /ssl/admin/certs/{id}/revoke` | 吊销 `{reason}` |
+| `POST /ssl/admin/certs/{id}/suspend` | 挂起（GM/T 0034 §12.6：进入 CRL certificateHold / OCSP on-hold，可恢复） |
+| `POST /ssl/admin/certs/{id}/unsuspend` | 解除挂起（§12.7，恢复有效并移出 CRL） |
+| `POST /ssl/admin/certs/{id}/renew` | 证书更新（§12.2：原证吊销 SUPERSEDED + 同公钥重签，私钥仍申请方自持） |
+| `POST /ssl/admin/certs/{id}/rekey` | 密钥更新（§12.2：仅限 CA 持私钥的在线签发证书，换新密钥对重签） |
 | `GET /ssl/admin/certs/{id}/cert.pem` | 下载证书（含 SUB_CA 中间CA链） |
 | `GET /ssl/admin/certs/{id}/key.pem` | 下载私钥（受开关控制，CSR 签发无私钥） |
+| `GET /ssl/admin/certs/{id}/export/p12` | 导出 PKCS#12（口令加密，证书链+私钥，软件证书场景） |
 | `GET /ssl/admin/crl` | 吊销记录 + CRL PEM + thisUpdate/nextUpdate |
 | `GET /ssl/admin/crl/download` | 下载 CRL |
+| `GET /ssl/admin/crl/delta` | 增量 CRL 详情（PEM + 基础全量编号） |
 | `GET /ssl/admin/audit` | 审计日志（登录/签发/吊销/封存/导出留痕） |
+| `POST /ssl/admin/audit/verify` | 审计验签（防篡改 + 哈希链） |
+| `GET /ssl/admin/audit/export` | 审计归档导出 CSV（UTF-8 BOM）+ 报告 SM2 签名（留存 ≥5 年材料） |
+| `GET /ssl/admin/templates` | 证书模板管理（内置 SERVER_COMM/DOCTOR_SIGN/SUB_CA，签发锁定扩展项） |
+| `GET/POST /ssl/admin/applications` | RA 申请-审核-签发流程（提交→批准/驳回→签发，审核人≠录入人） |
+| `GET/POST /ssl/admin/users` | 用户与角色管理（ADMIN/OPERATOR/APPROVER/AUDITOR 分权，仅 ADMIN 建号） |
 | `GET /ssl/admin/overview` | 概览统计 |
 
 ## 关键设计
 
 - **根CA离线化**：对齐国内持证CA通行架构——根CA仅初始化与签发 SUB_CA，日常签发/CRL/OCSP 全部由 SUB_CA 承担；根私钥支持「封存」离线（`key.pem.enc` 移存为 `.sealed`），封存后根密钥不参与任何在线操作，到期前 `renewBeforeDays` 天自动轮换
 - **私钥加密落盘**：所有私钥经 `KeyVault` 以 SM4 加密后落盘（`*.key.pem.enc`），主密钥由 `SSL_MASTER_KEY` 注入（未配置时首启随机生成落盘 `master.key`）；旧明文密钥自动迁移加密；HSM/加密机（GM/T 0018）可在同类接口处替换
-- **吊销可发现性**：签发的证书带 CRL 分发点（CDP）与 OCSP 访问点（AIA）扩展；CRL 由 SUB_CA 签名并携带 thisUpdate/nextUpdate；提供标准 OCSP 三态 responder（good/revoked/unknown，RFC 6960，POST+GET 双通道）
-- **证书链下载**：`/admin/certs/{id}/cert.pem` 返回叶子 + SUB_CA 完整链，TLS 服务端部署免手工拼接
+- **吊销可发现性**：签发的证书带 CRL 分发点（CDP）与 OCSP 访问点（AIA）扩展；CRL 由 SUB_CA 签名并携带 thisUpdate/nextUpdate 与单调递增 CRLNumber；提供标准 OCSP 三态 responder（good/revoked/unknown，RFC 6960，POST+GET 双通道，nextUpdate 时效可配 `SSL_OCSP_NEXT_UPDATE_HOURS`）
+- **增量 CRL（dCRL）**：`/ca/public/crl/delta` 只发布自最近全量以来新增的吊销/挂起条目，带 DeltaCRLIndicator 指向基础全量编号；发布状态持久化 `store-dir/crl-state.json`（重启不丢），依赖方全量+增量合并即可增量同步（对标格尔/厂商分块增量做法）
+- **证书生命周期**：签发→挂起/解除挂起（CRL certificateHold / OCSP on-hold）→更新 renew / 重签 rekey →吊销→过期归档，全流程审计留痕（GM/T 0034 §12）
+- **证书链下载**：`/admin/certs/{id}/cert.pem` 返回叶子 + SUB_CA 完整链，TLS 服务端部署免手工拼接；软件证书场景支持 PKCS#12 打包导出（口令加密，叶子+SUB_CA+根完整链）
 - **国密支持**：签发算法可选 `SM2`（SM3withSM2 签名、sm2p256v1 曲线），与 openssl / 国密工具链互通；`Sm4Util` 提供 SM4 加解密供 csmig 生产期使用
-- **审计留痕**：登录/签发/CSR签发/吊销/封存解封/下载全部落 `ssl_audit_log`，等保审计用
+- **审计留痕**：登录/签发/吊销/挂起/导出/封存解封全部落 `ssl_audit_log`；每条 SM3withSM2 签名 + 上一条签名哈希链（改任何一条即断链），验签接口在线核验，归档导出 CSV 带报告签名（留存 ≥5 年）
+- **分权制衡**：ADMIN/OPERATOR/APPROVER/AUDITOR 四角色，签发与审核分离（审核人≠录入人，§10.1g），路由与菜单按角色显隐
 - **鉴权对齐**：登录链路（SM2 加密口令 → BCrypt 校验 → JWT）与 cslk HIS、csmig 完全一致，前端复用 `sm-crypto`
 
 ## 生产期配置建议
@@ -150,12 +166,17 @@ npm run build               # 构建产物 dist/
 - 《电子签名法》第17/18条：面向公众发证须工信部许可——csssl 仅限院内自用，**不可对外商用发证**
 - 《密码法》第27条 + 《商用密码管理条例》第38/39条：重要系统须使用商用密码并开展密评；若 csssl 服务的系统参与密评，建议根私钥接入加密机并保持根CA离线
 
-## TODO（P1/P2/P3 演进）
+## TODO（P2/P3 演进）
 
-- [ ] 双证书体系 + 密钥管理中心（KMC，签名证书自持 + 加密证书托管，GM/T 0034）
-- [ ] 时间戳服务（TSA，医疗签名"权威时间源+签名同时打戳"）
-- [ ] CRL 增量/分块发布
-- [ ] RA/CA 逻辑分离与双人审批、三权分立
-- [ ] SCEP/CMP 标准协议接入
-- [ ] PKCS#12（.p12）打包下载与证书到期自动预警
+- [x] 时间戳服务（TSA，医疗签名"权威时间源+签名同时打戳"）——已交付
+- [x] RA 申请-审核-签发双人审批、四角色三权分立——已交付（P0/P1）
+- [x] 证书更新/挂起/解除挂起/过期归档——已交付（P1）
+- [x] 审计签名 + SM3 哈希链 + 归档导出——已交付（P1）
+- [x] PKCS#12（.p12）打包下载——已交付（P2）
+- [x] CRL 增量（dCRL）发布——已交付（P2）
+- [ ] 双证书体系 + 密钥管理中心（KMC，加密证书托管，第三方持证才强制；院内豁免声明见 docs/）
+- [ ] 国密 UKey 发证（GM/T 0016 保护结构、私钥不出设备）——需硬件采购
+- [ ] 根密钥 Shamir(3,5) 门限分持 / 标准六类角色细化——等保立项时
+- [ ] 服务器密码机 HSM 对接（GM/T 0018）——生产/密评立项
+- [ ] 远程 RA 分节点 + SCEP/CMP 标准协议（GM/T 0089）
 - [ ] 管理后台口令修改页

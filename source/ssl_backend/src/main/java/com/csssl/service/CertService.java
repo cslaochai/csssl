@@ -15,14 +15,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
+import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -410,6 +413,51 @@ public class CertService {
                 .eq(CaCert::getSubjectCn, leaf.getIssuerCn())
                 .orderByDesc(CaCert::getCreatedAt));
         return subs.isEmpty() ? caService.currentSubCa() : subs.get(0);
+    }
+
+    /**
+     * PKCS#12 软件证书导出（§5.3.3 介质导出）：证书链（叶子+签发SUB_CA+根）与私钥打包，
+     * 口令加密保护（PBE）。仅限 CA 侧持私钥的终端证书（SERVER/CLIENT）；根/二级CA 为系统核心密钥不导出；
+     * CSR/公钥签发的证书私钥由申请方自持，不在此列。
+     */
+    public byte[] exportP12(Long id, String password) {
+        CaCert row = findById(id);
+        if (CaService.TYPE_ROOT.equals(row.getCertType()) || CaService.TYPE_SUB_CA.equals(row.getCertType())) {
+            throw new IllegalArgumentException("CA证书（根/二级CA）私钥为系统核心密钥，不提供PKCS#12导出");
+        }
+        if (password == null || password.length() < 4) {
+            throw new IllegalArgumentException("导出口令不能少于4位");
+        }
+        if (!caService.issuedKeyExists(row.getSerialHex())) {
+            throw new IllegalArgumentException("该证书无落盘私钥（CSR/公钥签发场景私钥由申请方自持，无CA侧密钥可导出）");
+        }
+        String keyPem = caService.loadIssuedKey(row.getSerialHex());
+        if (keyPem == null) {
+            throw new IllegalArgumentException("该证书私钥不可用（已封存或缺失）");
+        }
+        try {
+            PrivateKey key = PemUtil.parsePrivateKey(keyPem);
+            X509Certificate leaf = PemUtil.parseCert(row.getCertPem());
+            List<X509Certificate> chain = new ArrayList<>();
+            chain.add(leaf);
+            CaCert sub = matchingSubCa(row);
+            if (sub != null) {
+                chain.add(PemUtil.parseCert(sub.getCertPem()));
+            }
+            chain.add(caService.loadRootCert());
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            ks.load(null, null);
+            ks.setKeyEntry(row.getSerialHex(), key, password.toCharArray(),
+                    chain.toArray(new X509Certificate[0]));
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            ks.store(out, password.toCharArray());
+            log.info("[导出] 证书 id={}（{}）已导出 PKCS#12，链长度={}", id, row.getSubjectCn(), chain.size());
+            return out.toByteArray();
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("PKCS#12导出失败: " + e.getMessage(), e);
+        }
     }
 
     /** 概览统计：证书总量/状态分布/类型分布/30天内到期，供仪表盘渲染 */

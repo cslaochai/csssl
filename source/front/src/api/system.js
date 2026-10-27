@@ -138,3 +138,11 @@ export function renewCert(id, validityDays) {
 export function rekeyCert(id, validityDays) {
   return request.post(`/admin/certs/${id}/rekey`, { validityDays })
 }
+
+// ===== 导出（PKCS#12 软件证书 / 审计归档 CSV） =====
+export function exportCertP12(id, password) {
+  return request.get(`/admin/certs/${id}/export/p12`, { params: { password }, responseType: 'blob' })
+}
+export function exportAuditCsv() {
+  return request.get('/admin/audit/export')
+}

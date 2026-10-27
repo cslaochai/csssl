@@ -1,6 +1,7 @@
 package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.csssl.config.CssslProperties;
 import com.csssl.entity.CaCert;
 import com.csssl.mapper.CaCertMapper;
 import com.csssl.util.CertUtil;
@@ -47,6 +48,7 @@ public class OcspService {
 
     private final CaCertMapper certMapper;
     private final CaService caService;
+    private final CssslProperties props;
 
     /** 响应 OCSP 请求（DER 输入 → DER 输出） */
     public byte[] respond(byte[] requestDer) {
@@ -69,7 +71,8 @@ public class OcspService {
             BasicOCSPRespBuilder builder = new BasicOCSPRespBuilder(signerHolder.getSubjectPublicKeyInfo(),
                     new JcaDigestCalculatorProviderBuilder().build().get(CertificateID.HASH_SHA1));
             Date thisUpdate = new Date();
-            Date nextUpdate = Date.from(LocalDateTime.now().plusDays(1)
+            // nextUpdate 时效可配置（csssl.ocsp-next-update-hours，默认24h；行业1~7天）
+            Date nextUpdate = Date.from(LocalDateTime.now().plusHours(props.getOcspNextUpdateHours())
                     .atZone(ZoneId.systemDefault()).toInstant());
 
             CertificateStatus status;

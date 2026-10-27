@@ -67,6 +67,8 @@ csssl:
     master-key: ${SSL_MASTER_KEY:}
   # 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭
   allow-private-key-download: ${SSL_ALLOW_KEY_DOWNLOAD:true}
+  # OCSP 响应时效（小时）：依赖方缓存刷新周期，行业 24~168h（1~7天），默认 24h
+  ocsp-next-update-hours: ${SSL_OCSP_NEXT_UPDATE_HOURS:24}
   # ===== 登录鉴权（对齐 csmig：SM2 口令加密 + BCrypt + JWT） =====
   security:
     sm2:

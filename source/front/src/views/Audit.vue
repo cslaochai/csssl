@@ -5,6 +5,9 @@
       <el-select v-model="action" placeholder="操作类型" clearable style="width: 160px" @change="reload">
         <el-option v-for="item in actions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
+      <div>
+        <el-button type="primary" plain :loading="exporting" @click="onExport">导出归档CSV</el-button>
+      </div>
     </div>
 
     <el-table :data="rows" v-loading="loading" border stripe>
@@ -53,12 +56,26 @@
         </el-descriptions-item>
       </el-descriptions>
     </el-dialog>
+
+    <el-dialog v-model="exportVisible" title="审计归档导出完成（留存 ≥5 年材料）" width="560px">
+      <el-result icon="success" title="CSV 已下载" :sub-title="`共 ${exportCount} 条审计记录（UTF-8 BOM，Excel 可直接打开）`" />
+      <p style="font-size: 13px; color: #606266; margin-bottom: 8px">
+        归档报告完整性签名（SM3withSM2，对 CSV 全文计算）——请与 CSV 一并保存，事后校验：对同一 CSV 内容重算比对一致即未被篡改。
+      </p>
+      <div class="mono-wrap">{{ exportSign || '（签名生成失败，见服务端日志）' }}</div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="exportVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { pageAudit, verifyAuditLog } from '@/api/system'
+import { pageAudit, verifyAuditLog, exportAuditCsv } from '@/api/system'
+import { downloadText } from '@/lib/download'
 
 const loading = ref(false)
 const rows = ref([])
@@ -67,6 +84,10 @@ const action = ref('')
 const query = reactive({ pageNo: 1, pageSize: 10 })
 const verifyVisible = ref(false)
 const verify = ref(null)
+const exporting = ref(false)
+const exportVisible = ref(false)
+const exportSign = ref('')
+const exportCount = ref(0)
 
 const actions = [
   { value: 'LOGIN', label: '登录' },
@@ -103,6 +124,20 @@ async function onVerify(row) {
     verify.value = (await verifyAuditLog(row.id)).data
   } catch (e) {
     verifyVisible.value = false
+  }
+}
+
+async function onExport() {
+  exporting.value = true
+  try {
+    const res = await exportAuditCsv()
+    const data = res.data
+    downloadText(data.csv, `audit-export-${new Date().toISOString().slice(0, 10)}.csv`)
+    exportSign.value = data.sign
+    exportCount.value = data.count
+    exportVisible.value = true
+  } finally {
+    exporting.value = false
   }
 }
 

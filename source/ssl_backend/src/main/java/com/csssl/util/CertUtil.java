@@ -1,5 +1,6 @@
 package com.csssl.util;
 
+import org.bouncycastle.asn1.ASN1Integer;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.style.BCStyle;
 import org.bouncycastle.asn1.x509.AccessDescription;
@@ -354,17 +355,45 @@ public final class CertUtil {
         return fallback;
     }
 
-    /** 构建吊销列表（CRL v2），由根CA私钥签名 */
+    /**
+     * 构建全量吊销列表（CRL v2），由服务签发二级CA私钥签名。
+     * 携带 CRLNumber（递增编号，RFC 5280 §5.2.3），依赖方可将全量 CRL 与增量 CRL 结合做吊销增量同步。
+     *
+     * @param nextUpdateDays 下次发布间隔（天），行业 CRL 发布周期 24h~7天
+     */
     public static java.security.cert.X509CRL buildCrl(X509Certificate caCert, PrivateKey caKey,
-                                                      List<CrlEntry> entries) {
+                                                      List<CrlEntry> entries, long crlNumber, int nextUpdateDays) {
+        return buildCrl(caCert, caKey, entries, crlNumber, null, nextUpdateDays);
+    }
+
+    /**
+     * 构建增量吊销列表（dCRL，RFC 5280 §5.2.4）：仅含自基础全量 CRL 以来新增吊销/挂起的证书，
+     * 携带 DeltaCRLIndicator（2.5.29.27，critical）指向基础全量 CRL 的 CRLNumber。
+     * 依赖方需先持有基础全量 CRL，再用本增量合并得到最新吊销视图。
+     */
+    public static java.security.cert.X509CRL buildDeltaCrl(X509Certificate caCert, PrivateKey caKey,
+                                                           List<CrlEntry> entries, long crlNumber,
+                                                           long baseFullCrlNumber, int nextUpdateDays) {
+        return buildCrl(caCert, caKey, entries, crlNumber, baseFullCrlNumber, nextUpdateDays);
+    }
+
+    private static java.security.cert.X509CRL buildCrl(X509Certificate caCert, PrivateKey caKey,
+                                                       List<CrlEntry> entries, long crlNumber,
+                                                       Long deltaBaseNumber, int nextUpdateDays) {
         try {
             Date now = new Date();
             X509v2CRLBuilder builder = new X509v2CRLBuilder(
                     X500Name.getInstance(caCert.getSubjectX500Principal().getEncoded()), now);
-            builder.setNextUpdate(Date.from(LocalDateTime.now().plusDays(30)
+            builder.setNextUpdate(Date.from(LocalDateTime.now().plusDays(nextUpdateDays)
                     .atZone(ZoneId.systemDefault()).toInstant()));
             for (CrlEntry entry : entries) {
                 builder.addCRLEntry(new BigInteger(entry.serialHex(), 16), entry.revokedAt(), entry.reason());
+            }
+            // CRLNumber：单调递增，供依赖方判断 CRL 新旧
+            builder.addExtension(Extension.cRLNumber, false, new ASN1Integer(crlNumber));
+            // 增量 CRL：DeltaCRLIndicator = 基础全量 CRL 的 CRLNumber（critical，RFC 5280 强制）
+            if (deltaBaseNumber != null) {
+                builder.addExtension(Extension.deltaCRLIndicator, true, new ASN1Integer(deltaBaseNumber));
             }
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithmForKey(caKey))
                     .setProvider("BC").build(caKey);

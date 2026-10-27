@@ -30,6 +30,12 @@ public class CssslProperties {
     /** 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭 */
     private boolean allowPrivateKeyDownload = true;
 
+    /**
+     * OCSP 响应 nextUpdate 时效（小时），依赖方据此决定缓存刷新周期。
+     * 行业通行 24~168h（1~7天，360 信创根计划：响应最长 7 天、至少每 4 天更新）；默认 24h。
+     */
+    private int ocspNextUpdateHours = 24;
+
     private Security security = new Security();
 
     @Data

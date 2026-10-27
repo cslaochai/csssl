@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -113,6 +114,49 @@ public class AuditService {
         }
         qw.orderByDesc(AuditLog::getCreatedAt);
         return auditLogMapper.selectPage(new Page<>(pageNo, pageSize), qw);
+    }
+
+    /**
+     * 审计归档导出（留存 ≥5 年材料，等保要求）：全量日志导出 CSV（UTF-8 BOM），
+     * 并对导出内容做审计 SM2 报告签名（§10.5 审计记录创建人数字签名延伸）——归档文件完整性可在线验签。
+     *
+     * @return {csv, sign, count}：sign 是对 CSV 全文的 SM3withSM2 签名（hex），验签=对下载的 CSV 内容重算比对
+     */
+    public Map<String, Object> exportCsv() {
+        List<AuditLog> logs = auditLogMapper.selectList(new LambdaQueryWrapper<AuditLog>()
+                .orderByAsc(AuditLog::getId));
+        StringBuilder sb = new StringBuilder("\uFEFF"); // UTF-8 BOM，Excel 直接识别中文
+        sb.append("id,username,action,target,detail,ip,created_at,prev_sign,sign\n");
+        for (AuditLog l : logs) {
+            sb.append(l.getId()).append(',')
+                    .append(csv(l.getUsername())).append(',')
+                    .append(csv(l.getAction())).append(',')
+                    .append(csv(l.getTarget())).append(',')
+                    .append(csv(l.getDetail())).append(',')
+                    .append(csv(l.getIp())).append(',')
+                    .append(l.getCreatedAt() == null ? "" : TS.format(l.getCreatedAt())).append(',')
+                    .append(csv(l.getPrevSign())).append(',')
+                    .append(csv(l.getSign())).append('\n');
+        }
+        String csv = sb.toString();
+        String sign;
+        try {
+            sign = auditSigner.sign(csv);
+        } catch (Exception e) {
+            log.warn("[审计] 归档报告签名失败: {}", e.getMessage());
+            sign = "";
+        }
+        log.info("[审计] 归档导出完成，记录数={}，报告已签名", logs.size());
+        return Map.of("csv", csv, "sign", sign, "count", logs.size());
+    }
+
+    private static String csv(String s) {
+        if (s == null) {
+            return "";
+        }
+        String v = s.replace("\"", "\"\"");
+        return v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0 || v.indexOf('\r') >= 0
+                ? '"' + v + '"' : v;
     }
 
     private static String nz(String s) {
