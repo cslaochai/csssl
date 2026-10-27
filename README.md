@@ -131,12 +131,14 @@ npm run build               # 构建产物 dist/
 | `GET /ssl/admin/audit/export` | 审计归档导出 CSV（UTF-8 BOM）+ 报告 SM2 签名（留存 ≥5 年材料） |
 | `GET /ssl/admin/templates` | 证书模板管理（内置 SERVER_COMM/DOCTOR_SIGN/SUB_CA，签发锁定扩展项） |
 | `GET/POST /ssl/admin/applications` | RA 申请-审核-签发流程（提交→批准/驳回→签发，审核人≠录入人） |
-| `GET/POST /ssl/admin/users` | 用户与角色管理（ADMIN/OPERATOR/APPROVER/AUDITOR 分权，仅 ADMIN 建号） |
+| `GET/POST /ssl/admin/ca/shares*` | 根密钥 Shamir(3,5) 门限分持：`GET /shares` 状态 / `POST /shares/migrate` 迁移 / `GET /shares/{index}` 下载单份 / `POST /unseal-shares` 3份解封（仅 ADMIN/KEY_ADMIN） |
+| `GET/POST /ssl/admin/users` | 用户与角色管理（六类：ADMIN/OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN，仅 ADMIN 建号） |
 | `GET /ssl/admin/overview` | 概览统计 |
 
 ## 关键设计
 
-- **根CA离线化**：对齐国内持证CA通行架构——根CA仅初始化与签发 SUB_CA，日常签发/CRL/OCSP 全部由 SUB_CA 承担；根私钥支持「封存」离线（`key.pem.enc` 移存为 `.sealed`），封存后根密钥不参与任何在线操作，到期前 `renewBeforeDays` 天自动轮换
+- **根CA离线化**：对齐国内持证CA通行架构——根CA仅初始化与签发 SUB_CA，日常签发/CRL/OCSP 全部由 SUB_CA 承担；根私钥支持「封存」离线（`key.pem.enc` 移存为 `.sealed`）或「Shamir(3,5) 门限分持」（推荐），封存后根密钥不参与任何在线操作，到期前 `renewBeforeDays` 天自动轮换
+- **根密钥 Shamir(3,5) 门限分持（§8.2.4.3）**：根私钥 GF(256) 秘密共享拆 5 份份额、任 3 份恢复，门限化后原始 SM4 加密文件删除、份额成为唯一持久形态（新根自动触发/旧环境显式迁移接口）；份额解封仅内存缓存并以根证书公钥签名挑战校验（防篡改/错配），用后封存清除——对齐密评"根密钥不得单点持有"
 - **私钥加密落盘**：所有私钥经 `KeyVault` 以 SM4 加密后落盘（`*.key.pem.enc`），主密钥由 `SSL_MASTER_KEY` 注入（未配置时首启随机生成落盘 `master.key`）；旧明文密钥自动迁移加密；HSM/加密机（GM/T 0018）可在同类接口处替换
 - **吊销可发现性**：签发的证书带 CRL 分发点（CDP）与 OCSP 访问点（AIA）扩展；CRL 由 SUB_CA 签名并携带 thisUpdate/nextUpdate 与单调递增 CRLNumber；提供标准 OCSP 三态 responder（good/revoked/unknown，RFC 6960，POST+GET 双通道，nextUpdate 时效可配 `SSL_OCSP_NEXT_UPDATE_HOURS`）
 - **增量 CRL（dCRL）**：`/ca/public/crl/delta` 只发布自最近全量以来新增的吊销/挂起条目，带 DeltaCRLIndicator 指向基础全量编号；发布状态持久化 `store-dir/crl-state.json`（重启不丢），依赖方全量+增量合并即可增量同步（对标格尔/厂商分块增量做法）
@@ -144,7 +146,7 @@ npm run build               # 构建产物 dist/
 - **证书链下载**：`/admin/certs/{id}/cert.pem` 返回叶子 + SUB_CA 完整链，TLS 服务端部署免手工拼接；软件证书场景支持 PKCS#12 打包导出（口令加密，叶子+SUB_CA+根完整链）
 - **国密支持**：签发算法可选 `SM2`（SM3withSM2 签名、sm2p256v1 曲线），与 openssl / 国密工具链互通；`Sm4Util` 提供 SM4 加解密供 csmig 生产期使用
 - **审计留痕**：登录/签发/吊销/挂起/导出/封存解封全部落 `ssl_audit_log`；每条 SM3withSM2 签名 + 上一条签名哈希链（改任何一条即断链），验签接口在线核验，归档导出 CSV 带报告签名（留存 ≥5 年）
-- **分权制衡**：ADMIN/OPERATOR/APPROVER/AUDITOR 四角色，签发与审核分离（审核人≠录入人，§10.1g），路由与菜单按角色显隐
+- **分权制衡**：标准六类角色——系统管理员 ADMIN / CA操作员 OPERATOR / 审核员 APPROVER / 审计员 AUDITOR / 安全管理员 SECURITY_ADMIN（证书模板策略）/ 密钥管理员 KEY_ADMIN（根密钥门限分持与封存解封），签发与审核分离（审核人≠录入人，§10.1g），路由与菜单按角色显隐
 - **鉴权对齐**：登录链路（SM2 加密口令 → BCrypt 校验 → JWT）与 cslk HIS、csmig 完全一致，前端复用 `sm-crypto`
 
 ## 生产期配置建议
@@ -169,14 +171,14 @@ npm run build               # 构建产物 dist/
 ## TODO（P2/P3 演进）
 
 - [x] 时间戳服务（TSA，医疗签名"权威时间源+签名同时打戳"）——已交付
-- [x] RA 申请-审核-签发双人审批、四角色三权分立——已交付（P0/P1）
+- [x] RA 申请-审核-签发双人审批、角色三权分立——已交付（P0/P1，四角色）→ 六类角色细化已交付（P2）
 - [x] 证书更新/挂起/解除挂起/过期归档——已交付（P1）
 - [x] 审计签名 + SM3 哈希链 + 归档导出——已交付（P1）
 - [x] PKCS#12（.p12）打包下载——已交付（P2）
 - [x] CRL 增量（dCRL）发布——已交付（P2）
 - [ ] 双证书体系 + 密钥管理中心（KMC，加密证书托管，第三方持证才强制；院内豁免声明见 docs/）
 - [ ] 国密 UKey 发证（GM/T 0016 保护结构、私钥不出设备）——需硬件采购
-- [ ] 根密钥 Shamir(3,5) 门限分持 / 标准六类角色细化——等保立项时
+- [x] 根密钥 Shamir(3,5) 门限分持 + 标准六类角色细化——已交付（P2，`100ead3` 并入 master；份额生成/下载/3份解封 + SECURITY_ADMIN/KEY_ADMIN）
 - [ ] 服务器密码机 HSM 对接（GM/T 0018）——生产/密评立项
 - [ ] 远程 RA 分节点 + SCEP/CMP 标准协议（GM/T 0089）
 - [ ] 管理后台口令修改页
