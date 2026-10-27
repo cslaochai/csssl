@@ -2,8 +2,10 @@
   <div class="login-wrap">
     <div class="login-card">
       <div class="login-title">
-        <div class="login-logo">CSSSL</div>
-        <h1>CA 根认证中心</h1>
+        <div class="login-logo">
+          <img :src="logo" alt="长沙麓康CA认证中心" />
+        </div>
+        <h1>长沙麓康CA认证中心</h1>
         <p>证书签发 · 吊销 CRL · 国密加密传输</p>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" size="large" @keyup.enter="onSubmit">
@@ -35,6 +37,7 @@ import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { login } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache } from '@/lib/password'
+import logo from '@/assets/logo.svg'
 
 const router = useRouter()
 const route = useRoute()
@@ -92,16 +95,14 @@ async function onSubmit() {
   margin-bottom: 28px;
 }
 .login-logo {
-  width: 64px;
-  height: 64px;
-  line-height: 64px;
+  width: 72px;
+  height: 72px;
   margin: 0 auto 14px;
-  border-radius: 50%;
-  background: #1d2a4a;
-  color: #fff;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 1px;
+}
+.login-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 .login-title h1 {
   font-size: 20px;

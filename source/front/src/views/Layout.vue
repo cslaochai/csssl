@@ -1,7 +1,10 @@
 <template>
   <el-container class="layout">
     <el-aside width="220px" class="sidebar">
-      <div class="sidebar-logo">CSSSL · CA中心</div>
+      <div class="sidebar-logo">
+        <img class="sidebar-logo-icon" :src="logo" alt="长沙麓康CA认证中心" />
+        <span>长沙麓康CA认证中心</span>
+      </div>
       <el-menu
         :default-active="activeMenu"
         background-color="#1d2a4a"
@@ -61,12 +64,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { logout } from '@/api/system'
 import { resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
+import logo from '@/assets/logo.svg'
 
 const route = useRoute()
 const router = useRouter()
 
 const activeMenu = computed(() => route.path)
-const currentTitle = computed(() => route.meta.title || 'CA根认证中心')
+const currentTitle = computed(() => route.meta.title || '长沙麓康CA认证中心')
 const username = computed(() => localStorage.getItem('username') || 'admin')
 
 async function onCommand(command) {
@@ -79,7 +83,6 @@ async function onCommand(command) {
     }
     localStorage.removeItem('token')
     localStorage.removeItem('username')
-    resetPublicKeyCache()
     resetSm2Cache()
     router.push('/login')
   }
