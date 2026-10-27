@@ -1,0 +1,306 @@
+package com.csssl.util;
+
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x500.style.BCStyle;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.CRLReason;
+import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.asn1.x509.KeyPurposeId;
+import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.X509v2CRLBuilder;
+import org.bouncycastle.cert.X509v3CertificateBuilder;
+import org.bouncycastle.cert.jcajce.JcaX509CRLConverter;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.pkcs.PKCS10CertificationRequest;
+
+import java.io.StringReader;
+import java.math.BigInteger;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.regex.Pattern;
+
+/**
+ * X.509 证书签发核心：RSA2048 / SM2（国密）密钥生成、根CA自签、服务端/客户端证书签发、
+ * CSR 签发、吊销列表（CRL）构建。全部走 BouncyCastle（bcprov + bcpkix）。
+ */
+public final class CertUtil {
+
+    public static final String ALG_RSA2048 = "RSA2048";
+    public static final String ALG_SM2 = "SM2";
+
+    private static final Pattern IPV4 = Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
+    private static final Pattern IPV6 = Pattern.compile("^[0-9a-fA-F:]+$");
+
+    private CertUtil() {
+    }
+
+    /** 生成密钥对：RSA2048 或 SM2（sm2p256v1 推荐曲线） */
+    public static KeyPair generateKeyPair(String algorithm) {
+        try {
+            if (isSm2(algorithm)) {
+                // 走 JCE + BC provider：BC 会把 sm2p256v1 曲线 OID（1.2.156.10197.1.301）编进 SPKI，
+                // 产出的证书与 openssl / 国密工具链互通
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC", "BC");
+                kpg.initialize(new java.security.spec.ECGenParameterSpec("sm2p256v1"), new SecureRandom());
+                return kpg.generateKeyPair();
+            }
+            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+            kpg.initialize(2048, new SecureRandom());
+            return kpg.generateKeyPair();
+        } catch (Exception e) {
+            throw new IllegalStateException("密钥生成失败[" + algorithm + "]: " + e.getMessage(), e);
+        }
+    }
+
+    /** 生成随机正整数序列号（16 字节） */
+    public static BigInteger randomSerial() {
+        byte[] bytes = new byte[16];
+        new SecureRandom().nextBytes(bytes);
+        bytes[0] &= 0x7F;
+        return new BigInteger(bytes);
+    }
+
+    /** 根CA自签证书 */
+    public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String algorithm, int validityDays) {
+        try {
+            X500Name subject = new X500Name("CN=" + cn + ",O=CSSSL");
+            BigInteger serial = randomSerial();
+            Date notBefore = new Date();
+            Date notAfter = Date.from(LocalDateTime.now().plusDays(validityDays)
+                    .atZone(ZoneId.systemDefault()).toInstant());
+            JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
+                    subject, serial, notBefore, notAfter, subject, rootKey.getPublic());
+            JcaX509ExtensionUtils utils = new JcaX509ExtensionUtils();
+            builder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
+            builder.addExtension(Extension.keyUsage, true,
+                    new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign | KeyUsage.digitalSignature));
+            builder.addExtension(Extension.subjectKeyIdentifier, false,
+                    utils.createSubjectKeyIdentifier(rootKey.getPublic()));
+            builder.addExtension(Extension.authorityKeyIdentifier, false,
+                    utils.createAuthorityKeyIdentifier(rootKey.getPublic()));
+            ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm(algorithm))
+                    .setProvider("BC").build(rootKey.getPrivate());
+            X509CertificateHolder holder = builder.build(signer);
+            return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
+        } catch (Exception e) {
+            throw new IllegalStateException("根CA自签失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 用根CA签发服务端/客户端/二级CA证书（内部生成密钥对时调用） */
+    public static X509Certificate issue(KeyPair subjectKey, X509Certificate caCert, PrivateKey caKey,
+                                        String cn, String certType, int validityDays, String san) {
+        X500Name subject = new X500Name("CN=" + cn + ",O=CSSSL");
+        return issue(subject, subjectKey.getPublic(), caCert, caKey, certType, validityDays, san);
+    }
+
+    /** 用根CA签发证书（CSR 场景：主体与公钥取自 CSR） */
+    public static X509Certificate issueFromCsr(String csrPem, X509Certificate caCert, PrivateKey caKey,
+                                               String certType, int validityDays, String san) {
+        try (PEMParser parser = new PEMParser(new StringReader(csrPem))) {
+            Object obj = parser.readObject();
+            if (!(obj instanceof PKCS10CertificationRequest csr)) {
+                throw new IllegalArgumentException("CSR解析失败：不是 PKCS#10 证书请求");
+            }
+            PublicKey pub = new org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter()
+                    .setProvider("BC").getPublicKey(csr.getSubjectPublicKeyInfo());
+            X500Name subject = csr.getSubject();
+            return issue(subject, pub, caCert, caKey, certType, validityDays, san);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("CSR解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 签发通用入口：主体 X500Name + 公钥 */
+    private static X509Certificate issue(X500Name subject, PublicKey subjectPub,
+                                          X509Certificate caCert, PrivateKey caKey,
+                                          String certType, int validityDays, String san) {
+        try {
+            BigInteger serial = randomSerial();
+            Date notBefore = new Date();
+            Date notAfter = Date.from(LocalDateTime.now().plusDays(validityDays)
+                    .atZone(ZoneId.systemDefault()).toInstant());
+            JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
+                    X500Name.getInstance(caCert.getSubjectX500Principal().getEncoded()),
+                    serial, notBefore, notAfter, subject, subjectPub);
+            JcaX509ExtensionUtils utils = new JcaX509ExtensionUtils();
+
+            boolean isSubCa = "SUB_CA".equalsIgnoreCase(certType);
+            builder.addExtension(Extension.basicConstraints, true,
+                    isSubCa ? new BasicConstraints(1) : new BasicConstraints(false));
+            builder.addExtension(Extension.keyUsage, true, new KeyUsage(
+                    "CLIENT".equalsIgnoreCase(certType)
+                            ? KeyUsage.digitalSignature
+                            : KeyUsage.digitalSignature | KeyUsage.keyEncipherment));
+            if (!isSubCa) {
+                builder.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(
+                        "CLIENT".equalsIgnoreCase(certType)
+                                ? KeyPurposeId.id_kp_clientAuth
+                                : KeyPurposeId.id_kp_serverAuth));
+            }
+            builder.addExtension(Extension.subjectKeyIdentifier, false,
+                    utils.createSubjectKeyIdentifier(subjectPub));
+            builder.addExtension(Extension.authorityKeyIdentifier, false,
+                    utils.createAuthorityKeyIdentifier(caCert));
+
+            List<GeneralName> names = parseSan(san);
+            if (!names.isEmpty()) {
+                builder.addExtension(Extension.subjectAlternativeName, false,
+                        new GeneralNames(names.toArray(new GeneralName[0])));
+            }
+
+            ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithmForKey(caKey))
+                    .setProvider("BC").build(caKey);
+            X509CertificateHolder holder = builder.build(signer);
+            return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
+        } catch (Exception e) {
+            throw new IllegalStateException("证书签发失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 从 CSR 读取 SAN（若 CSR 带 subjectAlternativeName 扩展则提取，否则用传入 san） */
+    public static String sanFromCsr(String csrPem, String fallback) {
+        try (PEMParser parser = new PEMParser(new StringReader(csrPem))) {
+            Object obj = parser.readObject();
+            if (obj instanceof PKCS10CertificationRequest csr) {
+                GeneralNames gns = GeneralNames.fromExtensions(csr.getRequestedExtensions(),
+                        Extension.subjectAlternativeName);
+                if (gns != null) {
+                    List<String> items = new ArrayList<>();
+                    for (GeneralName gn : gns.getNames()) {
+                        if (gn.getTagNo() == GeneralName.dNSName || gn.getTagNo() == GeneralName.iPAddress) {
+                            items.add(gn.getName().toString());
+                        }
+                    }
+                    if (!items.isEmpty()) {
+                        return String.join(",", items);
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // 解析失败则回退到调用方传入的 san
+        }
+        return fallback;
+    }
+
+    /** 构建吊销列表（CRL v2），由根CA私钥签名 */
+    public static java.security.cert.X509CRL buildCrl(X509Certificate caCert, PrivateKey caKey,
+                                                      List<CrlEntry> entries) {
+        try {
+            Date now = new Date();
+            X509v2CRLBuilder builder = new X509v2CRLBuilder(
+                    X500Name.getInstance(caCert.getSubjectX500Principal().getEncoded()), now);
+            builder.setNextUpdate(Date.from(LocalDateTime.now().plusDays(30)
+                    .atZone(ZoneId.systemDefault()).toInstant()));
+            for (CrlEntry entry : entries) {
+                builder.addCRLEntry(new BigInteger(entry.serialHex(), 16), entry.revokedAt(), entry.reason());
+            }
+            ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithmForKey(caKey))
+                    .setProvider("BC").build(caKey);
+            return new JcaX509CRLConverter().setProvider("BC").getCRL(builder.build(signer));
+        } catch (Exception e) {
+            throw new IllegalStateException("CRL生成失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 吊销原因文本 → CRLReason 编码（默认 UNSPECIFIED） */
+    public static int crlReasonCode(String reason) {
+        if (reason == null) {
+            return CRLReason.unspecified;
+        }
+        return switch (reason.trim().toUpperCase(Locale.ROOT)) {
+            case "KEY_COMPROMISE" -> CRLReason.keyCompromise;
+            case "CA_COMPROMISE" -> CRLReason.cACompromise;
+            case "AFFILIATION_CHANGED" -> CRLReason.affiliationChanged;
+            case "SUPERSEDED" -> CRLReason.superseded;
+            case "CESSATION_OF_OPERATION" -> CRLReason.cessationOfOperation;
+            case "CERTIFICATE_HOLD" -> CRLReason.certificateHold;
+            case "PRIVILEGE_WITHDRAWN" -> CRLReason.privilegeWithdrawn;
+            default -> CRLReason.unspecified;
+        };
+    }
+
+    /** 签名算法：SM2 曲线用 SM3withSM2，其余用 SHA256withRSA */
+    public static String signatureAlgorithm(String algorithm) {
+        return isSm2(algorithm) ? "SM3withSM2" : "SHA256withRSA";
+    }
+
+    /**
+     * 签名算法跟随签发者（CA）密钥类型：EC（含 SM2 国密）私钥用 SM3withSM2，RSA 用 SHA256withRSA。
+     * 注意：主体证书算法（SM2/RSA）决定证书密钥类型，与签名算法相互独立——
+     * RSA 根CA完全可以签发 SM2 主体的证书（PKIX 允许跨算法签发）。
+     */
+    public static String signatureAlgorithmForKey(PrivateKey key) {
+        if (key != null && "EC".equals(key.getAlgorithm())) {
+            return "SM3withSM2";
+        }
+        return "SHA256withRSA";
+    }
+
+    public static boolean isSm2(String algorithm) {
+        return algorithm != null && ALG_SM2.equalsIgnoreCase(algorithm.trim());
+    }
+
+    /** 校验算法取值合法性 */
+    public static void checkAlgorithm(String algorithm) {
+        if (algorithm == null
+                || (!ALG_RSA2048.equalsIgnoreCase(algorithm.trim()) && !ALG_SM2.equalsIgnoreCase(algorithm.trim()))) {
+            throw new IllegalArgumentException("不支持的算法: " + algorithm + "（仅支持 RSA2048 / SM2）");
+        }
+    }
+
+    /** 解析 SAN 文本（逗号分隔，支持 DNS 名与 IPv4/IPv6） */
+    private static List<GeneralName> parseSan(String san) {
+        List<GeneralName> names = new ArrayList<>();
+        if (san == null || san.isBlank()) {
+            return names;
+        }
+        for (String item : san.split(",")) {
+            String name = item.trim();
+            if (name.isEmpty()) {
+                continue;
+            }
+            if (IPV4.matcher(name).matches() || IPV6.matcher(name).matches()) {
+                names.add(new GeneralName(GeneralName.iPAddress, name));
+            } else {
+                names.add(new GeneralName(GeneralName.dNSName, name));
+            }
+        }
+        return names;
+    }
+
+    /** 从证书提取 CN */
+    public static String subjectCn(X509Certificate cert) {
+        X500Name name = X500Name.getInstance(cert.getSubjectX500Principal().getEncoded());
+        var cn = name.getRDNs(BCStyle.CN);
+        if (cn != null && cn.length > 0) {
+            return cn[0].getFirst().getValue().toString();
+        }
+        return cert.getSubjectX500Principal().getName();
+    }
+
+    /** CRL 吊销条目 */
+    public record CrlEntry(String serialHex, Date revokedAt, int reason) {
+    }
+}

@@ -1,0 +1,50 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', Arial, sans-serif;
+  font-size: 14px;
+  color: #303133;
+  background: #f0f2f5;
+}
+
+/* 与 csmig / cslk 管理后台同风格的深色侧边栏 */
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  background: #1d2a4a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.page-card {
+  background: #fff;
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dialog-footer {
+  text-align: right;
+}

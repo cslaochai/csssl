@@ -1,0 +1,12 @@
+target/
+*.class
+*.jar
+*.war
+.idea/
+*.iml
+.vscode/
+.DS_Store
+node_modules/
+dist/
+# 证书与密钥落盘目录（生产由 SSL_STORE_DIR 指向共享存储，禁止入库）
+data/

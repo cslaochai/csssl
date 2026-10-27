@@ -1,0 +1,73 @@
+server:
+  port: 8092
+  servlet:
+    context-path: /ssl
+
+spring:
+  application:
+    name: ssl-backend
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${SSL_DB_URL:jdbc:mysql://192.168.88.132:3306/ssl_ca?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true}
+    username: ${SSL_DB_USERNAME:xz_feng}
+    password: ${SSL_DB_PASSWORD:Feng123456!}
+    hikari:
+      connection-timeout: 30000
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-test-query: SELECT 1
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+      encoding: UTF-8
+      continue-on-error: false
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: AUTO
+
+# ===== CA根认证中心业务参数 =====
+csssl:
+  # 证书与私钥落盘目录（根CA密钥、签发的私钥只落盘，不进数据库）
+  store-dir: ${SSL_STORE_DIR:./data/certs}
+  # 根CA
+  root-ca:
+    # 根CA标识（证书CN用：CSSSL Root CA v1）
+    cn: ${SSL_ROOT_CN:CSSSL Root CA}
+    # 算法：RSA2048 / SM2（国密）
+    algorithm: ${SSL_ROOT_ALGORITHM:RSA2048}
+    # 根证书有效期（天）
+    validity-days: ${SSL_ROOT_VALIDITY_DAYS:3650}
+  # 签发默认值
+  issue:
+    # 默认证书有效期（天）
+    default-validity-days: ${SSL_ISSUE_VALIDITY_DAYS:365}
+  # 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭
+  allow-private-key-download: ${SSL_ALLOW_KEY_DOWNLOAD:true}
+  # ===== 登录鉴权（对齐 csmig：SM2 口令加密 + BCrypt + JWT） =====
+  security:
+    sm2:
+      # 16进制SM2私钥（64 hex字符）；留空则启动时临时生成一对（重启失效，多实例必须显式配置同一对）
+      private-key: ${SSL_SM2_PRIVATE_KEY:}
+      # 16进制SM2公钥（含04前缀，130 hex字符）；留空则从私钥推导
+      public-key: ${SSL_SM2_PUBLIC_KEY:}
+    jwt:
+      # JWT签名密钥（生产期必须通过环境变量覆盖）
+      secret: ${SSL_JWT_SECRET:csssl-ca-jwt-secret-change-me-in-prod-2026}
+      # 会话有效期（毫秒），默认24小时
+      expiration: ${SSL_JWT_EXPIRATION:86400000}
+
+logging:
+  level:
+    com.csssl: debug
