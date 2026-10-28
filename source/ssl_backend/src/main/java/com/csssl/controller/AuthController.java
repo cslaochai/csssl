@@ -4,10 +4,13 @@ import com.csssl.common.Result;
 import com.csssl.dto.LoginRequest;
 import com.csssl.service.AuditService;
 import com.csssl.service.AuthService;
+import com.csssl.util.JwtUtil;
 import com.csssl.util.Sm2Util;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,7 +32,7 @@ public class AuthController {
     private final Sm2Util sm2Util;
     private final AuthService authService;
     private final AuditService auditService;
-    private final com.csssl.util.JwtUtil jwtUtil;
+    private final JwtUtil jwtUtil;
 
     /** 登录口令加密公钥（SM2 未压缩公钥点十六进制，04 前缀） */
     @GetMapping("/publicKey")
@@ -45,6 +48,27 @@ public class AuthController {
     public Result<Map<String, Object>> login(@RequestBody LoginRequest req, HttpServletRequest request) {
         Map<String, Object> data = authService.login(req, clientIp(request));
         return Result.success("登录成功", data);
+    }
+
+    /**
+     * 自助改密（需携带登录令牌，/auth/** 不经拦截器故手工解析）：
+     * body {oldPassword, newPassword}，均为 SM2 密文（与登录同通道）。
+     * 成功后 token_version+1，当前令牌即被吊销，客户端必须重新登录。
+     */
+    @PostMapping("/changePassword")
+    public ResponseEntity<Result<Void>> changePassword(@RequestBody Map<String, String> body,
+                                                       HttpServletRequest request) {
+        String auth = request.getHeader("Authorization");
+        JwtUtil.TokenClaims claims = auth != null && auth.startsWith("Bearer ")
+                ? jwtUtil.parse(auth.substring(7)) : null;
+        if (claims == null || claims.username() == null || claims.username().isBlank()) {
+            // /auth/** 不走拦截器，未带有效令牌在这里直接 401（前端按 401 跳登录页）
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Result.error(401, "未登录或登录已过期"));
+        }
+        authService.changePassword(claims.username(), claims.tokenVersion(),
+                body.get("oldPassword"), body.get("newPassword"), clientIp(request));
+        return ResponseEntity.ok(Result.success("口令修改成功，请使用新口令重新登录", null));
     }
 
     /** 退出登录（/auth/** 不经过拦截器，从 Authorization 头解析用户名） */

@@ -14,6 +14,10 @@ export function login(data) {
 export function logout() {
   return request.post('/auth/logout')
 }
+/** 修改本人登录口令（oldPassword/newPassword 均为 SM2 密文，成功后会话失效需重新登录） */
+export function changePassword(data) {
+  return request.post('/auth/changePassword', data)
+}
 
 // ===== 根CA =====
 export function getCaStatus() {
@@ -62,6 +66,10 @@ export function issueCert(data) {
 export function issueCertByCsr(data) {
   return request.post('/admin/certs/csr', data)
 }
+/** 公钥直签（RA 场景）：申请方自持私钥，提交 Subject DN + 公钥 PEM + 模板/CN/SAN */
+export function issueCertByPublicKey(data) {
+  return request.post('/admin/certs/public-key', data)
+}
 export function revokeCert(id, reason) {
   return request.post(`/admin/certs/${id}/revoke`, { reason })
 }
@@ -82,6 +90,10 @@ export function getCrlView() {
 export function downloadCrl() {
   return request.get('/admin/crl/download')
 }
+/** 增量 CRL（dCRL）：{deltaPem, thisUpdate, nextUpdate, entryCount, crlNumber, baseCrlNumber} */
+export function getDeltaCrl() {
+  return request.get('/admin/crl/delta')
+}
 
 // ===== 审计日志 =====
 export function pageAudit(params) {
@@ -89,6 +101,12 @@ export function pageAudit(params) {
 }
 export function verifyAuditLog(id) {
   return request.post('/admin/audit/verify', { id })
+}
+/** 哈希链对账（区间可空）：返回 {checked, broken:[{id,reason}]}，仅 AUDITOR */
+export function chainVerify(fromId, toId) {
+  return request.get('/admin/audit/chain-verify', {
+    params: { fromId: fromId ?? undefined, toId: toId ?? undefined }
+  })
 }
 
 // ===== 管理用户与角色（GM/T 0034 分权制衡，仅 ADMIN） =====
@@ -154,9 +172,15 @@ export function rekeyCert(id, validityDays) {
 }
 
 // ===== 导出（PKCS#12 软件证书 / 审计归档 CSV） =====
+/** 导出 PKCS#12：口令放 POST body（避免 URL 泄漏），返回二进制 blob */
 export function exportCertP12(id, password) {
-  return request.get(`/admin/certs/${id}/export/p12`, { params: { password }, responseType: 'blob' })
+  return request.post(`/admin/certs/${id}/export/p12`, { password }, { responseType: 'blob' })
 }
 export function exportAuditCsv() {
   return request.get('/admin/audit/export')
+}
+
+// ===== TSA 可信时间戳（公开） =====
+export function getTsaPublicKey() {
+  return request.get('/tsa/publicKey')
 }

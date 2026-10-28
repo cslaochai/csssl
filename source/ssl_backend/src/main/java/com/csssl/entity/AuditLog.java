@@ -29,6 +29,9 @@ public class AuditLog {
     /** 操作详情 */
     private String detail;
 
+    /** 哈希链前驱记录ID（首条为NULL；对账接口按 id 序核验存在性与签名衔接） */
+    private Long prevId;
+
     /** 操作来源IP */
     private String ip;
 

@@ -45,6 +45,14 @@ public class CertService {
     private static final Set<String> TYPES = Set.of("SERVER", "CLIENT", "SUB_CA");
     private static final int MAX_VALIDITY_DAYS = 36500;
 
+    /**
+     * 签发策略快照：RA 批准时从模板固化（certType/algorithm/validityDays/keyUsage/extKeyUsage/policyOid），
+     * 签发按快照执行，杜绝批准后被改动的可变模板影响已批准申请（GM/T 0034 §5.3.4 策略固化）。
+     */
+    public record IssuePolicy(String certType, String algorithm, Integer validityDays,
+                              String keyUsage, String extKeyUsage, String policyOid) {
+    }
+
     private final CaCertMapper certMapper;
     private final CertTemplateMapper templateMapper;
     private final CaService caService;
@@ -104,7 +112,7 @@ public class CertService {
         persistFiles(serial, PemUtil.keyToPem(subjectKey.getPrivate()), PemUtil.certToPem(cert));
 
         CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, req.getSan(),
-                req.getDescription(), username, tpl);
+                req.getDescription(), username, tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(username, "CERT_ISSUE", String.valueOf(row.getId()),
                 "签发 " + type + " 证书：" + cn + "（" + algorithm + (tpl != null ? "，模板 " + tpl.getTemplateCode() : "") + "）", ip);
@@ -151,7 +159,7 @@ public class CertService {
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
 
         CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, effectiveSan,
-                description, username, tpl);
+                description, username, tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(username, "CERT_CSR_ISSUE", String.valueOf(row.getId()),
                 "CSR签发 " + type + " 证书：" + cn + (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : ""), ip);
@@ -163,6 +171,16 @@ public class CertService {
      * 用于 HIS 等业务系统对接（医生签名证书等）。
      */
     public CertVo issueWithPublicKey(com.csssl.dto.PublicKeyIssueRequest req, String username, String ip) {
+        return issueWithPublicKey(req, null, username, ip);
+    }
+
+    /**
+     * 公钥签发（RA 场景，支持批准快照）：
+     * policy 非空时签发参数一律按快照执行（批准时固化的模板策略，不重查可变模板最新值，
+     * 保证审核人批准的内容与操作员最终签出的内容一致）；policy 为空时按 templateId 现查模板。
+     */
+    public CertVo issueWithPublicKey(com.csssl.dto.PublicKeyIssueRequest req, IssuePolicy policy,
+                                     String username, String ip) {
         String dn = req.getSubjectDn() == null ? "" : req.getSubjectDn().trim();
         if (dn.isEmpty()) {
             throw new IllegalArgumentException("主体DN不能为空（如 CN=张三,O=医院,OU=门诊部）");
@@ -170,21 +188,29 @@ public class CertService {
         if (req.getPublicKeyPem() == null || req.getPublicKeyPem().isBlank()) {
             throw new IllegalArgumentException("公钥PEM不能为空（申请方自持私钥，仅提交公钥）");
         }
-        CertTemplate tpl = resolveTemplate(req.getTemplateId());
-        String type = tpl != null ? tpl.getCertType() : (req.getCertType() == null ? "CLIENT" : req.getCertType()).toUpperCase();
+        CertTemplate tpl = policy == null ? resolveTemplate(req.getTemplateId()) : null;
+        String type = policy != null ? (policy.certType() == null ? "" : policy.certType().toUpperCase())
+                : (tpl != null ? tpl.getCertType() : (req.getCertType() == null ? "CLIENT" : req.getCertType()).toUpperCase());
         if (!TYPES.contains(type)) {
             throw new IllegalArgumentException("不支持的证书类型: " + type + "（仅支持 SERVER / CLIENT / SUB_CA）");
         }
-        int days = tpl != null ? tpl.getValidityDays() : resolveValidityDays(req.getValidityDays());
+        if (policy != null && policy.algorithm() != null && !policy.algorithm().isBlank()) {
+            CertUtil.checkAlgorithm(policy.algorithm());
+        }
+        int days = policy != null ? resolveValidityDays(policy.validityDays())
+                : (tpl != null ? tpl.getValidityDays() : resolveValidityDays(req.getValidityDays()));
+        String keyUsage = policy != null ? policy.keyUsage() : (tpl != null ? tpl.getKeyUsage() : null);
+        String extKeyUsage = policy != null ? policy.extKeyUsage() : (tpl != null ? tpl.getExtKeyUsage() : null);
+        String policyOid = policy != null ? policy.policyOid() : (tpl != null ? tpl.getPolicyOid() : null);
 
         X509Certificate caCert = caService.signingCert();
         PrivateKey caKey = caService.signingKey();
-        X509Certificate cert = tpl != null
+        // SAN 透传：申请单/请求里带的 SAN 必须写进证书，此前模板分支写死 null 属丢弃申请内容
+        X509Certificate cert = policy != null || tpl != null
                 ? CertUtil.issuePublicKeyByTemplate(dn, req.getPublicKeyPem(), caCert, caKey,
-                        type, days, null, crlUrl(), ocspUrl(),
-                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                        type, days, req.getSan(), crlUrl(), ocspUrl(), keyUsage, extKeyUsage, policyOid)
                 : CertUtil.issuePublicKey(dn, req.getPublicKeyPem(), caCert, caKey,
-                        type, days, null, crlUrl(), ocspUrl());
+                        type, days, req.getSan(), crlUrl(), ocspUrl());
 
         String serial = cert.getSerialNumber().toString(16);
         // 申请方自持私钥，不落盘
@@ -193,12 +219,13 @@ public class CertService {
         String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
 
-        CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, null,
-                req.getDescription(), username, tpl);
+        CaCert row = buildRow(serial, cn, type, algorithm, caCert, cert, req.getSan(),
+                req.getDescription(), username, policy != null ? req.getTemplateId() : (tpl == null ? null : tpl.getId()));
         certMapper.insert(row);
         auditService.record(username, "CERT_PUBKEY_ISSUE", String.valueOf(row.getId()),
-                "公钥签发 " + type + " 证书：" + cn + (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : ""), ip);
-        log.info("[公钥签发] id={}, cn={}, type={}, algorithm={}, serial={}", row.getId(), cn, type, algorithm, serial);
+                "公钥签发 " + type + " 证书：" + cn + (policy != null ? "（按批准快照）" : (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : "")), ip);
+        log.info("[公钥签发] id={}, cn={}, type={}, algorithm={}, serial={}, snapshot={}",
+                row.getId(), cn, type, algorithm, serial, policy != null);
         return CertVo.from(row);
     }
 
@@ -292,7 +319,7 @@ public class CertService {
         String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
         CaCert row = buildRow(serial, old.getSubjectCn(), old.getCertType(), algorithm,
-                caCert, cert, old.getSan(), old.getDescription(), username, tpl);
+                caCert, cert, old.getSan(), old.getDescription(), username, tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(username, "CERT_RENEW", String.valueOf(row.getId()),
                 "更新证书：" + old.getSubjectCn() + "（原证书 id=" + id + " 已吊销 SUPERSEDED，新证 " + days + " 天）", ip);
@@ -338,7 +365,7 @@ public class CertService {
         String serial = cert.getSerialNumber().toString(16);
         persistFiles(serial, PemUtil.keyToPem(kp.getPrivate()), PemUtil.certToPem(cert));
         CaCert row = buildRow(serial, old.getSubjectCn(), old.getCertType(), algorithm,
-                caCert, cert, old.getSan(), old.getDescription(), username, tpl);
+                caCert, cert, old.getSan(), old.getDescription(), username, tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(username, "CERT_REKEY", String.valueOf(row.getId()),
                 "密钥更新：" + old.getSubjectCn() + "（原证书 id=" + id + " 已吊销，新密钥对 " + algorithm + "）", ip);
@@ -541,7 +568,7 @@ public class CertService {
 
     private CaCert buildRow(String serial, String cn, String type, String algorithm,
                             X509Certificate caCert, X509Certificate cert, String san,
-                            String description, String username, CertTemplate tpl) {
+                            String description, String username, Long templateId) {
         CaCert row = new CaCert();
         row.setSerialHex(serial);
         row.setSubjectCn(cn);
@@ -555,7 +582,7 @@ public class CertService {
         row.setStatus("VALID");
         row.setCertPem(PemUtil.certToPem(cert));
         row.setDescription(description);
-        row.setTemplateId(tpl == null ? null : tpl.getId());
+        row.setTemplateId(templateId);
         row.setCreatedBy(username);
         row.setCreatedAt(LocalDateTime.now());
         return row;

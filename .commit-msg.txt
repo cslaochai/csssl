@@ -1,0 +1,9 @@
+feat(security): route B - fix all 18 audited design flaws (service smoke 14/14)
+
+- auth: JWT carries uid/token_version, interceptor re-checks DB (revoke on pwd/role/status change); login lockout 5/15min; self-service changePassword; strong-password policy on user create/reset, no plaintext echo
+- rbac: audit endpoints locked to AUDITOR; key.pem/p12 to ADMIN/KEY_ADMIN; p12 export POST body (password out of access log); direct-issue SUB_CA requires ADMIN
+- audit: account/template-change logging; hash-chain by id with prev_id; chain-verify endpoint detects deleted/missing records
+- RA: template policy snapshot frozen at approval; SAN passthrough fix; FOR UPDATE row lock on issue; cancel restricted to applicant/ADMIN
+- crl: content-fingerprint publish (no CRLNumber bump per GET pull); state moved to ssl_crl_state table (multi-instance safe); daily scheduled republish
+- ca: rootKeyCache lock consistency; threshold migration idempotent; purge revoked CA key files; SUB_CA rotation off the signing path; single KeyVault bean
+- misc: real HTTP status codes, no internal-message leak; serial sign-bit fix; frontend role-scoped menus (no ADMIN fallback), TSA/OCSP/DeltaCRL/public-key-issue pages

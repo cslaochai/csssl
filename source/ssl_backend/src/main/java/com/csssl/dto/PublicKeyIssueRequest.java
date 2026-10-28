@@ -20,6 +20,9 @@ public class PublicKeyIssueRequest {
     /** 有效期（天），缺省用系统默认 */
     private Integer validityDays;
 
+    /** SAN（逗号分隔，DNS名/IP）：RA 申请单携带时必须透传进证书，不得丢弃 */
+    private String san;
+
     /** 证书模板ID（非空则以模板锁定算法/有效期/KeyUsage/EKU/策略OID） */
     private Long templateId;
 

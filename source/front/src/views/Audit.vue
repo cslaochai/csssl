@@ -6,6 +6,7 @@
         <el-option v-for="item in actions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
       <div>
+        <el-button type="warning" plain @click="openChain">链对账</el-button>
         <el-button type="primary" plain :loading="exporting" @click="onExport">导出归档CSV</el-button>
       </div>
     </div>
@@ -57,6 +58,50 @@
       </el-descriptions>
     </el-dialog>
 
+    <el-dialog v-model="chainVisible" title="审计哈希链对账（GM/T 0034 §10.5 链式完整性校验）" width="640px">
+      <p style="margin-bottom: 12px; color: #606266; font-size: 13px">
+        对指定 ID 区间（可空，默认全域）逐条重算规范化哈希并验证签名链，检出被增删改动的记录。
+      </p>
+      <el-form inline>
+        <el-form-item label="起始ID">
+          <el-input-number v-model="chainFrom" :min="1" :controls="false" placeholder="可空" style="width: 120px" />
+        </el-form-item>
+        <el-form-item label="截止ID">
+          <el-input-number v-model="chainTo" :min="1" :controls="false" placeholder="可空" style="width: 120px" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="chainLoading" @click="onChainVerify">开始对账</el-button>
+        </el-form-item>
+      </el-form>
+
+      <template v-if="chainResult">
+        <el-result
+          v-if="chainResult.broken.length === 0"
+          icon="success"
+          :title="`链完整：共对账 ${chainResult.checked} 条，未发现断裂`"
+          sub-title="该区间内每条记录的签名与哈希链上一签名均校验通过，审计数据未被篡改"
+        />
+        <template v-else>
+          <el-alert
+            type="error"
+            :closable="false"
+            show-icon
+            :title="`共对账 ${chainResult.checked} 条，检出 ${chainResult.broken.length} 条断裂`"
+            style="margin-bottom: 12px"
+          />
+          <el-table :data="chainResult.broken" border stripe max-height="280">
+            <el-table-column prop="id" label="断裂记录ID" width="130" />
+            <el-table-column prop="reason" label="原因" min-width="260" show-overflow-tooltip />
+          </el-table>
+        </template>
+      </template>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="chainVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="exportVisible" title="审计归档导出完成（留存 ≥5 年材料）" width="560px">
       <el-result icon="success" title="CSV 已下载" :sub-title="`共 ${exportCount} 条审计记录（UTF-8 BOM，Excel 可直接打开）`" />
       <p style="font-size: 13px; color: #606266; margin-bottom: 8px">
@@ -74,7 +119,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { pageAudit, verifyAuditLog, exportAuditCsv } from '@/api/system'
+import { pageAudit, verifyAuditLog, exportAuditCsv, chainVerify } from '@/api/system'
 import { downloadText } from '@/lib/download'
 
 const loading = ref(false)
@@ -88,6 +133,13 @@ const exporting = ref(false)
 const exportVisible = ref(false)
 const exportSign = ref('')
 const exportCount = ref(0)
+
+// 链对账
+const chainVisible = ref(false)
+const chainLoading = ref(false)
+const chainFrom = ref(null)
+const chainTo = ref(null)
+const chainResult = ref(null)
 
 const actions = [
   { value: 'LOGIN', label: '登录' },
@@ -113,7 +165,14 @@ const actions = [
   { value: 'RA_REJECT', label: 'RA驳回' },
   { value: 'RA_ISSUE', label: 'RA签发' },
   { value: 'RA_CANCEL', label: 'RA撤销' },
-  { value: 'TSA_STAMP', label: '时间戳盖章' }
+  { value: 'TSA_STAMP', label: '时间戳盖章' },
+  { value: 'USER_CREATE', label: '创建账号' },
+  { value: 'USER_UPDATE', label: '更新账号' },
+  { value: 'USER_RESET_PWD', label: '重置口令' },
+  { value: 'PWD_CHANGE', label: '修改口令' },
+  { value: 'TEMPLATE_CREATE', label: '创建模板' },
+  { value: 'TEMPLATE_UPDATE', label: '更新模板' },
+  { value: 'TEMPLATE_DELETE', label: '删除模板' }
 ]
 
 function actionText(a) {
@@ -144,6 +203,23 @@ async function onExport() {
   }
 }
 
+function openChain() {
+  chainFrom.value = null
+  chainTo.value = null
+  chainResult.value = null
+  chainVisible.value = true
+}
+
+async function onChainVerify() {
+  chainLoading.value = true
+  try {
+    const res = await chainVerify(chainFrom.value || undefined, chainTo.value || undefined)
+    chainResult.value = { checked: res.data.checked ?? 0, broken: res.data.broken || [] }
+  } finally {
+    chainLoading.value = false
+  }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -154,6 +230,8 @@ async function load() {
     })
     rows.value = res.data.records || []
     total.value = res.data.total || 0
+  } catch (e) {
+    // 错误提示已由拦截器统一处理
   } finally {
     loading.value = false
   }

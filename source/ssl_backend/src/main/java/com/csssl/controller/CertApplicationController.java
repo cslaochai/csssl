@@ -79,12 +79,12 @@ public class CertApplicationController {
                 RoleCode.currentUser(request), clientIp(request)));
     }
 
-    /** 撤销申请（需 操作员/管理员） */
+    /** 撤销申请（需 操作员/管理员；仅提交人本人或系统管理员可撤销） */
     @PostMapping("/{id}/cancel")
     public Result<CertApplication> cancel(@PathVariable Long id, HttpServletRequest request) {
         RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
         return Result.success("已撤销", applicationService.cancel(id,
-                RoleCode.currentUser(request), clientIp(request)));
+                RoleCode.currentUser(request), RoleCode.currentRole(request), clientIp(request)));
     }
 
     private String clientIp(HttpServletRequest request) {

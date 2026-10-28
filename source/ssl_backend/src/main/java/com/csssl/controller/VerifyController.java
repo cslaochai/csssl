@@ -53,10 +53,10 @@ public class VerifyController {
         return Result.success("校验完成", verifyService.verify(req));
     }
 
-    /** CRL 下载（吊销列表，供业务系统缓存校验） */
+    /** CRL 下载（吊销列表，供业务系统缓存校验）：判重发布，内容未变复用已发布 CRL，不再每次 GET 自增 CRLNumber */
     @GetMapping("/crl")
     public String crl() {
-        return crlService.buildCrlPem();
+        return crlService.publishIfNeeded().pem();
     }
 
     /** 增量 CRL（dCRL）下载：自最近全量发布以来新增的吊销/挂起条目（RFC 5280 §5.2.4），

@@ -7,12 +7,17 @@ import com.csssl.dto.CertVo;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.CertTemplate;
 import com.csssl.mapper.CertApplicationMapper;
+import com.csssl.util.RoleCode;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -37,6 +42,7 @@ public class CertApplicationService {
     private final CertTemplateService templateService;
     private final CertService certService;
     private final AuditService auditService;
+    private final ObjectMapper objectMapper;
 
     /** 分页查询申请单 */
     public Page<CertApplication> page(long pageNo, long pageSize, String status, String keyword) {
@@ -100,16 +106,24 @@ public class CertApplicationService {
         return app;
     }
 
-    /** 审核批准（审核员；不得与提交人同一人，GM/T 0034 §10.1g） */
+    /**
+     * 审核批准（审核员；不得与提交人同一人，GM/T 0034 §10.1g）。
+     * 批准即固化：把模板策略快照写入申请单，签发按快照执行——批准之后模板被改动/删除
+     * 都不影响已批准单实际签出的证书内容（审核人看到的即所批的）。
+     */
+    @Transactional(rollbackFor = Exception.class)
     public CertApplication approve(Long id, String comment, String username, String ip) {
         CertApplication app = checkPending(id);
         checkReviewerDiff(app, username);
+        CertTemplate tpl = templateService.detail(app.getTemplateId());
+        app.setTemplateSnapshot(snapshotJson(tpl));
         app.setStatus(ST_APPROVED);
         app.setReviewedBy(username);
         app.setReviewedAt(LocalDateTime.now());
         app.setReviewComment(blankToNull(comment));
         applicationMapper.updateById(app);
-        auditService.record(username, "RA_APPROVE", app.getApplyNo(), "批准证书申请：" + app.getApplicantName(), ip);
+        auditService.record(username, "RA_APPROVE", app.getApplyNo(),
+                "批准证书申请：" + app.getApplicantName() + "（已固化模板策略快照）", ip);
         return app;
     }
 
@@ -129,9 +143,13 @@ public class CertApplicationService {
         return app;
     }
 
-    /** 签发：复用模板 + 公钥签发，私钥由申请方自持（操作员执行） */
+    /**
+     * 签发：按批准快照 + 公钥签发，私钥由申请方自持（操作员执行）。
+     * FOR UPDATE 行锁 + 同事务状态流转，防两个操作员并发对同一「已批准」单双签。
+     */
+    @Transactional(rollbackFor = Exception.class)
     public CertVo issue(Long id, String username, String ip) {
-        CertApplication app = applicationMapper.selectById(id);
+        CertApplication app = applicationMapper.selectForUpdate(id);
         if (app == null) {
             throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
         }
@@ -142,8 +160,11 @@ public class CertApplicationService {
         req.setSubjectDn(app.getSubjectDn());
         req.setPublicKeyPem(app.getPublicKeyPem());
         req.setTemplateId(app.getTemplateId());
+        req.setSan(app.getSan());
         req.setDescription(app.getDescription());
-        CertVo vo = certService.issueWithPublicKey(req, username, ip);
+        // 签发一律按快照执行，不重查可变模板最新值；存量单无快照时回退现查模板（模板须仍存在）
+        CertService.IssuePolicy policy = parseSnapshot(app);
+        CertVo vo = certService.issueWithPublicKey(req, policy, username, ip);
 
         app.setStatus(ST_ISSUED);
         app.setIssuedCertId(Long.valueOf(vo.getId()));
@@ -153,11 +174,17 @@ public class CertApplicationService {
         return vo;
     }
 
-    /** 撤销申请（录入员可在批准前撤回） */
-    public CertApplication cancel(Long id, String username, String ip) {
+    /**
+     * 撤销申请：仅申请人本人（录入人）或系统管理员可撤销，
+     * 防止任一操作员越权撤销他人经办的申请单。
+     */
+    public CertApplication cancel(Long id, String username, String role, String ip) {
         CertApplication app = applicationMapper.selectById(id);
         if (app == null) {
             throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
+        }
+        if (!RoleCode.ADMIN.equals(role) && !java.util.Objects.equals(app.getAppliedBy(), username)) {
+            throw new SecurityException("仅申请提交人本人或系统管理员可撤销申请（当前操作人：" + username + "）");
         }
         if (!ST_PENDING.equals(app.getStatus()) && !ST_APPROVED.equals(app.getStatus())) {
             throw new IllegalArgumentException("仅「待审核/已批准」状态的申请单可撤销（当前状态：" + app.getStatus() + "）");
@@ -184,6 +211,53 @@ public class CertApplicationService {
         if (username != null && username.equals(app.getAppliedBy())) {
             throw new SecurityException("违反分权制衡：审核人不得与申请提交人为同一人（GM/T 0034 §10.1g）");
         }
+    }
+
+    /** 批准时固化模板策略为 JSON 快照（有序字段，便于人工核对与审计比对） */
+    private String snapshotJson(CertTemplate tpl) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("certType", tpl.getCertType());
+        snapshot.put("algorithm", tpl.getAlgorithm());
+        snapshot.put("validityDays", tpl.getValidityDays());
+        snapshot.put("keyUsage", tpl.getKeyUsage());
+        snapshot.put("extKeyUsage", tpl.getExtKeyUsage());
+        snapshot.put("policyOid", tpl.getPolicyOid());
+        try {
+            return objectMapper.writeValueAsString(snapshot);
+        } catch (Exception e) {
+            throw new IllegalStateException("模板策略快照序列化失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 解析批准快照为签发策略；存量单快照为空时回退现查模板（模板不存在/已删除则报错，
+     * 已批准但模板丢失的单不允许"凭空"签发）。
+     */
+    private CertService.IssuePolicy parseSnapshot(CertApplication app) {
+        if (app.getTemplateSnapshot() == null || app.getTemplateSnapshot().isBlank()) {
+            return snapshotOf(templateService.detail(app.getTemplateId()));
+        }
+        try {
+            JsonNode node = objectMapper.readTree(app.getTemplateSnapshot());
+            return new CertService.IssuePolicy(
+                    text(node, "certType"),
+                    text(node, "algorithm"),
+                    node.hasNonNull("validityDays") ? node.get("validityDays").asInt() : null,
+                    text(node, "keyUsage"),
+                    text(node, "extKeyUsage"),
+                    text(node, "policyOid"));
+        } catch (Exception e) {
+            throw new IllegalStateException("模板策略快照解析失败（申请单 " + app.getApplyNo() + "）: " + e.getMessage(), e);
+        }
+    }
+
+    private CertService.IssuePolicy snapshotOf(CertTemplate tpl) {
+        return new CertService.IssuePolicy(tpl.getCertType(), tpl.getAlgorithm(), tpl.getValidityDays(),
+                tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid());
+    }
+
+    private String text(JsonNode node, String field) {
+        return node.hasNonNull(field) ? node.get(field).asText() : null;
     }
 
     private String required(Map<String, String> body, String key, String label) {

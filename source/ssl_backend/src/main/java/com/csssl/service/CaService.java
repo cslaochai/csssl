@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -37,7 +38,8 @@ import java.util.Set;
  *   <li>根CA（ROOT）：仅用于初始化与签发 SUB_CA；初始化完成后私钥支持两种离线化形态：
  *       「封存」（key.pem.enc 移存 .sealed）或「Shamir(3,5) 门限分持」（根私钥拆 5 份，任 3 份恢复，
  *       原始单点加密文件删除，对齐 §8.2.4.3 门限控制与密评"根密钥不得单点持有"）。</li>
- *   <li>SUB_CA（服务签发二级CA）：由根签发，承载在线签发/CRL/OCSP 签名；到期前自动轮换。</li>
+ *   <li>SUB_CA（服务签发二级CA）：由根签发，承载在线签发/CRL/OCSP 签名；到期由每日预检
+ *       {@link #dailyPrecheck()} 在根未封存时轮换，日常签发路径只取现有 SUB_CA、绝不隐式触发需根私钥的操作。</li>
  *   <li>私钥一律经 {@link KeyVault} SM4 加密落盘（key.pem.enc），数据库只存证书与元信息。</li>
  * </ul>
  */
@@ -60,48 +62,18 @@ public class CaService implements ApplicationRunner {
     public static final int SHARE_TOTAL = 5;
     public static final int SHARE_THRESHOLD = 3;
 
-    /** 份额解封后的临时根私钥（仅内存，用后 seal 清除） */
-    private volatile PrivateKey rootKeyCache;
-    /** 本次会话是否刚生成新根（生成后自动门限化） */
-    private volatile boolean newRootGenerated = false;
+    /**
+     * 份额解封后的临时根私钥（仅内存，用后 seal 清除）。
+     * 所有读写（loadRootKey / seal / unseal / 份额迁移 / ensureSubCa 离线判定）统一持本对象 this 锁，
+     * 杜绝"读到刚被封存的私钥"竞态。
+     */
+    private PrivateKey rootKeyCache;
 
     private final CssslProperties props;
     private final CaCertMapper certMapper;
     private final ObjectMapper objectMapper;
-
-    private volatile KeyVault vault;
-
-    private KeyVault vault() {
-        if (vault == null) {
-            synchronized (this) {
-                if (vault == null) {
-                    vault = new KeyVault(Path.of(props.getStoreDir()), resolveMasterKey());
-                }
-            }
-        }
-        return vault;
-    }
-
-    /** 主密钥解析：优先配置/环境变量 SSL_MASTER_KEY，否则首启生成随机密钥落盘 store-dir/master.key */
-    private String resolveMasterKey() {
-        String configured = props.getKeyVault().getMasterKey();
-        if (configured != null && !configured.isBlank()) {
-            return configured.trim();
-        }
-        Path mkFile = Path.of(props.getStoreDir()).resolve("master.key");
-        try {
-            if (Files.exists(mkFile)) {
-                return Files.readString(mkFile, StandardCharsets.UTF_8).trim();
-            }
-            Files.createDirectories(mkFile.getParent());
-            String generated = KeyVault.generateMasterKeyHex();
-            Files.writeString(mkFile, generated, StandardCharsets.UTF_8);
-            log.warn("[密钥保险库] 未配置 SSL_MASTER_KEY，已生成随机主密钥落盘 {}（生产环境必须通过环境变量注入）", mkFile);
-            return generated;
-        } catch (IOException e) {
-            throw new IllegalStateException("主密钥初始化失败: " + e.getMessage(), e);
-        }
-    }
+    /** 单例保险库 bean（KeyVaultConfig 提供），与 TsaService 共用同一 store-dir 实例 */
+    private final KeyVault vault;
 
     private Path rootDir() {
         return Path.of(props.getStoreDir(), "root");
@@ -129,10 +101,10 @@ public class CaService implements ApplicationRunner {
         try {
             CaCert root = ensureRoot();
             ensureSubCa();
-            // 新生成的根（或新装）自动门限化：拆 5 份份额并删除单点加密文件
-            if (newRootGenerated) {
+            // 门限化以「份额目录是否已有完整 5 份份额文件」为唯一判据（ensureRootShares 幂等）：
+            // 新根生成或中断后重启都会安全重试，不依赖任何内存标志；已封存/已门限态自动跳过
+            if (ROOT_KEY_ONLINE.equals(rootKeyState())) {
                 ensureRootShares();
-                newRootGenerated = false;
             }
             log.info("[CA] 启动完成：root={}({}), subCa 签发就绪，rootKeyState={}",
                     root.getSubjectCn(), root.getAlgorithm(), rootKeyState());
@@ -150,14 +122,14 @@ public class CaService implements ApplicationRunner {
     public synchronized CaCert ensureRoot() {
         CaCert root = findRoot();
 
-        if (root != null && (vault().keyExists("root", "key") || sharesExist())) {
+        if (root != null && (vault.keyExists("root", "key") || sharesExist())) {
             markExpiredIfNeeded(root);
             return root;
         }
-        if (root != null && !vault().keyExists("root", "key") && !sharesExist()) {
+        if (root != null && !vault.keyExists("root", "key") && !sharesExist()) {
             throw new IllegalStateException("根CA私钥缺失（" + rootDir() + "），无法签发二级CA，请恢复密钥或重建根CA");
         }
-        if (root == null && Files.exists(rootCertFile()) && vault().keyExists("root", "key")) {
+        if (root == null && Files.exists(rootCertFile()) && vault.keyExists("root", "key")) {
             CaCert rebuilt = rebuildFromFiles();
             log.warn("[根CA] 数据库记录缺失，已从落盘文件重建（serial={}）", rebuilt.getSerialHex());
             return rebuilt;
@@ -183,7 +155,7 @@ public class CaService implements ApplicationRunner {
         } catch (IOException e) {
             throw new IllegalStateException("根CA落盘失败: " + e.getMessage(), e);
         }
-        vault().storeKey("root", "key", PemUtil.keyToPem(keyPair.getPrivate()));
+        vault.storeKey("root", "key", PemUtil.keyToPem(keyPair.getPrivate()));
 
         CaCert row = new CaCert();
         row.setSerialHex(serial);
@@ -200,9 +172,7 @@ public class CaService implements ApplicationRunner {
         row.setCreatedBy("SYSTEM");
         row.setCreatedAt(LocalDateTime.now());
         certMapper.insert(row);
-
-        // 标记本次生成了新根：由调用方（run/initRoot）在签发 SUB_CA 后触发门限化（拆份额+删单点加密文件）
-        newRootGenerated = true;
+        // 门限化由调用方（run/initRoot）按"份额文件齐全"判据触发 ensureRootShares，无需内存标志
         log.info("[根CA] 初始化完成：cn={}, algorithm={}, serial={}", row.getSubjectCn(), algorithm, serial);
         return row;
     }
@@ -251,8 +221,11 @@ public class CaService implements ApplicationRunner {
         return PemUtil.parseCert(root.getCertPem());
     }
 
-    /** 加载根CA私钥：优先门限解封缓存；否则 SM4 加密文件（旧模式）；份额分持态必须显式解封 */
-    public PrivateKey loadRootKey() {
+    /**
+     * 加载根CA私钥：优先门限解封缓存；否则 SM4 加密文件（旧模式）；份额分持态必须显式解封。
+     * 与 seal/unseal/份额迁移同为 this 锁方法：读缓存与封存写入互斥，杜绝"读到刚被封存的私钥"。
+     */
+    public synchronized PrivateKey loadRootKey() {
         if (rootKeyCache != null) {
             return rootKeyCache;
         }
@@ -260,7 +233,7 @@ public class CaService implements ApplicationRunner {
         if (root == null) {
             throw new IllegalStateException("根CA未初始化");
         }
-        String keyPem = vault().loadKey("root", "key");
+        String keyPem = vault.loadKey("root", "key");
         if (keyPem == null) {
             if (sharesExist()) {
                 throw new IllegalStateException("根私钥已切换为 Shamir(3,5) 门限分持，请由密钥管理员提交任意 3 份份额解封后再轮换 SUB_CA");
@@ -275,10 +248,10 @@ public class CaService implements ApplicationRunner {
         if (sharesExist()) {
             return ROOT_KEY_SHARES;
         }
-        if (vault().isSealed("root", "key")) {
+        if (vault.isSealed("root", "key")) {
             return ROOT_KEY_SEALED;
         }
-        return vault().keyExists("root", "key") ? ROOT_KEY_ONLINE : ROOT_KEY_MISSING;
+        return vault.keyExists("root", "key") ? ROOT_KEY_ONLINE : ROOT_KEY_MISSING;
     }
 
     /** 封存根私钥：门限分持态清除内存缓存；旧模式将加密文件移存 .sealed（幂等） */
@@ -289,8 +262,8 @@ public class CaService implements ApplicationRunner {
         }
         ensureSubCa();
         rootKeyCache = null;
-        if (vault().keyExists("root", "key")) {
-            vault().sealKey("root", "key");
+        if (vault.keyExists("root", "key")) {
+            vault.sealKey("root", "key");
         }
         log.info("[根CA] 根私钥已封存（serial={}，门限分持态={}），日常签发由 SUB_CA 承担",
                 root.getSerialHex(), sharesExist());
@@ -304,8 +277,8 @@ public class CaService implements ApplicationRunner {
         if (sharesExist()) {
             throw new IllegalStateException("根私钥已切换为 Shamir(3,5) 门限分持，请用份额解封接口提交任意 3 份");
         }
-        vault().unsealKey("root", "key");
-        if (vault().isSealed("root", "key")) {
+        vault.unsealKey("root", "key");
+        if (vault.isSealed("root", "key")) {
             throw new IllegalStateException("根私钥文件缺失（已封存），无法解封");
         }
         log.info("[根CA] 根私钥已解封，恢复在线态");
@@ -361,7 +334,7 @@ public class CaService implements ApplicationRunner {
     /**
      * 根私钥门限化（幂等）：把当前 SM4 加密落盘的根私钥拆为 Shamir(3,5) 份额并删除单点加密文件。
      * 仅当 5 份份额全部成功落盘后才删除原始文件；任何一份失败则保留原始文件并报错（不静默降级）。
-     * 调用方：新根生成后自动触发（run/initRoot），旧环境由管理员显式调用迁移接口。
+     * 触发：run()/initRoot() 以「份额文件是否齐全」为唯一判据调用（中断/重启后可安全重试）；旧环境也可由管理员显式调用迁移接口。
      */
     public synchronized void ensureRootShares() {
         if (sharesExist()) {
@@ -371,7 +344,7 @@ public class CaService implements ApplicationRunner {
         if (root == null) {
             throw new IllegalStateException("根CA未初始化，无法生成门限份额");
         }
-        String keyPem = vault().loadKey("root", "key");
+        String keyPem = vault.loadKey("root", "key");
         if (keyPem == null) {
             throw new IllegalStateException("根私钥不可用（无 SM4 加密副本可拆分），无法生成门限份额");
         }
@@ -388,7 +361,7 @@ public class CaService implements ApplicationRunner {
         }
         // 5 份份额全部落盘成功后才删除单点加密文件
         if (sharesExist()) {
-            vault().deleteKey("root", "key");
+            vault.deleteKey("root", "key");
             rootKeyCache = null;
             log.warn("[根CA] 根私钥已切换为 Shamir(3,5) 门限分持（serial={}）：5 份份额落盘，原始加密文件已删除，恢复需任意 3 份",
                     root.getSerialHex());
@@ -465,7 +438,7 @@ public class CaService implements ApplicationRunner {
     /** 管理端主动初始化：已就绪则原样返回；根私钥丢失则吊销旧根并重建（连带吊销旧SUB_CA） */
     public synchronized CaStatusVo initRoot() {
         CaCert root = findRoot();
-        if (root != null && (vault().keyExists("root", "key") || sharesExist())) {
+        if (root != null && (vault.keyExists("root", "key") || sharesExist())) {
             return status();
         }
         if (root != null) {
@@ -474,6 +447,8 @@ public class CaService implements ApplicationRunner {
             root.setRevokeReason("ROOT_KEY_LOST");
             root.setRevokedAt(LocalDateTime.now());
             certMapper.updateById(root);
+            // 清理旧根密钥残留（含半套旧份额）：防遗留份额文件被"份额齐全"判据误命中、跳过新根门限化
+            clearRootKeyMaterial();
             log.warn("[根CA] 旧根私钥缺失，已吊销（serial={}）并重建新根", root.getSerialHex());
         }
         CaCert created = generateRoot();
@@ -485,7 +460,7 @@ public class CaService implements ApplicationRunner {
         return vo;
     }
 
-    /** 吊销全部有效 SUB_CA（根重建/根丢失时调用，旧链整体失效） */
+    /** 吊销全部有效 SUB_CA（根重建/根丢失时调用，旧链整体失效），并清理其磁盘私钥（仅 CA 类密钥） */
     private void revokeAllSubCa(String reason, String rootCn) {
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA));
@@ -495,16 +470,52 @@ public class CaService implements ApplicationRunner {
                 sub.setRevokeReason(reason);
                 sub.setRevokedAt(LocalDateTime.now());
                 certMapper.updateById(sub);
+                purgeCaKeyFiles(subCaDir(), sub.getSerialHex());
+            }
+        }
+    }
+
+    /**
+     * 清理被吊销 CA 的磁盘私钥文件（*.key.pem.enc / *.key.pem.enc.sealed / 遗留明文）。
+     * 只对 ROOT/SUB_CA 类密钥执行；叶证书私钥随证书吊销不删（院内数据恢复场景需要）。
+     */
+    private void purgeCaKeyFiles(Path dir, String serialHex) {
+        for (String fileName : new String[]{"key.pem.enc", "key.pem.enc.sealed", "key.pem"}) {
+            Path f = dir.resolve(fileName);
+            try {
+                if (Files.deleteIfExists(f)) {
+                    log.info("[CA密钥清理] 已删除被吊销CA私钥文件: {}（serial={}）", f, serialHex);
+                }
+            } catch (IOException e) {
+                log.warn("[CA密钥清理] 删除失败 {}（serial={}）: {}", f, serialHex, e.getMessage());
+            }
+        }
+    }
+
+    /** 根重建前清理旧根密钥残留：全形态加密文件 + 旧门限份额文件 */
+    private void clearRootKeyMaterial() {
+        purgeCaKeyFiles(rootDir(), "ROOT");
+        for (int i = 1; i <= SHARE_TOTAL; i++) {
+            Path stale = shareFile(i);
+            try {
+                if (Files.deleteIfExists(stale)) {
+                    log.info("[根CA] 重建前已删除旧根遗留份额文件: {}", stale);
+                }
+            } catch (IOException e) {
+                log.warn("[根CA] 旧份额文件删除失败（不阻断重建）: {}", e.getMessage());
             }
         }
     }
 
     // ==================== SUB_CA（服务签发二级CA） ====================
 
-    /** 确保有效 SUB_CA 存在（幂等）：无有效 SUB_CA 时用根签发；临近到期自动轮换 */
+    /**
+     * 确保 SUB_CA 存在（幂等，新建/轮换专用）：仅限启动、封存窗口（sealRootKey/initRoot）
+     * 与每日预检 {@link #dailyPrecheck()} 调用；日常签发路径不再经过这里。
+     */
     public synchronized CaCert ensureSubCa() {
         CaCert sub = findValidSubCa();
-        if (sub != null && vault().keyExists("subca", "key")) {
+        if (sub != null && vault.keyExists("subca", "key")) {
             return sub;
         }
         // 根私钥离线（封存/门限分持未解封）时不允许新建/轮换 SUB_CA
@@ -530,7 +541,7 @@ public class CaService implements ApplicationRunner {
         } catch (IOException e) {
             throw new IllegalStateException("SUB_CA落盘失败: " + e.getMessage(), e);
         }
-        vault().storeKey("subca", "key", PemUtil.keyToPem(subKey.getPrivate()));
+        vault.storeKey("subca", "key", PemUtil.keyToPem(subKey.getPrivate()));
 
         // 旧 SUB_CA 标记 EXPIRED（由新 SUB_CA 接管在线签发）
         List<CaCert> oldSubs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
@@ -572,7 +583,7 @@ public class CaService implements ApplicationRunner {
             return null;
         }
         CaCert sub = subs.get(0);
-        // 临近到期（< renewBeforeDays）视为不可继续签发，由 ensureSubCa 轮换
+        // 临近到期（< renewBeforeDays）视为不可继续签发，由 dailyPrecheck 在根可用时轮换
         LocalDateTime renewAt = sub.getValidTo() == null ? null
                 : sub.getValidTo().minusDays(props.getSubCa().getRenewBeforeDays());
         if (renewAt != null && renewAt.isBefore(LocalDateTime.now())) {
@@ -581,19 +592,50 @@ public class CaService implements ApplicationRunner {
         return sub;
     }
 
-    /** 当前签发CA（SUB_CA）：在线签发/CRL/OCSP 的证书与私钥 */
+    /**
+     * 每日到期预检（定时任务，与签发路径解耦）：SUB_CA 缺失/进入 renewBeforeDays 续期窗口
+     * 且根私钥可用（在线或份额已解封）时轮换；根封存期间只告警，绝不隐式触发需根私钥的操作。
+     */
+    @Scheduled(cron = "${csssl.subca-precheck-cron:0 30 3 * * ?}")
+    public synchronized void dailyPrecheck() {
+        try {
+            if (findValidSubCa() != null && vault.keyExists("subca", "key")) {
+                return;
+            }
+            String rkState = rootKeyState();
+            boolean rootUsable = ROOT_KEY_ONLINE.equals(rkState)
+                    || (ROOT_KEY_SHARES.equals(rkState) && rootKeyCache != null);
+            if (!rootUsable) {
+                log.warn("[SUB_CA] 预检发现 SUB_CA 缺失/临近到期，但根私钥离线（{}），请在根解封窗口轮换", rkState);
+                return;
+            }
+            ensureSubCa();
+            log.info("[SUB_CA] 到期预检完成轮换");
+        } catch (Exception e) {
+            log.warn("[SUB_CA] 到期预检失败: {}", e.getMessage());
+        }
+    }
+
+    /** 当前签发CA（SUB_CA）证书：只取现有有效 SUB_CA，不触发轮换（轮换见 {@link #dailyPrecheck()}） */
     public X509Certificate signingCert() {
-        CaCert sub = ensureSubCa();
-        return PemUtil.parseCert(sub.getCertPem());
+        return PemUtil.parseCert(requireValidSubCa().getCertPem());
     }
 
     public PrivateKey signingKey() {
-        CaCert sub = ensureSubCa();
-        String keyPem = vault().loadKey("subca", "key");
+        requireValidSubCa();
+        String keyPem = vault.loadKey("subca", "key");
         if (keyPem == null) {
-            throw new IllegalStateException("SUB_CA私钥缺失，请重建 SUB_CA");
+            throw new IllegalStateException("SUB_CA私钥缺失，请在根解封窗口轮换");
         }
         return PemUtil.parsePrivateKey(keyPem);
+    }
+
+    private CaCert requireValidSubCa() {
+        CaCert sub = findValidSubCa();
+        if (sub == null) {
+            throw new IllegalStateException("SUB_CA已过期，请在根解封窗口轮换");
+        }
+        return sub;
     }
 
     /** 当前有效 SUB_CA 记录（供链组装/OCSP 使用；无则返回 null） */
@@ -613,7 +655,7 @@ public class CaService implements ApplicationRunner {
         CaCert root = findRoot();
         if (root == null) {
             vo.setInitialized(false);
-            if (Files.exists(rootCertFile()) || vault().keyExists("root", "key")) {
+            if (Files.exists(rootCertFile()) || vault.keyExists("root", "key")) {
                 vo.setMessage("证书文件存在但数据库记录缺失，调用初始化接口可自动恢复");
             } else {
                 vo.setMessage("根CA未初始化，首次启动或点击「初始化根CA」自动生成");
@@ -669,16 +711,16 @@ public class CaService implements ApplicationRunner {
 
     /** 签发证书私钥加密落盘 */
     public void storeIssuedKey(String serialHex, String keyPem) {
-        vault().storeKey("issued/" + serialHex, "key", keyPem);
+        vault.storeKey("issued/" + serialHex, "key", keyPem);
     }
 
     /** 读取签发证书私钥（无则返回 null；已封存/主密钥错误时抛异常） */
     public String loadIssuedKey(String serialHex) {
-        return vault().loadKey("issued/" + serialHex, "key");
+        return vault.loadKey("issued/" + serialHex, "key");
     }
 
     public boolean issuedKeyExists(String serialHex) {
-        return vault().keyExists("issued/" + serialHex, "key");
+        return vault.keyExists("issued/" + serialHex, "key");
     }
 
     /** 证书过期后自动标记 EXPIRED（仅状态展示，不参与吊销） */

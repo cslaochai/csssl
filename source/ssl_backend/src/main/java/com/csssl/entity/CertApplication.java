@@ -36,6 +36,9 @@ public class CertApplication {
     /** 证书模板ID */
     private Long templateId;
 
+    /** 批准时固化的模板策略JSON（算法/有效期/KeyUsage/EKU/策略OID），签发按快照执行 */
+    private String templateSnapshot;
+
     /** SAN列表（DNS/IP，逗号分隔） */
     private String san;
 

@@ -1,15 +1,12 @@
 package com.csssl.service;
 
 import cn.hutool.core.util.HexUtil;
-import com.csssl.config.CssslProperties;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -34,39 +31,12 @@ public class AuditSigner {
     private static final String KEY_NAME = "key";
     private static final String PUB_NAME = "pub";
 
-    private final CssslProperties props;
-    private volatile com.csssl.util.KeyVault vault;
+    private final com.csssl.util.KeyVault vault;
     private volatile String cachedPublicPem;
 
-    public AuditSigner(CssslProperties props) {
-        this.props = props;
-    }
-
-    private com.csssl.util.KeyVault vault() {
-        if (vault == null) {
-            synchronized (this) {
-                if (vault == null) {
-                    vault = new com.csssl.util.KeyVault(Path.of(props.getStoreDir()), masterKey());
-                }
-            }
-        }
-        return vault;
-    }
-
-    private String masterKey() {
-        String configured = props.getKeyVault().getMasterKey();
-        if (configured != null && !configured.isBlank()) {
-            return configured.trim();
-        }
-        try {
-            Path mkFile = Path.of(props.getStoreDir()).resolve("master.key");
-            if (Files.exists(mkFile)) {
-                return Files.readString(mkFile, StandardCharsets.UTF_8).trim();
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("审计签名主密钥读取失败: " + e.getMessage(), e);
-        }
-        throw new IllegalStateException("审计签名主密钥未配置（store-dir/master.key 不存在且未设 SSL_MASTER_KEY）");
+    public AuditSigner(com.csssl.util.KeyVault vault) {
+        // 复用 KeyVaultConfig 单例，消除自建实例的重复 SM4 初始化与 master.key 首启竞态
+        this.vault = vault;
     }
 
     /** 确保审计签名密钥就绪（幂等）：首次生成 SM2 密钥对，私钥 SM4 加密落盘，公钥落盘 */
@@ -74,13 +44,13 @@ public class AuditSigner {
         if (cachedPublicPem != null) {
             return;
         }
-        if (!vault().keyExists(KEY_REL, KEY_NAME)) {
+        if (!vault.keyExists(KEY_REL, KEY_NAME)) {
             KeyPair kp = CertUtil.generateKeyPair("SM2");
-            vault().storeKey(KEY_REL, KEY_NAME, PemUtil.keyToPem(kp.getPrivate()));
-            vault().storeKey(KEY_REL, PUB_NAME, PemUtil.toPem("PUBLIC KEY", kp.getPublic().getEncoded()));
+            vault.storeKey(KEY_REL, KEY_NAME, PemUtil.keyToPem(kp.getPrivate()));
+            vault.storeKey(KEY_REL, PUB_NAME, PemUtil.toPem("PUBLIC KEY", kp.getPublic().getEncoded()));
             log.info("[审计签名] 已生成独立 SM2 审计签名密钥（私钥 SM4 加密落盘，公钥供验签）");
         }
-        cachedPublicPem = vault().loadKey(KEY_REL, PUB_NAME);
+        cachedPublicPem = vault.loadKey(KEY_REL, PUB_NAME);
     }
 
     /** 审计签名公钥 PEM（供外部/管理端验签） */
@@ -104,13 +74,15 @@ public class AuditSigner {
     public String sign(String canonical) {
         try {
             ensureKey();
-            PrivateKey key = PemUtil.parsePrivateKey(vault().loadKey(KEY_REL, KEY_NAME));
+            PrivateKey key = PemUtil.parsePrivateKey(vault.loadKey(KEY_REL, KEY_NAME));
             Signature sig = Signature.getInstance(SIGN_ALGO, "BC");
             sig.initSign(key);
             sig.update(canonical.getBytes(StandardCharsets.UTF_8));
             return HexUtil.encodeHexStr(sig.sign());
         } catch (Exception e) {
-            throw new IllegalStateException("审计签名失败: " + e.getMessage(), e);
+            log.error("[审计签名] 签名失败（密钥或算法异常）：{}", e.getMessage(), e);
+            // 原始异常可能带密钥路径，不外抛给接口响应
+            throw new IllegalStateException("审计签名失败，请稍后重试或联系密钥管理员", e);
         }
     }
 

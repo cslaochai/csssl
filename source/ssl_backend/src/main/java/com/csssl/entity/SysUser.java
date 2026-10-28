@@ -38,6 +38,15 @@ public class SysUser {
     /** 最近登录IP */
     private String lastLoginIp;
 
+    /** 连续登录失败次数（成功后清零） */
+    private Integer failedAttempts;
+
+    /** 锁定截止时间（NULL=未锁定） */
+    private LocalDateTime lockedUntil;
+
+    /** 会话版本号：口令/角色/状态变更时+1，JWT 携带比对，旧 token 即刻失效 */
+    private Integer tokenVersion;
+
     /** 创建时间 */
     private LocalDateTime createdAt;
 }

@@ -5,8 +5,10 @@ import com.csssl.common.Result;
 import com.csssl.dto.CertVo;
 import com.csssl.dto.CsrIssueRequest;
 import com.csssl.dto.IssueCertRequest;
+import com.csssl.entity.CertTemplate;
 import com.csssl.service.AuditService;
 import com.csssl.service.CertService;
+import com.csssl.service.CertTemplateService;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -35,14 +37,17 @@ public class CertController {
 
     private final CertService certService;
     private final AuditService auditService;
+    private final CertTemplateService templateService;
 
-    /** 证书列表（分页 + 类型/状态/关键字筛选） */
+    /** 证书列表（分页 + 类型/状态/关键字筛选；需 操作员/管理员/密钥管理员） */
     @GetMapping("/certs")
     public Result<Page<CertVo>> page(@RequestParam(defaultValue = "1") long pageNo,
                                      @RequestParam(defaultValue = "10") long pageSize,
                                      @RequestParam(required = false) String certType,
                                      @RequestParam(required = false) String status,
-                                     @RequestParam(required = false) String keyword) {
+                                     @RequestParam(required = false) String keyword,
+                                     HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
         return Result.success("查询成功", certService.page(pageNo, pageSize, certType, status, keyword));
     }
 
@@ -52,29 +57,32 @@ public class CertController {
         return Result.success("查询成功", certService.detail(id));
     }
 
-    /** 在线签发（内部生成密钥对，私钥落盘；需 CA操作员/系统管理员） */
+    /** 在线签发（内部生成密钥对，私钥落盘；需 CA操作员/系统管理员，SUB_CA 仅系统管理员） */
     @PostMapping("/certs")
     public Result<CertVo> issue(@RequestBody IssueCertRequest req, HttpServletRequest request) {
         RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), request);
         String username = RoleCode.currentUser(request);
         return Result.success("签发成功", certService.issue(req, username, clientIp(request)));
     }
 
-    /** CSR 签发（主体与公钥取自 CSR；需 CA操作员/系统管理员） */
+    /** CSR 签发（主体与公钥取自 CSR；需 CA操作员/系统管理员，SUB_CA 仅系统管理员） */
     @PostMapping("/certs/csr")
     public Result<CertVo> issueFromCsr(@RequestBody CsrIssueRequest req, HttpServletRequest request) {
         RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), request);
         String username = RoleCode.currentUser(request);
         return Result.success("CSR签发成功", certService.issueFromCsr(
                 req.getCsrPem(), req.getCertType(), req.getValidityDays(),
-                req.getSan(), req.getDescription(), username, clientIp(request)));
+                req.getSan(), req.getDescription(), username, clientIp(request), req.getTemplateId()));
     }
 
-    /** 公钥签发（RA 场景）：申请方自持私钥，仅提交 Subject DN + 公钥 PEM（需 CA操作员/系统管理员） */
+    /** 公钥签发（RA 场景）：申请方自持私钥，仅提交 Subject DN + 公钥 PEM（需 CA操作员/系统管理员，SUB_CA 仅系统管理员） */
     @PostMapping("/certs/public-key")
     public Result<CertVo> issueWithPublicKey(@RequestBody com.csssl.dto.PublicKeyIssueRequest req,
                                              HttpServletRequest request) {
         RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), request);
         String username = RoleCode.currentUser(request);
         return Result.success("公钥签发成功", certService.issueWithPublicKey(req, username, clientIp(request)));
     }
@@ -129,29 +137,36 @@ public class CertController {
                 certService.rekey(id, days, RoleCode.currentUser(request), clientIp(request)));
     }
 
-    /** 下载证书 PEM（公钥证书） */
+    /** 下载证书 PEM（公钥证书；需 操作员/管理员，落审计） */
     @GetMapping("/certs/{id}/cert.pem")
     public String downloadCert(@PathVariable Long id, HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
         String username = (String) request.getAttribute("ssl.username");
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
                 "下载证书：" + certService.detail(id).getSubjectCn(), clientIp(request));
         return certService.certPem(id);
     }
 
-    /** 下载私钥 PEM（受 allow-private-key-download 开关控制） */
+    /** 下载私钥 PEM（需 管理员/密钥管理员；受 allow-private-key-download 开关控制，落审计） */
     @GetMapping("/certs/{id}/key.pem")
     public String downloadKey(@PathVariable Long id, HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
         String username = (String) request.getAttribute("ssl.username");
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
                 "下载私钥：" + certService.detail(id).getSubjectCn(), clientIp(request));
         return certService.keyPem(id);
     }
 
-    /** 导出 PKCS#12（软件证书场景，PBE 口令加密；私钥由 CA 侧持有的终端证书可导） */
-    @GetMapping("/certs/{id}/export/p12")
+    /**
+     * 导出 PKCS#12（软件证书场景，PBE 口令加密；需 管理员/密钥管理员，落审计）。
+     * 口令走 POST body 而非 query 参数，避免进入访问日志/Referer 留痕。
+     */
+    @PostMapping("/certs/{id}/export/p12")
     public ResponseEntity<byte[]> exportP12(@PathVariable Long id,
-                                            @RequestParam String password,
+                                            @RequestBody(required = false) Map<String, String> body,
                                             HttpServletRequest request) {
+        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        String password = body == null ? null : body.get("password");
         byte[] p12 = certService.exportP12(id, password);
         String username = (String) request.getAttribute("ssl.username");
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
@@ -166,6 +181,23 @@ public class CertController {
     @GetMapping("/overview")
     public Result<Map<String, Object>> overview() {
         return Result.success("查询成功", certService.overview());
+    }
+
+    /**
+     * RA 直发接口收紧：目标模板（或直传类型）为 SUB_CA 时仅 ADMIN 可发（OPERATOR 不够，
+     * 防止操作员越权签发可继续签发证书的中间CA）；带模板ID时先校验模板存在且未被删除。
+     */
+    private void checkSubCaAndTemplate(Long templateId, String reqCertType, HttpServletRequest request) {
+        if (templateId != null) {
+            CertTemplate tpl = templateService.detail(templateId);
+            if ("SUB_CA".equalsIgnoreCase(tpl.getCertType())) {
+                RoleCode.require(request, RoleCode.ADMIN);
+            }
+            return;
+        }
+        if ("SUB_CA".equalsIgnoreCase(reqCertType)) {
+            RoleCode.require(request, RoleCode.ADMIN);
+        }
     }
 
     private String clientIp(HttpServletRequest request) {

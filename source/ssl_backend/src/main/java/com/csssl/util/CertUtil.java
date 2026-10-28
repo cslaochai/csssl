@@ -79,11 +79,17 @@ public final class CertUtil {
         }
     }
 
-    /** 生成随机正整数序列号（16 字节） */
+    /**
+     * 生成随机正整数序列号（16 字节）。
+     * RFC 5280 §2.1：serialNumber 为正 INTEGER——首字节清符号位（&amp; 0x7F）保证为正数；
+     * 强制置 0x01 位保证首字节非零，避免 BigInteger 编码吃掉前导零后实际熵缩水。
+     * 注：撞号由 ssl_ca_cert.uk_serial 唯一索引兜底；128-bit 随机值在十万级签发量下
+     * 碰撞概率约 10^-29，不做入库重试（序列已签入证书，重试须整证重签，得不偿失）。
+     */
     public static BigInteger randomSerial() {
         byte[] bytes = new byte[16];
         new SecureRandom().nextBytes(bytes);
-        bytes[0] &= 0x7F;
+        bytes[0] = (byte) ((bytes[0] & 0x7F) | 0x01);
         return new BigInteger(bytes);
     }
 

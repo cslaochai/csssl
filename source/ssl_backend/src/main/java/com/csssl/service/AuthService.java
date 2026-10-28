@@ -2,6 +2,7 @@ package com.csssl.service;
 
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.csssl.dto.LoginRequest;
 import com.csssl.entity.SysUser;
 import com.csssl.mapper.SysUserMapper;
@@ -17,11 +18,21 @@ import java.util.Map;
 
 /**
  * 登录鉴权：SM2 解密口令 → BCrypt 校验 → JWT 会话（对齐 cslk HIS / csmig 方案）。
+ *
+ * <p>身份鉴别强化：连续口令错误锁定账号（等保要求），JWT 携带 token_version 支持会话吊销，
+ * 自助改密走与登录一致的 SM2 密文通道。</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
+
+    /** 连续失败锁定阈值（等保身份鉴别：连续 5 次失败锁定） */
+    private static final int MAX_FAILED_ATTEMPTS = 5;
+    /** 锁定时长（分钟） */
+    private static final int LOCK_MINUTES = 15;
+    /** 口令最短长度（复杂度：长度 + 字母数字两类，见 checkPasswordComplexity） */
+    private static final int MIN_PASSWORD_LENGTH = 8;
 
     private final SysUserMapper userMapper;
     private final Sm2Util sm2Util;
@@ -35,20 +46,38 @@ public class AuthService {
         if (req.getUsername() == null || req.getUsername().isBlank()) {
             throw new IllegalArgumentException("账号不能为空");
         }
+        String username = req.getUsername().trim();
         String password = sm2Util.decryptPassword(req.getPasswordCipher());
 
-        SysUser user = userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUsername, req.getUsername().trim()));
-        if (user == null || user.getStatus() == null || user.getStatus() != 1
-                || !BCrypt.checkpw(password, user.getPassword())) {
-            auditService.record(req.getUsername().trim(), "LOGIN", null, "登录失败（账号或口令错误）", ip);
+        SysUser user = loadByUsername(username);
+        if (user == null) {
+            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip);
+            throw new IllegalArgumentException("账号或口令错误");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(now)) {
+            auditService.record(username, "LOGIN", null, "登录失败（账号锁定中）", ip);
+            throw new IllegalArgumentException("账号已锁定，请稍后再试");
+        }
+        // 停用账号与口令错误同口径回显，避免账号枚举
+        if (user.getStatus() == null || user.getStatus() != 1) {
+            auditService.record(username, "LOGIN", null, "登录失败（账号已停用）", ip);
+            throw new IllegalArgumentException("账号或口令错误");
+        }
+        if (!passwordMatches(password, user)) {
+            registerLoginFailure(user, now);
+            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip);
             throw new IllegalArgumentException("账号或口令错误");
         }
 
-        String token = jwtUtil.createToken(user.getUsername(), user.getRoleCode());
-        user.setLastLoginTime(LocalDateTime.now());
-        user.setLastLoginIp(ip);
-        userMapper.updateById(user);
+        String token = jwtUtil.createToken(user.getUsername(), user.getRoleCode(),
+                user.getId(), user.getTokenVersion());
+        userMapper.update(null, new LambdaUpdateWrapper<SysUser>()
+                .eq(SysUser::getId, user.getId())
+                .set(SysUser::getFailedAttempts, 0)
+                .set(SysUser::getLockedUntil, null)
+                .set(SysUser::getLastLoginTime, now)
+                .set(SysUser::getLastLoginIp, ip));
         auditService.record(user.getUsername(), "LOGIN", null, "登录成功", ip);
 
         Map<String, Object> data = new HashMap<>();
@@ -59,8 +88,106 @@ public class AuthService {
         return data;
     }
 
+    /**
+     * 自助改密：校验原口令 → 校验新口令复杂度 → BCrypt 落库 → token_version+1（旧令牌即刻失效）。
+     * 新旧口令均为前端 SM2 密文，与登录同通道，避免明文过网。
+     *
+     * @param tokenVersion 当前令牌携带的会话版本；与库中不符说明令牌已被吊销（改密/改角色/停用后）
+     */
+    public void changePassword(String username, Integer tokenVersion,
+                               String oldPasswordCipher, String newPasswordCipher, String ip) {
+        if (username == null || username.isBlank()) {
+            throw new SecurityException("未登录或登录已过期");
+        }
+        SysUser user = loadByUsername(username.trim());
+        if (user == null || user.getStatus() == null || user.getStatus() != 1) {
+            throw new IllegalArgumentException("账号不存在或已停用");
+        }
+        int currentVersion = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
+        if (tokenVersion == null || tokenVersion != currentVersion) {
+            throw new IllegalArgumentException("登录状态已失效，请重新登录后再修改口令");
+        }
+        String oldPassword = sm2Util.decryptPassword(oldPasswordCipher);
+        String newPassword = sm2Util.decryptPassword(newPasswordCipher);
+        if (!passwordMatches(oldPassword, user)) {
+            auditService.record(user.getUsername(), "PWD_CHANGE", null, "修改口令失败（原口令错误）", ip);
+            throw new IllegalArgumentException("原口令错误");
+        }
+        checkPasswordComplexity(newPassword);
+        if (passwordMatches(newPassword, user)) {
+            throw new IllegalArgumentException("新口令不能与原口令相同");
+        }
+        userMapper.update(null, bumpTokenVersion(new LambdaUpdateWrapper<SysUser>()
+                        .eq(SysUser::getId, user.getId()))
+                .set(SysUser::getPassword, BCrypt.hashpw(newPassword, BCrypt.gensalt())));
+        auditService.record(user.getUsername(), "PWD_CHANGE", null, "自助修改登录口令成功（需重新登录）", ip);
+        log.info("[账号] {} 自助修改口令，会话版本已递增", user.getUsername());
+    }
+
     /** 退出登录：仅记录审计，JWT 无状态，客户端丢弃令牌即可 */
     public void logout(String username, String ip) {
         auditService.record(username, "LOGOUT", null, "退出登录", ip);
+    }
+
+    /**
+     * 口令复杂度：≥8 位且同时包含字母和数字（建号/重置/自助改密共用同一口径）。
+     */
+    public static void checkPasswordComplexity(String password) {
+        if (password == null || password.isBlank()) {
+            throw new IllegalArgumentException("口令不能为空");
+        }
+        if (password.length() < MIN_PASSWORD_LENGTH) {
+            throw new IllegalArgumentException("口令长度不足：至少需 " + MIN_PASSWORD_LENGTH + " 位");
+        }
+        if (password.length() > 64) {
+            throw new IllegalArgumentException("口令长度超限：最多 64 位");
+        }
+        boolean hasLetter = false;
+        boolean hasDigit = false;
+        for (char c : password.toCharArray()) {
+            if (Character.isLetter(c)) {
+                hasLetter = true;
+            } else if (Character.isDigit(c)) {
+                hasDigit = true;
+            }
+        }
+        if (!hasLetter || !hasDigit) {
+            throw new IllegalArgumentException("口令需同时包含字母和数字");
+        }
+    }
+
+    /** 按用户名取账号（唯一索引） */
+    private SysUser loadByUsername(String username) {
+        return userMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username));
+    }
+
+    /** BCrypt 校验：哈希列异常（历史脏数据）按校验失败处理，不外泄异常细节 */
+    private boolean passwordMatches(String rawPassword, SysUser user) {
+        try {
+            return user.getPassword() != null && BCrypt.checkpw(rawPassword, user.getPassword());
+        } catch (Exception e) {
+            log.warn("[登录] 口令哈希校验异常 user={}：{}", user.getUsername(), e.getMessage());
+            return false;
+        }
+    }
+
+    /** 失败计数递增；达到阈值即锁定并清零计数（解锁后重新计数） */
+    private void registerLoginFailure(SysUser user, LocalDateTime now) {
+        int attempts = (user.getFailedAttempts() == null ? 0 : user.getFailedAttempts()) + 1;
+        LambdaUpdateWrapper<SysUser> uw = new LambdaUpdateWrapper<SysUser>().eq(SysUser::getId, user.getId());
+        if (attempts >= MAX_FAILED_ATTEMPTS) {
+            uw.set(SysUser::getFailedAttempts, 0)
+                    .set(SysUser::getLockedUntil, now.plusMinutes(LOCK_MINUTES));
+            log.warn("[登录] 连续失败 {} 次，账号锁定 {} 分钟：{}", attempts, LOCK_MINUTES, user.getUsername());
+        } else {
+            uw.set(SysUser::getFailedAttempts, attempts);
+            log.info("[登录] 口令错误 user={} 累计失败 {} 次", user.getUsername(), attempts);
+        }
+        userMapper.update(null, uw);
+    }
+
+    /** 追加 token_version 原子自增（SQL 侧自增，避免并发写覆盖）；建号/改角色/停用/重置口令共用 */
+    public static LambdaUpdateWrapper<SysUser> bumpTokenVersion(LambdaUpdateWrapper<SysUser> uw) {
+        return uw.setSql("token_version = COALESCE(token_version, 0) + 1");
     }
 }

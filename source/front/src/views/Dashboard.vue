@@ -58,9 +58,13 @@ const statCards = computed(() => [
 ])
 
 async function load() {
-  const res = await getOverview()
-  overview.value = res.data
-  root.value = res.data.root || {}
+  try {
+    const res = await getOverview()
+    overview.value = res.data
+    root.value = res.data.root || {}
+  } catch (e) {
+    // 错误提示已由拦截器统一处理
+  }
 }
 
 onMounted(load)

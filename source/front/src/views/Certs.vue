@@ -24,9 +24,10 @@
           />
           <el-button type="primary" plain @click="reload">查询</el-button>
         </div>
-        <div>
+        <div v-if="canIssue">
           <el-button type="primary" @click="openIssue">签发证书</el-button>
           <el-button @click="openCsr">CSR签发</el-button>
+          <el-button @click="openPubKey">公钥直签</el-button>
         </div>
       </div>
 
@@ -54,10 +55,10 @@
         <el-table-column prop="description" label="用途说明" min-width="140" show-overflow-tooltip />
         <el-table-column label="操作" width="490" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
-            <el-button link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
+            <el-button v-if="canDownloadCert" link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
+            <el-button v-if="canDownloadKey" link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
             <el-button
-              v-if="['SERVER', 'CLIENT'].includes(row.certType)"
+              v-if="canDownloadKey && ['SERVER', 'CLIENT'].includes(row.certType)"
               link
               size="small"
               @click="openExportP12(row)"
@@ -186,6 +187,49 @@
       </template>
     </el-dialog>
 
+    <!-- 公钥直签（RA 场景：申请方自持私钥） -->
+    <el-dialog v-model="pubKeyVisible" title="公钥直签（申请方自持私钥，仅提交公钥）" width="560px" :close-on-click-modal="false">
+      <el-form :model="pubKeyForm" label-width="110px">
+        <el-form-item label="公钥PEM" required>
+          <el-input
+            v-model="pubKeyForm.publicKeyPem"
+            type="textarea"
+            :rows="7"
+            placeholder="-----BEGIN PUBLIC KEY----- ...（SPKI 格式，RSA2048 或 SM2 均可）"
+          />
+        </el-form-item>
+        <el-form-item label="证书模板">
+          <el-select v-model="pubKeyForm.templateId" clearable placeholder="不选则按下发参数签发" style="width: 100%">
+            <el-option v-for="t in templates" :key="t.id" :label="`${t.name}（${t.algorithm || '-'}）`" :value="t.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="主体CN" required>
+          <el-input v-model="pubKeyForm.subjectCn" placeholder="如 his.cslk.local / 张三" />
+        </el-form-item>
+        <el-form-item label="证书类型">
+          <el-radio-group v-model="pubKeyForm.certType">
+            <el-radio-button value="SERVER">服务端</el-radio-button>
+            <el-radio-button value="CLIENT">客户端</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="有效期(天)">
+          <el-input-number v-model="pubKeyForm.validityDays" :min="1" :max="36500" />
+        </el-form-item>
+        <el-form-item label="SAN">
+          <el-input v-model="pubKeyForm.san" placeholder="逗号分隔：DNS或IP（模板锁定SAN时以模板为准）" />
+        </el-form-item>
+        <el-form-item label="用途说明">
+          <el-input v-model="pubKeyForm.description" type="textarea" :rows="2" placeholder="颁发给哪个子系统/服务" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="pubKeyVisible = false">取消</el-button>
+          <el-button type="primary" :loading="submitting" @click="onPubKeyIssue">签发</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- 挂起 -->
     <el-dialog v-model="suspendVisible" title="挂起证书（GM/T 0034 §12.6，可解除）" width="460px" :close-on-click-modal="false">
       <p style="margin-bottom: 12px">
@@ -283,6 +327,8 @@ import {
   pageCerts,
   issueCert,
   issueCertByCsr,
+  issueCertByPublicKey,
+  pageTemplates,
   revokeCert,
   suspendCert,
   unsuspendCert,
@@ -293,6 +339,12 @@ import {
   downloadKeyPem
 } from '@/api/system'
 import { downloadText } from '@/lib/download'
+
+// 下载权限与后端兜底 403 对齐：cert.pem=OPERATOR/ADMIN；key.pem 与 p12=ADMIN/KEY_ADMIN
+const role = localStorage.getItem('role') || ''
+const canIssue = ['ADMIN', 'OPERATOR'].includes(role)
+const canDownloadCert = ['ADMIN', 'OPERATOR'].includes(role)
+const canDownloadKey = ['ADMIN', 'KEY_ADMIN'].includes(role)
 
 const loading = ref(false)
 const rows = ref([])
@@ -317,6 +369,18 @@ const p12Password = ref('')
 const submitting = ref(false)
 
 const defaultDays = 365
+
+const pubKeyVisible = ref(false)
+const templates = ref([])
+const pubKeyForm = reactive({
+  publicKeyPem: '',
+  templateId: null,
+  subjectCn: '',
+  certType: 'SERVER',
+  validityDays: defaultDays,
+  san: '',
+  description: ''
+})
 
 const issueForm = reactive({
   subjectCn: '',
@@ -360,6 +424,8 @@ async function load() {
     })
     rows.value = res.data.records || []
     total.value = res.data.total || 0
+  } catch (e) {
+    // 错误提示已由拦截器统一处理
   } finally {
     loading.value = false
   }
@@ -419,6 +485,55 @@ async function onCsrIssue() {
     await issueCertByCsr({ ...csrForm, validityDays: csrForm.validityDays || defaultDays })
     ElMessage.success('CSR签发成功（私钥由申请方自持）')
     csrVisible.value = false
+    load()
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function openPubKey() {
+  Object.assign(pubKeyForm, {
+    publicKeyPem: '',
+    templateId: null,
+    subjectCn: '',
+    certType: 'SERVER',
+    validityDays: defaultDays,
+    san: '',
+    description: ''
+  })
+  pubKeyVisible.value = true
+  if (templates.value.length === 0) {
+    try {
+      const res = await pageTemplates({ pageNo: 1, pageSize: 100 })
+      templates.value = res.data.records || []
+    } catch (e) {
+      // 模板加载失败不阻断手填签发参数
+    }
+  }
+}
+
+async function onPubKeyIssue() {
+  if (!pubKeyForm.publicKeyPem.trim()) {
+    ElMessage.warning('请粘贴公钥 PEM')
+    return
+  }
+  if (!pubKeyForm.subjectCn.trim()) {
+    ElMessage.warning('请填写主体CN')
+    return
+  }
+  submitting.value = true
+  try {
+    await issueCertByPublicKey({
+      subjectDn: `CN=${pubKeyForm.subjectCn.trim()}`,
+      publicKeyPem: pubKeyForm.publicKeyPem,
+      certType: pubKeyForm.certType,
+      validityDays: pubKeyForm.validityDays || defaultDays,
+      templateId: pubKeyForm.templateId || undefined,
+      san: pubKeyForm.san || undefined,
+      description: pubKeyForm.description || undefined
+    })
+    ElMessage.success('公钥直签成功（私钥由申请方自持，CA 不留存）')
+    pubKeyVisible.value = false
     load()
   } finally {
     submitting.value = false

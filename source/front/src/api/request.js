@@ -91,10 +91,19 @@ request.interceptors.response.use(
       if (status === 401) {
         if (!isLoginRequest) {
           localStorage.removeItem('token')
+          localStorage.removeItem('username')
+          localStorage.removeItem('role')
           if (!redirectingToLogin) {
             redirectingToLogin = true
             window.location.href = '/login'
           }
+        }
+        return Promise.reject(error)
+      }
+      // 真实 HTTP 403：已登录但角色不足，只提示权限不足，不跳登录页
+      if (status === 403) {
+        if (!silent) {
+          notifyError('权限不足，无法执行该操作')
         }
         return Promise.reject(error)
       }

@@ -104,7 +104,8 @@ npm run build               # 构建产物 dist/
 | 接口 | 说明 |
 |---|---|
 | `GET /ssl/auth/publicKey` | 登录 SM2 公钥 |
-| `POST /ssl/auth/login` | 登录（口令 SM2 密文） |
+| `POST /ssl/auth/login` | 登录（口令 SM2 密文；5 次失败锁定 15 分钟） |
+| `POST /ssl/auth/changePassword` | 自助改口令（SM2 密文新旧口令；改后旧 token 即刻失效） |
 | `GET /ssl/admin/ca/status` | 根CA状态（含 SUB_CA 信息与根密钥封存状态） |
 | `POST /ssl/admin/ca/init` | 初始化/重建根CA（幂等，私钥丢失时吊销旧根重建） |
 | `POST /ssl/admin/ca/seal` | 封存根私钥（离线化，此后仅 SUB_CA 在线签发） |
@@ -121,13 +122,14 @@ npm run build               # 构建产物 dist/
 | `POST /ssl/admin/certs/{id}/renew` | 证书更新（§12.2：原证吊销 SUPERSEDED + 同公钥重签，私钥仍申请方自持） |
 | `POST /ssl/admin/certs/{id}/rekey` | 密钥更新（§12.2：仅限 CA 持私钥的在线签发证书，换新密钥对重签） |
 | `GET /ssl/admin/certs/{id}/cert.pem` | 下载证书（含 SUB_CA 中间CA链） |
-| `GET /ssl/admin/certs/{id}/key.pem` | 下载私钥（受开关控制，CSR 签发无私钥） |
-| `GET /ssl/admin/certs/{id}/export/p12` | 导出 PKCS#12（口令加密，证书链+私钥，软件证书场景） |
+| `GET /ssl/admin/certs/{id}/key.pem` | 下载私钥（仅 ADMIN/KEY_ADMIN + 开关控制，CSR 签发无私钥） |
+| `POST /ssl/admin/certs/{id}/export/p12` | 导出 PKCS#12（body `{password}`，口令不进访问日志；仅 ADMIN/KEY_ADMIN） |
 | `GET /ssl/admin/crl` | 吊销记录 + CRL PEM + thisUpdate/nextUpdate |
 | `GET /ssl/admin/crl/download` | 下载 CRL |
 | `GET /ssl/admin/crl/delta` | 增量 CRL 详情（PEM + 基础全量编号） |
-| `GET /ssl/admin/audit` | 审计日志（登录/签发/吊销/封存/导出留痕） |
-| `POST /ssl/admin/audit/verify` | 审计验签（防篡改 + 哈希链） |
+| `GET /ssl/admin/audit` | 审计日志（登录/签发/吊销/封存/导出/账号与模板变更留痕；**仅 AUDITOR 可查询/验签/导出**） |
+| `POST /ssl/admin/audit/verify` | 审计验签（防篡改 + 哈希链，仅 AUDITOR） |
+| `GET /ssl/admin/audit/chain-verify` | 全链对账（按 id 序逐条自签名+prev_id 衔接核验，检出删除/分叉，仅 AUDITOR） |
 | `GET /ssl/admin/audit/export` | 审计归档导出 CSV（UTF-8 BOM）+ 报告 SM2 签名（留存 ≥5 年材料） |
 | `GET /ssl/admin/templates` | 证书模板管理（内置 SERVER_COMM/DOCTOR_SIGN/SUB_CA，签发锁定扩展项） |
 | `GET/POST /ssl/admin/applications` | RA 申请-审核-签发流程（提交→批准/驳回→签发，审核人≠录入人） |
@@ -141,13 +143,13 @@ npm run build               # 构建产物 dist/
 - **根密钥 Shamir(3,5) 门限分持（§8.2.4.3）**：根私钥 GF(256) 秘密共享拆 5 份份额、任 3 份恢复，门限化后原始 SM4 加密文件删除、份额成为唯一持久形态（新根自动触发/旧环境显式迁移接口）；份额解封仅内存缓存并以根证书公钥签名挑战校验（防篡改/错配），用后封存清除——对齐密评"根密钥不得单点持有"
 - **私钥加密落盘**：所有私钥经 `KeyVault` 以 SM4 加密后落盘（`*.key.pem.enc`），主密钥由 `SSL_MASTER_KEY` 注入（未配置时首启随机生成落盘 `master.key`）；旧明文密钥自动迁移加密；HSM/加密机（GM/T 0018）可在同类接口处替换
 - **吊销可发现性**：签发的证书带 CRL 分发点（CDP）与 OCSP 访问点（AIA）扩展；CRL 由 SUB_CA 签名并携带 thisUpdate/nextUpdate 与单调递增 CRLNumber；提供标准 OCSP 三态 responder（good/revoked/unknown，RFC 6960，POST+GET 双通道，nextUpdate 时效可配 `SSL_OCSP_NEXT_UPDATE_HOURS`）
-- **增量 CRL（dCRL）**：`/ca/public/crl/delta` 只发布自最近全量以来新增的吊销/挂起条目，带 DeltaCRLIndicator 指向基础全量编号；发布状态持久化 `store-dir/crl-state.json`（重启不丢），依赖方全量+增量合并即可增量同步（对标格尔/厂商分块增量做法）
+- **增量 CRL（dCRL）**：`/ca/public/crl/delta` 只发布自最近全量以来新增的吊销/挂起条目，带 DeltaCRLIndicator 指向基础全量编号；发布状态持久化 `ssl_crl_state` 表（行锁保证多实例一致，取代旧 crl-state.json）；CRL 按"吊销集合指纹"判重发布——内容未变不递增编号不重签（公开拉取不可再被刷号），每日定时主动发布，依赖方全量+增量合并即可增量同步
 - **证书生命周期**：签发→挂起/解除挂起（CRL certificateHold / OCSP on-hold）→更新 renew / 重签 rekey →吊销→过期归档，全流程审计留痕（GM/T 0034 §12）
 - **证书链下载**：`/admin/certs/{id}/cert.pem` 返回叶子 + SUB_CA 完整链，TLS 服务端部署免手工拼接；软件证书场景支持 PKCS#12 打包导出（口令加密，叶子+SUB_CA+根完整链）
 - **国密支持**：签发算法可选 `SM2`（SM3withSM2 签名、sm2p256v1 曲线），与 openssl / 国密工具链互通；`Sm4Util` 提供 SM4 加解密供 csmig 生产期使用
-- **审计留痕**：登录/签发/吊销/挂起/导出/封存解封全部落 `ssl_audit_log`；每条 SM3withSM2 签名 + 上一条签名哈希链（改任何一条即断链），验签接口在线核验，归档导出 CSV 带报告签名（留存 ≥5 年）
+- **审计留痕**：登录/签发/吊销/挂起/导出/封存解封/建号改号停用/模板增删改全部落 `ssl_audit_log`；每条 SM3withSM2 签名 + SM3 哈希链（prev_id+prev_sign 双绑定：改任何一条即断链、**删中间记录由链对账检出**）；验签/链对账/导出仅 AUDITOR；归档导出 CSV 带报告签名（留存 ≥5 年）
 - **分权制衡**：标准六类角色——系统管理员 ADMIN / CA操作员 OPERATOR / 审核员 APPROVER / 审计员 AUDITOR / 安全管理员 SECURITY_ADMIN（证书模板策略）/ 密钥管理员 KEY_ADMIN（根密钥门限分持与封存解封），签发与审核分离（审核人≠录入人，§10.1g），路由与菜单按角色显隐
-- **鉴权对齐**：登录链路（SM2 加密口令 → BCrypt 校验 → JWT）与 cslk HIS、csmig 完全一致，前端复用 `sm-crypto`
+- **鉴权对齐**：登录链路（SM2 加密口令 → BCrypt 校验 → JWT 携带 uid/token_version）与 cslk HIS、csmig 一致，前端复用 `sm-crypto`；改密/改角色/停用即递增版本号吊销全部旧会话，5 次口令错误锁定 15 分钟，新口令复杂度 ≥8 位含字母数字
 
 ## 生产期配置建议
 

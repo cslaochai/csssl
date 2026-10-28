@@ -1,39 +1,50 @@
 package com.csssl.common;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
- * 全局异常处理：参数类错误返回 400，业务运行错误返回 500，统一 Result 协议。
+ * 全局异常处理：按异常语义设真实 HTTP 状态码（400/403/500），响应体仍沿用统一 Result 协议。
+ *
+ * <p>对外文案只保留"入参校验"这类可安全回显的信息；运行期与权限细节一律写日志，
+ * 避免异常消息泄露密钥路径、内部状态与权限矩阵。</p>
  */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    /** 参数校验/业务规则不满足（如"主体CN不能为空"） */
+    /** 参数校验/业务规则不满足（面向入参，消息本身即校验口径，可回显） */
     @ExceptionHandler(IllegalArgumentException.class)
-    public Result<Void> handleIllegalArgument(IllegalArgumentException e) {
-        return Result.error(400, e.getMessage());
+    public ResponseEntity<Result<Void>> handleIllegalArgument(IllegalArgumentException e) {
+        log.warn("[参数错误] {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(HttpStatus.BAD_REQUEST.value(), e.getMessage()));
     }
 
-    /** 运行期错误（根CA未初始化、私钥缺失、签发失败等） */
+    /** 运行期错误（根CA未初始化、私钥缺失、签发失败等）：原始消息只进日志 */
     @ExceptionHandler(IllegalStateException.class)
-    public Result<Void> handleIllegalState(IllegalStateException e) {
-        log.error("[系统错误] {}", e.getMessage());
-        return Result.error(500, e.getMessage());
+    public ResponseEntity<Result<Void>> handleIllegalState(IllegalStateException e) {
+        log.error("[系统错误] {}", e.getMessage(), e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Result.error(HttpStatus.INTERNAL_SERVER_ERROR.value(), "系统繁忙，操作未能完成"));
     }
 
-    /** 权限不足（GM/T 0034 多角色分权，返回 403） */
+    /** 权限不足（GM/T 0034 多角色分权）：所需/当前角色由 RoleCode 写日志，响应不echo */
     @ExceptionHandler(SecurityException.class)
-    public Result<Void> handleSecurity(SecurityException e) {
-        return Result.error(403, e.getMessage());
+    public ResponseEntity<Result<Void>> handleSecurity(SecurityException e) {
+        log.warn("[权限拦截] {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Result.error(HttpStatus.FORBIDDEN.value(), "权限不足"));
     }
 
     /** 兜底异常 */
     @ExceptionHandler(Exception.class)
-    public Result<Void> handleException(Exception e) {
+    public ResponseEntity<Result<Void>> handleException(Exception e) {
         log.error("[系统异常]", e);
-        return Result.error(500, "系统繁忙，请稍后重试");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Result.error(HttpStatus.INTERNAL_SERVER_ERROR.value(), "系统繁忙，请稍后重试"));
     }
 }

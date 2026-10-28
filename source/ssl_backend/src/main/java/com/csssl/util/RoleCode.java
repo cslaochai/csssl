@@ -1,6 +1,7 @@
 package com.csssl.util;
 
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 管理角色与接口权限校验（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡）。
@@ -15,6 +16,7 @@ import jakarta.servlet.http.HttpServletRequest;
  *   <li>KEY_ADMIN     密钥管理员：根密钥门限分持/封存/解封（份额保管与恢复）</li>
  * </ul>
  */
+@Slf4j
 public final class RoleCode {
 
     /** 系统管理员 */
@@ -46,10 +48,14 @@ public final class RoleCode {
     /**
      * 校验当前登录人是否具备任一角色；不具备抛 {@link SecurityException}（全局转 403）。
      * 同时校验已登录（用户名非空）。
+     *
+     * <p>拒绝原因（所需角色/当前角色）只写日志，异常文案泛化为"权限不足"，
+     * 防止未授权调用方据此探测权限矩阵。</p>
      */
     public static void require(HttpServletRequest request, String... roles) {
         String user = currentUser(request);
         if (user == null || user.isBlank()) {
+            log.warn("[权限] 未登录访问受限接口 uri={}", request.getRequestURI());
             throw new SecurityException("未登录或登录已过期");
         }
         String role = currentRole(request);
@@ -61,6 +67,8 @@ public final class RoleCode {
                 return;
             }
         }
-        throw new SecurityException("权限不足：该操作需要角色 " + String.join("/", roles) + "（当前角色：" + (role == null ? "无" : role) + "）");
+        log.warn("[权限] 拒绝访问 user={} 当前角色={} 所需角色={} uri={}",
+                user, role == null ? "无" : role, String.join("/", roles), request.getRequestURI());
+        throw new SecurityException("权限不足");
     }
 }

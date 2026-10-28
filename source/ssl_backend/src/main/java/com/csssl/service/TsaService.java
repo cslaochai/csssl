@@ -1,6 +1,5 @@
 package com.csssl.service;
 
-import com.csssl.config.CssslProperties;
 import com.csssl.util.CertUtil;
 import com.csssl.util.KeyVault;
 import com.csssl.util.PemUtil;
@@ -10,8 +9,6 @@ import org.bouncycastle.util.encoders.Hex;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
@@ -51,44 +48,16 @@ public class TsaService {
     private static final DateTimeFormatter SECOND = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final Pattern DIGEST_HEX = Pattern.compile("^[0-9a-fA-F]{64}$");
 
-    private final CssslProperties props;
     private final AuditService auditService;
+    /** 单例保险库 bean（KeyVaultConfig 提供），与 CaService 共用同一 store-dir 实例 */
+    private final KeyVault vault;
 
     private final java.security.SecureRandom random = new java.security.SecureRandom();
 
-    private volatile KeyVault vault;
     private volatile String cachedPublicPem;
 
     /** 一次盖章结果（HIS 侧直接落台账的字段） */
     public record Stamp(String serial, LocalDateTime tsaTime, String tokenValue, String algo) {
-    }
-
-    private KeyVault vault() {
-        if (vault == null) {
-            synchronized (this) {
-                if (vault == null) {
-                    vault = new KeyVault(Path.of(props.getStoreDir()), masterKey());
-                }
-            }
-        }
-        return vault;
-    }
-
-    private String masterKey() {
-        // 与 CA 密钥共用同一保险库主密钥：优先 SSL_MASTER_KEY，否则读 store-dir/master.key
-        String configured = props.getKeyVault().getMasterKey();
-        if (configured != null && !configured.isBlank()) {
-            return configured.trim();
-        }
-        try {
-            Path mkFile = Path.of(props.getStoreDir()).resolve("master.key");
-            if (Files.exists(mkFile)) {
-                return Files.readString(mkFile, StandardCharsets.UTF_8).trim();
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("TSA 主密钥读取失败: " + e.getMessage(), e);
-        }
-        throw new IllegalStateException("TSA 主密钥未配置（store-dir/master.key 不存在且未设 SSL_MASTER_KEY）");
     }
 
     /** 确保 TSA 密钥就绪（幂等）：SM2 密钥对，私钥 SM4 加密落盘，公钥 PEM 一并缓存 */
@@ -96,13 +65,13 @@ public class TsaService {
         if (cachedPublicPem != null) {
             return;
         }
-        if (!vault().keyExists("tsa", "key")) {
+        if (!vault.keyExists("tsa", "key")) {
             KeyPair kp = CertUtil.generateKeyPair(TSA_ALGORITHM);
-            vault().storeKey("tsa", "key", PemUtil.keyToPem(kp.getPrivate()));
-            vault().storeKey("tsa", "pub", PemUtil.toPem("PUBLIC KEY", kp.getPublic().getEncoded()));
+            vault.storeKey("tsa", "key", PemUtil.keyToPem(kp.getPrivate()));
+            vault.storeKey("tsa", "pub", PemUtil.toPem("PUBLIC KEY", kp.getPublic().getEncoded()));
             log.info("[TSA] 已生成独立 SM2 时间戳密钥（私钥经 SM4 加密落盘，公钥落盘供业务系统下载）");
         }
-        cachedPublicPem = vault().loadKey("tsa", "pub");
+        cachedPublicPem = vault.loadKey("tsa", "pub");
     }
 
     /** TSA 公钥（PEM），供业务系统验签时间戳令牌 */
@@ -164,7 +133,7 @@ public class TsaService {
 
     private String sign(String canonical) {
         try {
-            PrivateKey key = PemUtil.parsePrivateKey(vault().loadKey("tsa", "key"));
+            PrivateKey key = PemUtil.parsePrivateKey(vault.loadKey("tsa", "key"));
             Signature sig = Signature.getInstance(TSA_SIGN_ALGO, "BC");
             sig.initSign(key);
             sig.update(canonical.getBytes(StandardCharsets.UTF_8));

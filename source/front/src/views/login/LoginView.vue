@@ -25,7 +25,7 @@
           登 录
         </el-button>
       </el-form>
-      <div class="login-tip">默认账号 admin / 123456，登录后请尽快修改口令</div>
+      <div class="login-tip">如忘记口令，请联系系统管理员重置</div>
     </div>
   </div>
 </template>
@@ -63,7 +63,8 @@ async function onSubmit() {
     const res = await login({ username: form.username.trim(), passwordCipher: cipher })
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.username)
-    localStorage.setItem('role', res.data.role || 'ADMIN')
+    // 不再缺省回退 ADMIN：后端未返回角色即视为异常，由守卫按未登录处理
+    localStorage.setItem('role', res.data.role || '')
     ElMessage.success('登录成功')
     const redirect = route.query.redirect || '/dashboard'
     router.push(redirect)

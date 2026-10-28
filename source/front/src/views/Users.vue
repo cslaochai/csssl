@@ -59,7 +59,12 @@
           <el-input v-model="form.username" :disabled="editing" placeholder="登录账号（创建后不可改）" />
         </el-form-item>
         <el-form-item :label="editing ? '重置口令(可选)' : '口令'" required>
-          <el-input v-model="form.password" :placeholder="editing ? '留空则不修改口令' : '默认 123456'" show-password />
+          <el-input
+            v-model="form.password"
+            :placeholder="editing ? '留空则不修改口令' : '至少8位，需同时包含字母和数字'"
+            type="password"
+            show-password
+          />
         </el-form-item>
         <el-form-item label="姓名">
           <el-input v-model="form.realName" placeholder="真实姓名/岗位" />
@@ -123,6 +128,8 @@ async function load() {
     })
     rows.value = res.data.records || []
     total.value = res.data.total || 0
+  } catch (e) {
+    // 错误提示已由拦截器统一处理
   } finally {
     loading.value = false
   }
@@ -135,7 +142,7 @@ function reload() {
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: null, username: '', password: '123456', realName: '', roleCode: 'OPERATOR', status: 1 })
+  Object.assign(form, { id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1 })
   dialogVisible.value = true
 }
 
@@ -145,13 +152,21 @@ function openEdit(row) {
   dialogVisible.value = true
 }
 
+function validPassword(pwd) {
+  return pwd.length >= 8 && /[A-Za-z]/.test(pwd) && /\d/.test(pwd)
+}
+
 async function onSave() {
   if (!form.username.trim()) {
     ElMessage.warning('请填写账号')
     return
   }
   if (!editing.value && !form.password.trim()) {
-    ElMessage.warning('请填写口令')
+    ElMessage.warning('请填写初始口令（线下告知使用人后妥善保管）')
+    return
+  }
+  if (form.password.trim() && !validPassword(form.password.trim())) {
+    ElMessage.warning('口令至少8位，且需同时包含字母和数字')
     return
   }
   submitting.value = true
@@ -161,7 +176,8 @@ async function onSave() {
       ElMessage.success('账号已更新')
     } else {
       await createUser({ username: form.username, password: form.password, realName: form.realName, roleCode: form.roleCode })
-      ElMessage.success(`账号创建成功（初始口令：${form.password}）`)
+      // 不回显初始口令：口令仅创建者本人知道，线下交接
+      ElMessage.success('账号已创建，口令已按线下流程告知管理员')
     }
     dialogVisible.value = false
     load()

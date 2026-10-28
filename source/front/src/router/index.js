@@ -22,13 +22,13 @@ const routes = [
         path: 'root-ca',
         name: 'root-ca',
         component: () => import('@/views/RootCa.vue'),
-        meta: { title: '根CA管理' }
+        meta: { title: '根CA管理', roles: ['ADMIN', 'KEY_ADMIN'] }
       },
       {
         path: 'certs',
         name: 'certs',
         component: () => import('@/views/Certs.vue'),
-        meta: { title: '证书管理' }
+        meta: { title: '证书管理', roles: ['ADMIN', 'OPERATOR'] }
       },
       {
         path: 'crl',
@@ -40,7 +40,7 @@ const routes = [
         path: 'audit',
         name: 'audit',
         component: () => import('@/views/Audit.vue'),
-        meta: { title: '审计日志' }
+        meta: { title: '审计日志', roles: ['AUDITOR'] }
       },
       {
         path: 'users',
@@ -59,6 +59,18 @@ const routes = [
         name: 'applications',
         component: () => import('@/views/Applications.vue'),
         meta: { title: 'RA申请审核', roles: ['ADMIN', 'OPERATOR', 'APPROVER'] }
+      },
+      {
+        path: 'tsa',
+        name: 'tsa',
+        component: () => import('@/views/Tsa.vue'),
+        meta: { title: '时间戳TSA' }
+      },
+      {
+        path: 'ocsp',
+        name: 'ocsp',
+        component: () => import('@/views/Ocsp.vue'),
+        meta: { title: 'OCSP查询' }
       }
     ]
   },

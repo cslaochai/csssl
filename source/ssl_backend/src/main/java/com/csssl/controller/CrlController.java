@@ -30,7 +30,7 @@ public class CrlController {
     @GetMapping
     public Result<Map<String, Object>> view() {
         List<CaCert> revoked = crlService.revokedList();
-        CrlService.CrlInfo info = crlService.buildCrl();
+        CrlService.CrlInfo info = crlService.publishIfNeeded();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("revoked", revoked.stream().map(CertVo::from).toList());
         data.put("crlPem", revoked.isEmpty() ? "" : info.pem());
@@ -41,11 +41,11 @@ public class CrlController {
         return Result.success("查询成功", data);
     }
 
-    /** 下载 CRL PEM */
+    /** 下载 CRL PEM（判重发布：内容未变直接复用已发布 CRL，不自增编号） */
     @GetMapping("/download")
     public String download(HttpServletRequest request) {
         String username = (String) request.getAttribute("ssl.username");
-        String crlPem = crlService.buildCrlPem();
+        String crlPem = crlService.publishIfNeeded().pem();
         auditService.record(username, "CRL_DOWNLOAD", null, "下载CRL吊销列表", clientIp(request));
         return crlPem;
     }

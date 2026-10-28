@@ -61,6 +61,10 @@ csssl:
     default-validity-days: ${SSL_ISSUE_VALIDITY_DAYS:365}
   # OCSP 响应时效（小时）：依赖方缓存刷新周期，行业 24~168h（1~7天），默认 24h
   ocsp-next-update-hours: ${SSL_OCSP_NEXT_UPDATE_HOURS:24}
+  # CRL 定时发布 cron：nextUpdate 进入续期窗口或吊销集合（指纹）变化时主动重签（默认每日 03:00）
+  crl-refresh-cron: ${SSL_CRL_REFRESH_CRON:0 0 3 * * ?}
+  # SUB_CA 到期预检 cron：进入 renew-before-days 窗口且根未封存时轮换（默认每日 03:30，签发路径不隐式轮换）
+  subca-precheck-cron: ${SSL_SUBCA_PRECHECK_CRON:0 30 3 * * ?}
   # ===== 登录鉴权（对齐 csmig：SM2 口令加密 + BCrypt + JWT） =====
   security:
     jwt:
