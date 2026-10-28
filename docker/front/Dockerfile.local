@@ -1,0 +1,7 @@
+# 离线环境（132 无公网）：基础镜像 nginx:1.27-alpine 拉不到，
+# 复用本地已有的 his-front:local（同一基础镜像）作为运行时层；
+# 必须清掉 HIS 的旧静态产物并覆盖 nginx.conf（HIS 站点配置会一起继承下来）。
+FROM his-front:local
+RUN rm -rf /usr/share/nginx/html/*
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY dist/ /usr/share/nginx/html/

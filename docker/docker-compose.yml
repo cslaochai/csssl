@@ -1,0 +1,48 @@
+services:
+  csssl-backend:
+    build:
+      context: ./backend
+    image: csssl-backend:local
+    container_name: csssl-backend
+    restart: unless-stopped
+    # 连接串与口令全部来自同目录 .env（该文件不入库），application.yml 里只有 ${SSL_*:} 占位
+    env_file: .env
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_OPTS: -Xms384m -Xmx1g -XX:+UseG1GC -Duser.timezone=Asia/Shanghai
+    ports:
+      # 宿主 8012 → 容器 8092，context-path /ssl
+      - "8012:8092"
+    # MySQL 是宿主机上的进程（非容器），容器内用 host.docker.internal 回到宿主
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 根CA/SUB_CA 私钥（SM4 加密落盘）、CRL 发布态、master.key 全写在 store-dir（默认 /app/data/certs），
+      # 落宿主目录避免镜像里堆文件、重建不丢
+      - ./data:/app/data
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8092" ]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    networks:
+      - ssl
+
+  csssl-front:
+    build:
+      context: ./front
+    image: csssl-front:local
+    container_name: csssl-front
+    restart: unless-stopped
+    ports:
+      - "3400:80"
+    depends_on:
+      csssl-backend:
+        condition: service_healthy
+    networks:
+      - ssl
+
+networks:
+  ssl:
+    driver: bridge

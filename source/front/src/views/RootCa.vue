@@ -7,10 +7,10 @@
           {{ root.initialized ? '已初始化' : '未就绪' }}
         </el-tag>
         <el-tag
-          v-if="root.rootKeyState"
-          :type="rootKeyTagType"
-          size="small"
-          style="margin-left: 8px"
+            v-if="root.rootKeyState"
+            :type="rootKeyTagType"
+            size="small"
+            style="margin-left: 8px"
         >
           {{ rootKeyLabel }}
         </el-tag>
@@ -19,23 +19,25 @@
         <el-button type="primary" :loading="initLoading" @click="onInit">初始化 / 重建根CA</el-button>
         <el-button :disabled="!root.initialized" @click="onDownloadRoot">导出根证书</el-button>
         <el-button
-          v-if="root.rootKeyState === 'ONLINE'"
-          type="warning"
-          @click="onSeal"
-        >封存根密钥（离线化）</el-button>
+            v-if="root.rootKeyState === 'ONLINE'"
+            type="warning"
+            @click="onSeal"
+        >封存根密钥（离线化）
+        </el-button>
         <el-button
-          v-if="root.rootKeyState === 'SEALED'"
-          @click="onUnseal"
-        >解封根密钥</el-button>
+            v-if="root.rootKeyState === 'SEALED'"
+            @click="onUnseal"
+        >解封根密钥
+        </el-button>
       </div>
     </div>
 
     <el-alert
-      v-if="!root.initialized && root.message"
-      :title="root.message"
-      type="warning"
-      :closable="false"
-      style="margin-bottom: 14px"
+        v-if="!root.initialized && root.message"
+        :title="root.message"
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 14px"
     />
 
     <el-descriptions :column="3" border v-if="root.initialized">
@@ -79,89 +81,78 @@
           {{ shares.generated ? '已门限化（5 份，任 3 份可恢复）' : '未门限化（当前为单点加密落盘）' }}
         </el-tag>
       </div>
-      <el-alert
-        type="info"
-        :closable="false"
-        style="margin-bottom: 10px"
-        title="对齐 GM/T 0034 §8.2.4.3 门限控制：根私钥拆分 5 份份额，任意 3 份才能恢复，任何少于 3 份的持有者无法得到私钥"
-        description="门限化后原始 SM4 加密文件（key.pem.enc）删除，份额成为唯一持久形态。请下载 5 份份额并分人离线保管（建议钥匙/保险柜分级）。轮换 SUB_CA 等需要根私钥的操作，由密钥管理员提交任意 3 份份额临时解封（仅内存，用后封存清除）。"
-      />
       <div class="shares-status">
         <template v-for="s in shareList" :key="s.index">
           <el-tag
-            size="small"
-            :type="s.exists ? 'success' : 'danger'"
-            style="margin-right: 6px"
-          >份额{{ s.index }}：{{ s.exists ? '已生成' : '缺失' }}</el-tag>
+              size="small"
+              :type="s.exists ? 'success' : 'danger'"
+              style="margin-right: 6px"
+          >份额{{ s.index }}：{{ s.exists ? '已生成' : '缺失' }}
+          </el-tag>
         </template>
       </div>
       <div style="margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
         <el-button
-          v-if="root.rootKeyState === 'ONLINE'"
-          type="warning"
-          :loading="migrating"
-          @click="onMigrateShares"
-        >迁移为门限分持（删除单点加密文件）</el-button>
+            v-if="root.rootKeyState === 'ONLINE'"
+            type="warning"
+            :loading="migrating"
+            @click="onMigrateShares"
+        >迁移为门限分持（删除单点加密文件）
+        </el-button>
         <template v-if="shares.generated">
           <el-button
-            v-for="s in shareList"
-            :key="s.index"
-            size="small"
-            :disabled="!s.exists"
-            @click="onDownloadShare(s.index)"
-          >下载份额{{ s.index }}</el-button>
+              v-for="s in shareList"
+              :key="s.index"
+              size="small"
+              :disabled="!s.exists"
+              @click="onDownloadShare(s.index)"
+          >下载份额{{ s.index }}
+          </el-button>
           <el-button type="danger" plain @click="onSeal">清除解封缓存（封存）</el-button>
         </template>
       </div>
       <div v-if="shares.generated" class="unseal-form">
         <div class="unseal-title">份额解封（提交任意 3 份，重组根私钥仅存内存）</div>
         <el-input
-          v-for="i in 3"
-          :key="i"
-          v-model="shareInputs[i - 1]"
-          type="textarea"
-          :rows="2"
-          :placeholder="`份额 JSON（从“下载份额${i}”获取）`"
-          style="margin-bottom: 8px"
+            v-for="i in 3"
+            :key="i"
+            v-model="shareInputs[i - 1]"
+            type="textarea"
+            :rows="2"
+            :placeholder="`份额 JSON（从“下载份额${i}”获取）`"
+            style="margin-bottom: 8px"
         />
-        <el-button type="primary" :loading="unsealing" :disabled="shareInputs.filter(s => s && s.trim()).length < 3" @click="onUnsealShares">
+        <el-button type="primary" :loading="unsealing" :disabled="shareInputs.filter(s => s && s.trim()).length < 3"
+                   @click="onUnsealShares">
           提交份额解封
         </el-button>
       </div>
     </div>
-
-    <el-alert
-      type="info"
-      :closable="false"
-      style="margin-top: 16px"
-      title="说明"
-      description="对齐国内持证CA通行架构：根CA仅初始化与签发二级CA（SUB_CA），日常证书签发、CRL与OCSP全部由 SUB_CA 承担。根私钥支持「封存」离线或「Shamir(3,5) 门限分持」（推荐，对齐密评根密钥不得单点持有）。若根私钥及全部份额丢失会吊销旧根并重建新根（旧证书全部失效，请谨慎操作）。"
-    />
   </div>
 </template>
 
 <script setup>
-import { computed, ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import {computed, onMounted, ref} from 'vue'
+import {ElMessage, ElMessageBox} from 'element-plus'
 import {
-  getCaStatus,
-  initCa,
+  downloadCaShare,
   downloadRootCert,
   downloadSubCaCert,
-  sealRootKey,
-  unsealRootKey,
   getCaShares,
+  getCaStatus,
+  initCa,
   migrateCaShares,
-  downloadCaShare,
-  unsealCaShares
+  sealRootKey,
+  unsealCaShares,
+  unsealRootKey
 } from '@/api/system'
-import { downloadText } from '@/lib/download'
+import {downloadText} from '@/lib/download'
 
 const root = ref({})
 const initLoading = ref(false)
 const migrating = ref(false)
 const unsealing = ref(false)
-const shares = ref({ generated: false, total: 5, threshold: 3, shares: [] })
+const shares = ref({generated: false, total: 5, threshold: 3, shares: []})
 const shareInputs = ref(['', '', ''])
 
 const shareList = computed(() => shares.value.shares || [])
@@ -190,17 +181,17 @@ async function load() {
 async function loadShares() {
   try {
     const res = await getCaShares()
-    shares.value = res.data || { generated: false, total: 5, threshold: 3, shares: [] }
+    shares.value = res.data || {generated: false, total: 5, threshold: 3, shares: []}
   } catch (e) {
-    shares.value = { generated: false, total: 5, threshold: 3, shares: [] }
+    shares.value = {generated: false, total: 5, threshold: 3, shares: []}
   }
 }
 
 async function onInit() {
   const confirmed = await ElMessageBox.confirm(
-    '初始化将生成（或重建）根CA。若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？',
-    '初始化根CA',
-    { type: 'warning', confirmButtonText: '确定初始化', cancelButtonText: '取消' }
+      '初始化将生成（或重建）根CA。若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？',
+      '初始化根CA',
+      {type: 'warning', confirmButtonText: '确定初始化', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return
   initLoading.value = true
@@ -216,11 +207,11 @@ async function onInit() {
 
 async function onSeal() {
   const confirmed = await ElMessageBox.confirm(
-    root.value.rootKeyState === 'SHARES'
-      ? '将清除本次门限解封的内存根私钥缓存（门限份额不受影响，仍为唯一持久形态）。确定封存吗？'
-      : '封存后根CA私钥进入离线状态（key.pem.enc 移存为 .sealed），日常签发由 SUB_CA 承担；轮换 SUB_CA 等维护操作需先解封。确定封存吗？',
-    '封存根密钥',
-    { type: 'warning', confirmButtonText: '确定封存', cancelButtonText: '取消' }
+      root.value.rootKeyState === 'SHARES'
+          ? '将清除本次门限解封的内存根私钥缓存（门限份额不受影响，仍为唯一持久形态）。确定封存吗？'
+          : '封存后根CA私钥进入离线状态（key.pem.enc 移存为 .sealed），日常签发由 SUB_CA 承担；轮换 SUB_CA 等维护操作需先解封。确定封存吗？',
+      '封存根密钥',
+      {type: 'warning', confirmButtonText: '确定封存', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return
   const res = await sealRootKey()
@@ -231,9 +222,9 @@ async function onSeal() {
 
 async function onUnseal() {
   const confirmed = await ElMessageBox.confirm(
-    '解封将使根CA私钥恢复在线态（仅建议在轮换 SUB_CA 等维护窗口内使用）。确定解封吗？',
-    '解封根密钥',
-    { type: 'warning', confirmButtonText: '确定解封', cancelButtonText: '取消' }
+      '解封将使根CA私钥恢复在线态（仅建议在轮换 SUB_CA 等维护窗口内使用）。确定解封吗？',
+      '解封根密钥',
+      {type: 'warning', confirmButtonText: '确定解封', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return
   const res = await unsealRootKey()
@@ -244,9 +235,9 @@ async function onUnseal() {
 
 async function onMigrateShares() {
   const confirmed = await ElMessageBox.confirm(
-    '迁移将把当前 SM4 加密落盘的根私钥拆为 5 份 Shamir(3,5) 门限份额并删除原始加密文件。请先准备好 5 个离线保管位置（U盘/保险柜/不同责任人）。确定迁移吗？',
-    '迁移为门限分持',
-    { type: 'warning', confirmButtonText: '确定迁移', cancelButtonText: '取消' }
+      '迁移将把当前 SM4 加密落盘的根私钥拆为 5 份 Shamir(3,5) 门限份额并删除原始加密文件。请先准备好 5 个离线保管位置（U盘/保险柜/不同责任人）。确定迁移吗？',
+      '迁移为门限分持',
+      {type: 'warning', confirmButtonText: '确定迁移', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return
   migrating.value = true
@@ -300,6 +291,7 @@ onMounted(load)
   display: flex;
   align-items: center;
 }
+
 .subca-block,
 .shamir-block {
   margin-top: 16px;
@@ -308,6 +300,7 @@ onMounted(load)
   border-radius: 8px;
   background: #fafbfe;
 }
+
 .subca-title {
   font-size: 14px;
   font-weight: 600;
@@ -316,9 +309,11 @@ onMounted(load)
   display: flex;
   align-items: center;
 }
+
 .shares-status {
   margin-top: 8px;
 }
+
 .unseal-form {
   margin-top: 12px;
   padding: 12px;
@@ -326,6 +321,7 @@ onMounted(load)
   border-radius: 6px;
   background: #fff;
 }
+
 .unseal-title {
   font-size: 13px;
   font-weight: 600;

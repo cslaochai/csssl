@@ -8,8 +8,12 @@ target/
 .DS_Store
 node_modules/
 dist/
+# 容器部署真值（compose 的 env_file：库口令 / SM2 / JWT），只留 docker/.env.example 入库
+.env
 # 证书与密钥落盘目录（生产由 SSL_STORE_DIR 指向共享存储，禁止入库）
 data/
+# 冒烟测试产物目录（密钥/证书/签发态等运行时落盘，禁止入库）
+data-smoke/
 
 # ============ 内部调研 / 规划类文档：严禁入库 ============
 # 口径：开源项目不得出现任何第三方厂商名称；
