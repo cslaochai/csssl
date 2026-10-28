@@ -8,7 +8,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 管理用户（对齐 cslk sys_user / csmig mip_sys_user 核心字段）。
+ * 管理用户（对齐 cslk sys_user / csmig mig_sys_user 核心字段）。
  */
 @Data
 @TableName("ssl_sys_user")

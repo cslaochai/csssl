@@ -4,6 +4,8 @@ server:
     context-path: /ssl
 
 spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
     name: ssl-backend
   jackson:
@@ -13,9 +15,6 @@ spring:
       write-dates-as-timestamps: false
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${SSL_DB_URL:jdbc:mysql://192.168.88.132:3306/ssl_ca?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true}
-    username: ${SSL_DB_USERNAME:xz_feng}
-    password: ${SSL_DB_PASSWORD:Feng123456!}
     hikari:
       connection-timeout: 30000
       maximum-pool-size: 10
@@ -41,8 +40,6 @@ mybatis-plus:
 csssl:
   # 证书与私钥落盘目录（私钥加密后落盘，不进数据库）
   store-dir: ${SSL_STORE_DIR:./data/certs}
-  # 对外公开基础地址：生成证书 CDP/AIA 扩展与 OCSP URL（业务系统可见地址，需可外访）
-  public-base-url: ${SSL_PUBLIC_BASE_URL:http://localhost:8092/ssl}
   # 根CA
   root-ca:
     # 根CA标识（证书CN用：CSSSL Root CA）
@@ -62,26 +59,15 @@ csssl:
   issue:
     # 默认证书有效期（天）
     default-validity-days: ${SSL_ISSUE_VALIDITY_DAYS:365}
-  # 私钥加密（SM4）：主密钥32位十六进制，生产必须用环境变量注入；留空则首启生成随机密钥落盘 store-dir/master.key
-  key-vault:
-    master-key: ${SSL_MASTER_KEY:}
-  # 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭
-  allow-private-key-download: ${SSL_ALLOW_KEY_DOWNLOAD:true}
   # OCSP 响应时效（小时）：依赖方缓存刷新周期，行业 24~168h（1~7天），默认 24h
   ocsp-next-update-hours: ${SSL_OCSP_NEXT_UPDATE_HOURS:24}
   # ===== 登录鉴权（对齐 csmig：SM2 口令加密 + BCrypt + JWT） =====
   security:
-    sm2:
-      # 16进制SM2私钥（64 hex字符）；留空则启动时临时生成一对（重启失效，多实例必须显式配置同一对）
-      private-key: ${SSL_SM2_PRIVATE_KEY:}
-      # 16进制SM2公钥（含04前缀，130 hex字符）；留空则从私钥推导
-      public-key: ${SSL_SM2_PUBLIC_KEY:}
     jwt:
-      # JWT签名密钥（生产期必须通过环境变量覆盖）
-      secret: ${SSL_JWT_SECRET:csssl-ca-jwt-secret-change-me-in-prod-2026}
-      # 会话有效期（毫秒），默认24小时
-      expiration: ${SSL_JWT_EXPIRATION:86400000}
+      # 会话有效期（毫秒），默认24小时；签名密钥属环境项，落 profile 文件
+      expiration: 86400000
 
+# 业务日志级别两环境同值，声明一次；dev 要开 SQL 调试就在 application-dev.yml 里覆盖成 debug
 logging:
   level:
-    com.csssl: debug
+    com.csssl: info

@@ -1,9 +1,9 @@
 -- =============================================================================
 -- CA根认证中心（csssl）数据库脚本，库：ssl_ca
--- 与 csmig（mip_gateway）/ cslk HIS 风格一致：utf8mb4、InnoDB、中文注释
+-- 与 csmig（mig_gateway）/ cslk HIS 风格一致：utf8mb4、InnoDB、中文注释
 -- =============================================================================
 
--- 管理用户：登录鉴权（对齐 cslk sys_user / csmig mip_sys_user 核心字段；初始 admin 账号由 DataInitializer 创建）
+-- 管理用户：登录鉴权（对齐 cslk sys_user / csmig mig_sys_user 核心字段；初始 admin 账号由 DataInitializer 创建）
 CREATE TABLE IF NOT EXISTS ssl_sys_user (
     id               BIGINT       NOT NULL AUTO_INCREMENT,
     username         VARCHAR(64)  NOT NULL COMMENT '登录账号',
