@@ -177,3 +177,80 @@ CREATE TABLE IF NOT EXISTS ssl_crl_state (
     updated_at        DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CRL发布状态（多实例一致性，取代crl-state.json）';
+
+-- =============================================================================
+-- ===== 路线 A：多机构（按机构独立根CA） =====
+-- 兼容铁律：存量单根原样成为 default 机构（subject_o='CSSSL'），
+-- 其落盘路径沿用现有根路径；新机构路径 store-dir/orgs/{orgKey}/…，互相不信任。
+-- =============================================================================
+
+-- 机构注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额）
+CREATE TABLE IF NOT EXISTS ssl_ca_org (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    org_key     VARCHAR(32)  NOT NULL COMMENT '机构标识（小写字母数字，如 his1；default=院内默认域/存量单根）',
+    org_name    VARCHAR(64)  NOT NULL COMMENT '机构名称（展示与新根CA CN用）',
+    subject_o   VARCHAR(128) NOT NULL COMMENT '证书主体O（机构受控，根/子CA DN 的 O 字段，全局唯一）',
+    algorithm   VARCHAR(32)  NOT NULL DEFAULT 'SM2' COMMENT '根CA算法：RSA2048 / SM2（建机构时定，SUB_CA 跟随根）',
+    status      VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE' COMMENT '状态：ACTIVE-启用 SUSPENDED-暂停 CLOSED-关闭',
+    contact     VARCHAR(64)  NULL COMMENT '联系人/联系方式',
+    description VARCHAR(500) NULL COMMENT '备注',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_org_key (org_key),
+    UNIQUE KEY uk_subject_o (subject_o)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA机构注册表（多根CA域隔离）';
+
+-- 幂等加列：各业务表归属机构。存量行由 DEFAULT 'default' 自动归位院内默认域；
+-- 模板/用户用 NULL 表达"全局"语义（全局模板对所有机构可见、全局管理员不受限）
+SET @c10 = (SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'org_key');
+SET @s10 = IF(@c10 = 0, 'ALTER TABLE ssl_ca_cert ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属机构（独立根CA域），default=院内默认域'' AFTER id', 'SELECT 1');
+PREPARE s10 FROM @s10; EXECUTE s10; DEALLOCATE PREPARE s10;
+
+SET @c11 = (SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'org_key');
+SET @s11 = IF(@c11 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理机构（签发落到该机构根域）'' AFTER id', 'SELECT 1');
+PREPARE s11 FROM @s11; EXECUTE s11; DEALLOCATE PREPARE s11;
+
+SET @c12 = (SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'org_key');
+SET @s12 = IF(@c12 = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''操作归属机构（全局操作记 default）'' AFTER username', 'SELECT 1');
+PREPARE s12 FROM @s12; EXECUTE s12; DEALLOCATE PREPARE s12;
+
+SET @c13 = (SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_template' AND column_name = 'org_key');
+SET @s13 = IF(@c13 = 0, 'ALTER TABLE ssl_cert_template ADD COLUMN org_key VARCHAR(32) NULL COMMENT ''归属机构；NULL=全局模板（所有机构可用）'' AFTER id', 'SELECT 1');
+PREPARE s13 FROM @s13; EXECUTE s13; DEALLOCATE PREPARE s13;
+
+SET @c14 = (SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'org_key');
+SET @s14 = IF(@c14 = 0, 'ALTER TABLE ssl_sys_user ADD COLUMN org_key VARCHAR(32) NULL COMMENT ''归属机构；NULL=全局管理员（跨机构）'' AFTER role_code', 'SELECT 1');
+PREPARE s14 FROM @s14; EXECUTE s14; DEALLOCATE PREPARE s14;
+
+SET @c15 = (SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'org_key');
+SET @s15 = IF(@c15 = 0, 'ALTER TABLE ssl_crl_state ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属机构（每机构独立CRL发布状态行）'' AFTER id', 'SELECT 1');
+PREPARE s15 FROM @s15; EXECUTE s15; DEALLOCATE PREPARE s15;
+
+-- 幂等加索引：证书按机构过滤（机构化查询主路径）、审计按机构+时间检索
+SET @c16 = (SELECT COUNT(*) FROM information_schema.statistics
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_org');
+SET @s16 = IF(@c16 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_org (org_key, status)', 'SELECT 1');
+PREPARE s16 FROM @s16; EXECUTE s16; DEALLOCATE PREPARE s16;
+
+SET @c17 = (SELECT COUNT(*) FROM information_schema.statistics
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND index_name = 'idx_org_time');
+SET @s17 = IF(@c17 = 0, 'ALTER TABLE ssl_audit_log ADD KEY idx_org_time (org_key, created_at)', 'SELECT 1');
+PREPARE s17 FROM @s17; EXECUTE s17; DEALLOCATE PREPARE s17;
+
+-- CRL 发布状态每机构一行：org_key 唯一（并发首建靠唯一索引闭环，代码侧 DuplicateKey 重试兜底）
+SET @c18 = (SELECT COUNT(*) FROM information_schema.statistics
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND index_name = 'uk_crl_state_org');
+SET @s18 = IF(@c18 = 0, 'ALTER TABLE ssl_crl_state ADD UNIQUE KEY uk_crl_state_org (org_key)', 'SELECT 1');
+PREPARE s18 FROM @s18; EXECUTE s18; DEALLOCATE PREPARE s18;
+
+-- 机构域内按序列号检索（OCSP/verify 域内命中）
+SET @c19 = (SELECT COUNT(*) FROM information_schema.statistics
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_org_serial');
+SET @s19 = IF(@c19 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_org_serial (org_key, serial_hex)', 'SELECT 1');
+PREPARE s19 FROM @s19; EXECUTE s19; DEALLOCATE PREPARE s19;

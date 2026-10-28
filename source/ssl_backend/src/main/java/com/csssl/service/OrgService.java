@@ -1,0 +1,185 @@
+package com.csssl.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.csssl.config.CssslProperties;
+import com.csssl.config.KeyVaultConfig;
+import com.csssl.dto.CaStatusVo;
+import com.csssl.entity.CaOrg;
+import com.csssl.mapper.CaOrgMapper;
+import com.csssl.util.CertUtil;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+/**
+ * 机构域管理（路线A：每家医院=一套独立根CA，机构间互不信任）。
+ * 开机构即建根：登记记录后立即复用 {@link CaService} 带 orgKey 的初始化路径生成
+ * 独立根CA+SUB_CA+Shamir(3,5) 门限份额；suspend/close 本波仅落状态字段，
+ * CLOSED 拒绝签发由后续波次在签发/CRL/OCSP 链路 enforce。
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class OrgService {
+
+    /** 机构标识格式：小写字母数字（同时兜住路径穿越——orgKey 直接参与 store-dir/orgs/{orgKey} 拼路） */
+    private static final Pattern ORG_KEY = Pattern.compile("^[a-z0-9]{1,32}$");
+
+    public static final String STATUS_ACTIVE = "ACTIVE";
+    public static final String STATUS_SUSPENDED = "SUSPENDED";
+    public static final String STATUS_CLOSED = "CLOSED";
+
+    private final CaOrgMapper orgMapper;
+    private final CaService caService;
+    private final CssslProperties props;
+
+    /** 机构列表（含各机构根CA根状态摘要，管理页一屏看全根池拓扑） */
+    public List<Map<String, Object>> overview() {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (CaOrg org : list()) {
+            rows.add(buildRow(org));
+        }
+        return rows;
+    }
+
+    /** 单机构状态摘要（详情/创建回执用） */
+    public Map<String, Object> overviewOf(String orgKey) {
+        return buildRow(get(orgKey));
+    }
+
+    private Map<String, Object> buildRow(CaOrg org) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("orgKey", org.getOrgKey());
+        row.put("orgName", org.getOrgName());
+        row.put("subjectO", org.getSubjectO());
+        row.put("algorithm", org.getAlgorithm());
+        row.put("status", org.getStatus());
+        row.put("contact", org.getContact());
+        row.put("description", org.getDescription());
+        row.put("createdAt", org.getCreatedAt());
+        try {
+            CaStatusVo st = caService.status(org.getOrgKey());
+            row.put("hasRoot", st.isInitialized());
+            row.put("rootSerialHex", st.getSerialHex());
+            row.put("rootCn", st.getCn());
+            row.put("rootStatus", st.getStatus());
+            row.put("rootValidTo", st.getValidTo());
+            row.put("rootKeyState", st.getRootKeyState());
+            if (st.getSubCa() != null) {
+                row.put("subCaSerialHex", st.getSubCa().getSerialHex());
+                row.put("subCaStatus", st.getSubCa().getStatus());
+                row.put("subCaValidTo", st.getSubCa().getValidTo());
+            }
+        } catch (Exception e) {
+            // 单机构状态异常不拖垮整个列表（如密钥文件损坏）
+            row.put("hasRoot", false);
+            row.put("statusError", e.getMessage());
+        }
+        return row;
+    }
+
+    /** 机构原始记录列表 */
+    public List<CaOrg> list() {
+        return orgMapper.selectList(new LambdaQueryWrapper<CaOrg>().orderByAsc(CaOrg::getId));
+    }
+
+    /** 按 orgKey 查询（不存在返回 null） */
+    public CaOrg findByKey(String orgKey) {
+        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
+        return orgMapper.selectOne(new LambdaQueryWrapper<CaOrg>().eq(CaOrg::getOrgKey, orgKey));
+    }
+
+    /** 按 orgKey 查询（不存在抛异常） */
+    public CaOrg get(String orgKey) {
+        CaOrg org = findByKey(orgKey);
+        if (org == null) {
+            throw new IllegalArgumentException("机构不存在: " + orgKey);
+        }
+        return org;
+    }
+
+    /** 校验机构存在且 ACTIVE（根CA管理写操作前置；default 域存量语义不受机构表约束） */
+    public void requireActive(String orgKey) {
+        CaOrg org = get(orgKey);
+        if (!STATUS_ACTIVE.equals(org.getStatus())) {
+            throw new IllegalArgumentException("机构状态不允许该操作: " + orgKey + "（" + org.getStatus() + "）");
+        }
+    }
+
+    /**
+     * 新建机构并立即初始化独立根CA+SUB_CA+门限份额。
+     * 算法缺省取全局配置 csssl.root-ca.algorithm（新机构"开机构默认参数"约定）。
+     */
+    public CaOrg create(String orgKey, String orgName, String subjectO, String algorithm,
+                        String contact, String description) {
+        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
+        if (CaOrg.DEFAULT_ORG_KEY.equals(orgKey)) {
+            throw new IllegalArgumentException("default 为院内默认域保留标识，不可新建");
+        }
+        if (orgName == null || orgName.isBlank() || orgName.trim().length() > 64) {
+            throw new IllegalArgumentException("机构名称必填且不超过64字符");
+        }
+        if (subjectO == null || subjectO.isBlank() || subjectO.trim().length() > 128) {
+            throw new IllegalArgumentException("证书主体O必填且不超过128字符");
+        }
+        String alg = algorithm == null || algorithm.isBlank()
+                ? props.getRootCa().getAlgorithm() : algorithm.trim();
+        CertUtil.checkAlgorithm(alg);
+        if (findByKey(orgKey) != null) {
+            throw new IllegalArgumentException("机构标识已存在: " + orgKey);
+        }
+        if (orgMapper.selectCount(new LambdaQueryWrapper<CaOrg>()
+                .eq(CaOrg::getSubjectO, subjectO.trim())) > 0) {
+            throw new IllegalArgumentException("证书主体O已被其他机构占用: " + subjectO);
+        }
+
+        CaOrg org = new CaOrg();
+        org.setOrgKey(orgKey);
+        org.setOrgName(orgName.trim());
+        org.setSubjectO(subjectO.trim());
+        org.setAlgorithm(alg);
+        org.setStatus(STATUS_ACTIVE);
+        org.setContact(contact);
+        org.setDescription(description);
+        org.setCreatedAt(LocalDateTime.now());
+        orgMapper.insert(org);
+        log.info("[机构] 已登记机构 {}（{}，主体O={}，算法={}）", orgKey, org.getOrgName(), org.getSubjectO(), alg);
+
+        // 开机构即建根：独立根CA → SUB_CA → 门限份额（复用带 orgKey 的初始化路径，幂等）
+        caService.initRoot(orgKey);
+        return org;
+    }
+
+    /** 暂停机构（ACTIVE → SUSPENDED） */
+    public CaOrg suspend(String orgKey) {
+        return updateStatus(orgKey, STATUS_SUSPENDED, List.of(STATUS_ACTIVE));
+    }
+
+    /** 恢复机构（SUSPENDED → ACTIVE） */
+    public CaOrg resume(String orgKey) {
+        return updateStatus(orgKey, STATUS_ACTIVE, List.of(STATUS_SUSPENDED));
+    }
+
+    /** 关闭机构（SUSPENDED → CLOSED；CLOSED 为终态，密钥清理由后续波次处置） */
+    public CaOrg close(String orgKey) {
+        return updateStatus(orgKey, STATUS_CLOSED, List.of(STATUS_ACTIVE, STATUS_SUSPENDED));
+    }
+
+    private CaOrg updateStatus(String orgKey, String target, List<String> fromAllowed) {
+        CaOrg org = get(orgKey);
+        if (!fromAllowed.contains(org.getStatus())) {
+            throw new IllegalArgumentException("机构当前状态（" + org.getStatus() + "）不允许变更为 " + target);
+        }
+        org.setStatus(target);
+        orgMapper.updateById(org);
+        log.info("[机构] {} 状态变更为 {}", orgKey, target);
+        return org;
+    }
+}

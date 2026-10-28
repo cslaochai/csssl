@@ -24,17 +24,20 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(cssslProperties.getSecurity().getJwt().getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 令牌解析结果（uid/tv 供拦截器回查会话版本号，实现吊销） */
-    public record TokenClaims(String username, String role, Long uid, Integer tokenVersion) {
+    /** 令牌解析结果（uid/tv 供拦截器回查会话版本号，实现吊销；org 为签发时机构域快照，权威值以拦截器回库为准） */
+    public record TokenClaims(String username, String role, Long uid, Integer tokenVersion, String org) {
     }
 
     /**
      * 签发会话令牌：subject=username，携带角色与 uid/tv（tv=签发时的 token_version）。
      * 口令/角色/状态变更后库里 token_version+1，旧令牌即刻与库中版本不符而被拒。
+     *
+     * <p>orgKey（机构数据域）写入 claim 'o'；全局用户（orgKey 为空）不写该声明。
+     * 'o' 仅作签发时快照，拦截器以回库的 ssl_sys_user.org_key 为准写入请求属性。</p>
      */
-    public String createToken(String username, String role, Long uid, Integer tokenVersion) {
+    public String createToken(String username, String role, Long uid, Integer tokenVersion, String orgKey) {
         long exp = cssslProperties.getSecurity().getJwt().getExpiration();
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(username)
                 .claim("username", username)
                 .claim("role", role == null ? "" : role)
@@ -42,8 +45,11 @@ public class JwtUtil {
                 .claim("tv", tokenVersion == null ? 0 : tokenVersion)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + exp))
-                .signWith(signingKey())
-                .compact();
+                .signWith(signingKey());
+        if (orgKey != null && !orgKey.isBlank()) {
+            builder.claim("o", orgKey);
+        }
+        return builder.compact();
     }
 
     /** 解析并校验令牌，一次解出全部 claim；非法/过期返回 null */
@@ -58,7 +64,8 @@ public class JwtUtil {
                     payload.get("username", String.class),
                     payload.get("role", String.class),
                     asLong(payload.get("uid")),
-                    asInt(payload.get("tv")));
+                    asInt(payload.get("tv")),
+                    payload.get("o", String.class));
         } catch (Exception e) {
             return null;
         }

@@ -28,3 +28,6 @@ data-smoke/
 **/*排班*
 **/*排期*
 **/施工手册/
+
+# 提交信息临时文件（git commit -F 用，勿入库）
+.commit-msg.txt

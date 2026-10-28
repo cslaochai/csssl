@@ -20,6 +20,9 @@ public class AuditLog {
     /** 操作人 */
     private String username;
 
+    /** 操作归属机构（全局操作记 default；机构维度过滤由后续波次接入） */
+    private String orgKey;
+
     /** 操作：LOGIN/LOGOUT/CA_INIT/CERT_ISSUE/CERT_CSR_ISSUE/CERT_REVOKE/CERT_DOWNLOAD/CRL_DOWNLOAD */
     private String action;
 

@@ -5,7 +5,10 @@
         <!-- 全量 CRL -->
         <el-tab-pane label="全量 CRL" name="full">
           <div class="table-toolbar">
-            <div class="section-title">吊销列表（CRL）</div>
+            <div class="section-title">
+              吊销列表（CRL）
+              <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain" style="margin-left: 8px">当前域：{{ orgDomain }}</el-tag>
+            </div>
             <el-button type="primary" :loading="crlLoading" @click="onDownloadCrl">下载 CRL</el-button>
           </div>
 
@@ -89,6 +92,10 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getCrlView, downloadCrl, getDeltaCrl } from '@/api/system'
 import { downloadText } from '@/lib/download'
+import { currentOrg } from '@/lib/org'
+
+// 全量/dCRL 均按机构域取数（api 缺省 orgKey=currentOrg()，页面随域切换重建）
+const orgDomain = ref(currentOrg())
 
 const activeTab = ref('full')
 const loading = ref(false)
@@ -158,8 +165,8 @@ function onTabChange(name) {
 async function onDownloadCrl() {
   crlLoading.value = true
   try {
-    const pem = await downloadCrl()
-    downloadText(pem, 'csssl-crl.pem')
+    const pem = await downloadCrl(orgDomain.value)
+    downloadText(pem, `csssl-crl-${orgDomain.value}.pem`)
     ElMessage.success('CRL已下载')
   } catch (e) {
     // 错误提示已由拦截器统一处理
@@ -171,7 +178,7 @@ async function onDownloadCrl() {
 async function onDownloadDelta() {
   deltaDownLoading.value = true
   try {
-    downloadText(delta.value.deltaPem, 'csssl-delta-crl.pem')
+    downloadText(delta.value.deltaPem, `csssl-delta-crl-${orgDomain.value}.pem`)
     ElMessage.success('增量CRL已下载')
   } finally {
     deltaDownLoading.value = false

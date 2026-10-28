@@ -23,6 +23,7 @@
             @clear="reload"
           />
           <el-button type="primary" plain @click="reload">查询</el-button>
+          <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
         </div>
         <div v-if="canIssue">
           <el-button type="primary" @click="openIssue">签发证书</el-button>
@@ -117,9 +118,17 @@
 
     <!-- 签发证书 -->
     <el-dialog v-model="issueVisible" title="签发证书" width="520px" :close-on-click-modal="false">
+      <el-alert
+        v-if="isOrgDomain"
+        type="info"
+        :closable="false"
+        show-icon
+        :title="`机构域「${orgDomain}」签发：O 取机构主体，无需手填，仅需填写 CN（后端按机构口径受控附加并校验 O）。`"
+        style="margin-bottom: 12px"
+      />
       <el-form :model="issueForm" label-width="110px">
         <el-form-item label="主体CN" required>
-          <el-input v-model="issueForm.subjectCn" placeholder="如 his.cslk.local / csmig 前置机" />
+          <el-input v-model="issueForm.subjectCn" :placeholder="isOrgDomain ? '仅填 CN，如 his.yibao.local（O 由后端受控）' : '如 his.cslk.local / csmig 前置机'" />
         </el-form-item>
         <el-form-item label="证书类型">
           <el-radio-group v-model="issueForm.certType">
@@ -189,6 +198,14 @@
 
     <!-- 公钥直签（RA 场景：申请方自持私钥） -->
     <el-dialog v-model="pubKeyVisible" title="公钥直签（申请方自持私钥，仅提交公钥）" width="560px" :close-on-click-modal="false">
+      <el-alert
+        v-if="isOrgDomain"
+        type="info"
+        :closable="false"
+        show-icon
+        :title="`机构域「${orgDomain}」签发：主体DN 的 O 取机构主体，仅填 CN（CN=xxx，O 交给后端受控校验）。`"
+        style="margin-bottom: 12px"
+      />
       <el-form :model="pubKeyForm" label-width="110px">
         <el-form-item label="公钥PEM" required>
           <el-input
@@ -321,7 +338,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, reactive, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   pageCerts,
@@ -339,12 +356,17 @@ import {
   downloadKeyPem
 } from '@/api/system'
 import { downloadText } from '@/lib/download'
+import { currentOrg } from '@/lib/org'
 
 // 下载权限与后端兜底 403 对齐：cert.pem=OPERATOR/ADMIN；key.pem 与 p12=ADMIN/KEY_ADMIN
 const role = localStorage.getItem('role') || ''
 const canIssue = ['ADMIN', 'OPERATOR'].includes(role)
 const canDownloadCert = ['ADMIN', 'OPERATOR'].includes(role)
 const canDownloadKey = ['ADMIN', 'KEY_ADMIN'].includes(role)
+
+// 当前机构域：列表/签发/吊销等请求由 request 封装自动附带 orgKey=currentOrg()
+const orgDomain = ref(currentOrg())
+const isOrgDomain = computed(() => orgDomain.value !== 'default')
 
 const loading = ref(false)
 const rows = ref([])

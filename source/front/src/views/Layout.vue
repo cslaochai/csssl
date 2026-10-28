@@ -44,6 +44,10 @@
           <el-icon><User /></el-icon>
           <span>用户与角色</span>
         </el-menu-item>
+        <el-menu-item v-if="can('/orgs') && isGlobal" index="/orgs">
+          <el-icon><OfficeBuilding /></el-icon>
+          <span>机构管理</span>
+        </el-menu-item>
         <el-menu-item index="/tsa">
           <el-icon><Clock /></el-icon>
           <span>时间戳TSA</span>
@@ -58,23 +62,40 @@
     <el-container>
       <el-header class="header">
         <div class="header-title">{{ currentTitle }}</div>
-        <el-dropdown @command="onCommand">
-          <span class="user-box">
-            <el-icon><UserFilled /></el-icon>
-            <span>{{ username }}</span>
-            <el-tag size="small" type="info" effect="plain">{{ roleText }}</el-tag>
-            <el-icon><ArrowDown /></el-icon>
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="changePassword">修改口令</el-dropdown-item>
-              <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
-            </el-dropdown-menu>
+        <div class="header-right">
+          <!-- 机构域：全局用户可选域（默认 default）；机构用户只读徽标 -->
+          <template v-if="isGlobal">
+            <span class="domain-label">机构域</span>
+            <el-select v-model="domain" size="small" style="width: 200px" @change="onDomainChange">
+              <el-option label="default（默认域）" value="default" />
+              <el-option
+                v-for="o in orgOptions"
+                :key="o.orgKey"
+                :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey"
+                :value="o.orgKey"
+              />
+            </el-select>
           </template>
-        </el-dropdown>
+          <el-tag v-else type="warning" effect="dark" size="small">机构：{{ userOrg }}</el-tag>
+          <el-dropdown @command="onCommand">
+            <span class="user-box">
+              <el-icon><UserFilled /></el-icon>
+              <span>{{ username }}</span>
+              <el-tag size="small" type="info" effect="plain">{{ roleText }}</el-tag>
+              <el-icon><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="changePassword">修改口令</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </el-header>
       <el-main class="main">
-        <router-view />
+        <!-- 切换机构域时按域重建页面组件，当前页数据自动重载 -->
+        <router-view :key="`${route.path}@${domainFlag}`" />
       </el-main>
     </el-container>
 
@@ -109,11 +130,12 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { logout, changePassword } from '@/api/system'
+import { logout, changePassword, listOrgsCached } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
+import { isGlobalUser, userOrgKey, getDomain, setDomain, currentOrg, clearOrgState } from '@/lib/org'
 import logo from '@/assets/logo.svg'
 
 const route = useRoute()
@@ -128,6 +150,26 @@ const roleText = computed(() =>
   ({ ADMIN: '系统管理员', OPERATOR: 'CA操作员', APPROVER: '审核员', AUDITOR: '审计员', SECURITY_ADMIN: '安全管理员', KEY_ADMIN: '密钥管理员' })[role.value] || role.value
 )
 
+// ===== 机构域状态（全局用户=顶栏选择器；机构用户=只读徽标） =====
+const isGlobal = ref(isGlobalUser())
+const userOrg = ref(userOrgKey())
+const domain = ref(getDomain())
+const orgOptions = ref([])
+// 参与 router-view key：切换域后当前页组件重建、数据重载
+const domainFlag = ref(currentOrg())
+
+onMounted(async () => {
+  if (isGlobal.value) {
+    orgOptions.value = await listOrgsCached()
+  }
+})
+
+function onDomainChange(v) {
+  setDomain(v)
+  domainFlag.value = v
+  ElMessage.success(`已切换到机构域 ${v}`)
+}
+
 // 菜单显隐与 router/index.js 的 meta.roles 保持一致
 const MENU_ROLES = {
   '/root-ca': ['ADMIN', 'KEY_ADMIN'],
@@ -137,6 +179,7 @@ const MENU_ROLES = {
   '/applications': ['ADMIN', 'OPERATOR', 'APPROVER'],
   '/templates': ['ADMIN', 'SECURITY_ADMIN'],
   '/users': ['ADMIN'],
+  '/orgs': ['ADMIN'], // 另限全局用户（模板 v-if isGlobal）
   '/tsa': null,
   '/ocsp': null
 }
@@ -182,6 +225,7 @@ function clearSession() {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
   localStorage.removeItem('role')
+  clearOrgState()
   resetSm2Cache()
 }
 
@@ -248,6 +292,15 @@ async function onCommand(command) {
   font-size: 16px;
   font-weight: 600;
   color: #1d2a4a;
+}
+.header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.domain-label {
+  font-size: 13px;
+  color: #606266;
 }
 .user-box {
   display: inline-flex;

@@ -19,6 +19,7 @@
             @clear="reload"
           />
           <el-button type="primary" plain @click="reload">查询</el-button>
+          <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
         </div>
         <div>
           <el-button type="primary" @click="openSubmit">提交申请</el-button>
@@ -86,7 +87,11 @@
             <el-option v-for="t in templates" :key="t.id" :label="`${t.templateName}（${t.templateCode}）`" :value="t.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="主体DN" required>
+        <el-form-item v-if="isOrgDomain" label="主体CN" required>
+          <el-input v-model="submitCn" placeholder="仅填 CN，如 张三 / his.yibao.local" />
+          <div class="dn-tip">机构域「{{ orgDomain }}」：O 取机构主体，无需手填，提交拼为 CN=xxx，O 由后端按机构口径受控附加校验。</div>
+        </el-form-item>
+        <el-form-item v-else label="主体DN" required>
           <el-input v-model="submitForm.subjectDn" placeholder="如 CN=张三,O=长沙麓康医院,OU=门诊部" />
         </el-form-item>
         <el-form-item label="SAN（可选）">
@@ -145,18 +150,24 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   pageApplications, submitApplication, approveApplication, rejectApplication,
   issueApplication, cancelApplication, pageTemplates
 } from '@/api/system'
+import { currentOrg } from '@/lib/org'
 
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const templates = ref([])
 const query = reactive({ pageNo: 1, pageSize: 10, status: '', keyword: '' })
+
+// 机构域：列表/审批/签发请求由 request 封装自动附带 orgKey=currentOrg()
+const orgDomain = ref(currentOrg())
+const isOrgDomain = computed(() => orgDomain.value !== 'default')
+const submitCn = ref('')
 
 const submitVisible = ref(false)
 const reviewVisible = ref(false)
@@ -214,10 +225,18 @@ function openSubmit() {
     applicantType: 'PERSON', applicantName: '', idNo: '', templateId: null,
     subjectDn: '', san: '', publicKeyPem: '', description: ''
   })
+  submitCn.value = ''
   submitVisible.value = true
 }
 
 async function onSubmit() {
+  if (isOrgDomain.value) {
+    if (!submitCn.value.trim()) {
+      ElMessage.warning('请填写主体CN（O 取机构主体，无需手填）')
+      return
+    }
+    submitForm.subjectDn = `CN=${submitCn.value.trim()}`
+  }
   if (!submitForm.applicantName.trim() || !submitForm.idNo.trim() || !submitForm.subjectDn.trim() || !submitForm.publicKeyPem.trim() || !submitForm.templateId) {
     ElMessage.warning('请完整填写申请信息（含公钥PEM）')
     return
@@ -298,5 +317,10 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+.dn-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
 }
 </style>

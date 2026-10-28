@@ -49,6 +49,13 @@ const routes = [
         meta: { title: '用户与角色', roles: ['ADMIN'] }
       },
       {
+        path: 'orgs',
+        name: 'orgs',
+        component: () => import('@/views/Orgs.vue'),
+        // 机构管理仅全局 ADMIN：机构用户（orgKey 非空）由 globalOnly 拦截
+        meta: { title: '机构管理', roles: ['ADMIN'], globalOnly: true }
+      },
+      {
         path: 'templates',
         name: 'templates',
         component: () => import('@/views/Templates.vue'),

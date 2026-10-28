@@ -29,6 +29,9 @@ public class SysUser {
     /** 角色编码 */
     private String roleCode;
 
+    /** 归属机构；NULL=全局管理员（跨机构，兼容存量账号） */
+    private String orgKey;
+
     /** 1-启用 0-禁用 */
     private Integer status;
 

@@ -6,6 +6,10 @@
           <el-select v-model="query.roleCode" placeholder="角色" clearable style="width: 150px" @change="reload">
             <el-option v-for="r in roles" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
+          <el-select v-if="isGlobal" v-model="query.orgKey" placeholder="机构域" clearable style="width: 170px" @change="reload">
+            <el-option label="default（全局/默认域）" value="default" />
+            <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
+          </el-select>
           <el-button type="primary" plain @click="reload">查询</el-button>
         </div>
         <div>
@@ -20,6 +24,12 @@
         <el-table-column label="角色" width="110">
           <template #default="{ row }">
             <el-tag size="small" :type="roleTag(row.roleCode)">{{ roleText(row.roleCode) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="归属机构" width="130">
+          <template #default="{ row }">
+            <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
+            <span v-else class="mono">{{ row.orgKey }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
@@ -74,6 +84,17 @@
             <el-option v-for="r in roles" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="!editing" label="归属机构">
+          <template v-if="isGlobal">
+            <el-select v-model="form.orgKey" style="width: 100%">
+              <el-option label="全局账号（跨机构，不限定域）" value="" />
+              <el-option label="default（默认域）" value="default" />
+              <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
+            </el-select>
+            <div class="org-tip">机构账号仅能操作本机构数据；全局账号由后端按角色+机构策略管控。</div>
+          </template>
+          <el-tag v-else size="small" type="warning">机构用户建号恒归本机构：{{ userOrg }}</el-tag>
+        </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
         </el-form-item>
@@ -91,7 +112,8 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { pageUsers, createUser, updateUser } from '@/api/system'
+import { pageUsers, createUser, updateUser, listOrgsCached } from '@/api/system'
+import { isGlobalUser, userOrgKey } from '@/lib/org'
 
 const roles = [
   { value: 'ADMIN', label: '系统管理员' },
@@ -102,14 +124,18 @@ const roles = [
   { value: 'KEY_ADMIN', label: '密钥管理员（根密钥门限）' }
 ]
 
+const isGlobal = ref(isGlobalUser())
+const userOrg = ref(userOrgKey())
+const orgOptions = ref([])
+
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ pageNo: 1, pageSize: 10, roleCode: '' })
+const query = reactive({ pageNo: 1, pageSize: 10, roleCode: '', orgKey: '' })
 const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
-const form = reactive({ id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1 })
+const form = reactive({ id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, orgKey: '' })
 
 function roleText(r) {
   return roles.find(i => i.value === r)?.label || r
@@ -124,7 +150,9 @@ async function load() {
     const res = await pageUsers({
       pageNo: query.pageNo,
       pageSize: query.pageSize,
-      roleCode: query.roleCode || undefined
+      roleCode: query.roleCode || undefined,
+      // 全局用户可按域过滤（缺省=全部域含全局账号）；机构用户由后端强制本域
+      orgKey: isGlobal.value && query.orgKey ? query.orgKey : undefined
     })
     rows.value = res.data.records || []
     total.value = res.data.total || 0
@@ -142,7 +170,7 @@ function reload() {
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1 })
+  Object.assign(form, { id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, orgKey: isGlobal.value ? '' : userOrg.value })
   dialogVisible.value = true
 }
 
@@ -175,7 +203,14 @@ async function onSave() {
       await updateUser(form.id, { realName: form.realName, roleCode: form.roleCode, status: String(form.status), password: form.password || undefined })
       ElMessage.success('账号已更新')
     } else {
-      await createUser({ username: form.username, password: form.password, realName: form.realName, roleCode: form.roleCode })
+      // orgKey：空=全局账号；非空=机构账号（机构用户由后端强制本域）
+      await createUser({
+        username: form.username,
+        password: form.password,
+        realName: form.realName,
+        roleCode: form.roleCode,
+        orgKey: form.orgKey || undefined
+      })
       // 不回显初始口令：口令仅创建者本人知道，线下交接
       ElMessage.success('账号已创建，口令已按线下流程告知管理员')
     }
@@ -194,7 +229,12 @@ async function toggleStatus(row) {
   load()
 }
 
-onMounted(load)
+onMounted(async () => {
+  load()
+  if (isGlobal.value) {
+    orgOptions.value = await listOrgsCached()
+  }
+})
 </script>
 
 <style scoped>
@@ -202,5 +242,14 @@ onMounted(load)
   display: flex;
   gap: 8px;
   align-items: center;
+}
+.mono {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+}
+.org-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
 }
 </style>

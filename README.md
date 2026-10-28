@@ -1,4 +1,4 @@
-# csssl · CA 根认证中心
+﻿# csssl · CA 根认证中心
 
 为 HIS 生态提供统一信任根与加密传输支撑的独立工程：
 
@@ -17,7 +17,7 @@
        ▼                                                     │  校验/OCSP         │
 ┌──────────────┐   证书信任链 / SM2签名 / SM4加密（生产期）              └────────▲─────────┘
 │ csmig 医保前置 │───────────────────────────────────────────────────────┘
-│ (8091 /mip)  │
+│ (8091 /mig)  │
 └──────┬───────┘
        ▼
 ┌──────────────┐
@@ -98,6 +98,7 @@ npm run build               # 构建产物 dist/
 | `GET /ssl/ca/public/crl/delta` | 增量 CRL（dCRL）下载：自最近全量发布以来新增的吊销/挂起条目（RFC 5280 §5.2.4，带 DeltaCRLIndicator） |
 | `POST /ssl/ca/public/ocsp` | OCSP 查询（`application/ocsp-request` DER → `application/ocsp-response`，三态：good/revoked/unknown） |
 | `GET /ssl/ca/public/ocsp/{base64url}` | OCSP 查询 GET 形式（RFC 6960） |
+| `/ssl/ca/public/{orgKey}/…` | 多机构变体：`root`/`subca`/`crl`/`crl/delta`/`ocsp`/`verify` 均带机构路径段，按该机构信任域验链/取吊销（无 orgKey 段=default 域，兼容存量） |
 
 ### 管理接口（需 `Authorization: Bearer <token>`）
 
@@ -106,7 +107,10 @@ npm run build               # 构建产物 dist/
 | `GET /ssl/auth/publicKey` | 登录 SM2 公钥 |
 | `POST /ssl/auth/login` | 登录（口令 SM2 密文；5 次失败锁定 15 分钟） |
 | `POST /ssl/auth/changePassword` | 自助改口令（SM2 密文新旧口令；改后旧 token 即刻失效） |
-| `GET /ssl/admin/ca/status` | 根CA状态（含 SUB_CA 信息与根密钥封存状态） |
+| `GET /ssl/admin/ca/status` | 根CA状态（含 SUB_CA 信息与根密钥封存状态；`?orgKey=` 切机构域，default 兼容存量） |
+| `GET /ssl/admin/orgs` | 机构注册表总览（各机构根CA状态摘要，多机构域拓扑；仅全局 ADMIN） |
+| `POST /ssl/admin/orgs` | 开新机构域 `{orgKey, orgName, subjectO, algorithm}`（自动建独立根CA+SUB_CA+门限份额；仅全局 ADMIN） |
+| `POST /ssl/admin/orgs/{orgKey}/suspend\|resume\|close` | 机构状态流转（ACTIVE↔SUSPENDED→CLOSED 终态；关停仅门禁写操作，历史证书仍可验吊销） |
 | `POST /ssl/admin/ca/init` | 初始化/重建根CA（幂等，私钥丢失时吊销旧根重建） |
 | `POST /ssl/admin/ca/seal` | 封存根私钥（离线化，此后仅 SUB_CA 在线签发） |
 | `POST /ssl/admin/ca/unseal` | 解封根私钥（轮换 SUB_CA 等维护窗口用） |
@@ -139,6 +143,8 @@ npm run build               # 构建产物 dist/
 
 ## 关键设计
 
+- **多机构域（多家独立医院共用一套 csssl）**：GDCA 多根家族式信任模型——每家机构一把独立根CA + 专属 SUB_CA + 独立密钥域/落盘目录（`store-dir/orgs/{orgKey}/`）/主密钥/门限份额，机构间互不信任（default 根验他域证书一律 valid=false）。机构注册表 `ssl_ca_org`（orgKey 受 `^[a-z0-9]{1,32}$` 校验兜路径穿越，subject_o 全局唯一），开机构即建根（幂等，首建中途崩溃留裸域可由 `/admin/ca/init` 补建 SUB_CA）。存量单根原样归位 `default` 域，老 URL 与落盘路径逐字节兼容；新机构叶证书主体 O 强制取注册表 `subject_o`
+- **数据域服务端强制隔离**：各业务表加 `org_key`（default 域由 `DEFAULT` 自动归位，模板/用户 `NULL`=全局）；机构用户锁定本域（跨域读写一律 403，不信任前端传参），全局用户需显式 `?orgKey=` 才跨域，签发/CRL/OCSP/校验/审计/密钥全链路按 effectiveOrg 收口；SUSPENDED/CLOSED 机构只门禁写操作、历史证书仍可验证吊销（合规）
 - **根CA离线化**：对齐国内持证CA通行架构——根CA仅初始化与签发 SUB_CA，日常签发/CRL/OCSP 全部由 SUB_CA 承担；根私钥支持「封存」离线（`key.pem.enc` 移存为 `.sealed`）或「Shamir(3,5) 门限分持」（推荐），封存后根密钥不参与任何在线操作，到期前 `renewBeforeDays` 天自动轮换
 - **根密钥 Shamir(3,5) 门限分持（§8.2.4.3）**：根私钥 GF(256) 秘密共享拆 5 份份额、任 3 份恢复，门限化后原始 SM4 加密文件删除、份额成为唯一持久形态（新根自动触发/旧环境显式迁移接口）；份额解封仅内存缓存并以根证书公钥签名挑战校验（防篡改/错配），用后封存清除——对齐密评"根密钥不得单点持有"
 - **私钥加密落盘**：所有私钥经 `KeyVault` 以 SM4 加密后落盘（`*.key.pem.enc`），主密钥由 `SSL_MASTER_KEY` 注入（未配置时首启随机生成落盘 `master.key`）；旧明文密钥自动迁移加密；HSM/加密机（GM/T 0018）可在同类接口处替换
@@ -181,6 +187,7 @@ npm run build               # 构建产物 dist/
 - [ ] 双证书体系 + 密钥管理中心（KMC，加密证书托管，第三方持证才强制；院内豁免声明见 docs/）
 - [ ] 国密 UKey 发证（GM/T 0016 保护结构、私钥不出设备）——需硬件采购
 - [x] 根密钥 Shamir(3,5) 门限分持 + 标准六类角色细化——已交付（P2，`100ead3` 并入 master；份额生成/下载/3份解封 + SECURITY_ADMIN/KEY_ADMIN）
+- [x] 多机构域（按机构独立根CA，多家医院共用一套 csssl）——已交付（路线 A：`ssl_ca_org` 注册表 + 每机构独立根/SUB_CA/密钥域/门限份额 + 全域 org_key 服务端强制隔离 + 机构管理页；`smoke-route-a.cjs` 24/24）
 - [ ] 服务器密码机 HSM 对接（GM/T 0018）——生产/密评立项
 - [ ] 远程 RA 分节点 + SCEP/CMP 标准协议（GM/T 0089）
 - [ ] 管理后台口令修改页

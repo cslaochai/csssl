@@ -8,6 +8,7 @@ import com.csssl.entity.SysUser;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.AuditService;
 import com.csssl.service.AuthService;
+import com.csssl.service.OrgService;
 import com.csssl.util.RoleCode;
 import cn.hutool.crypto.digest.BCrypt;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,6 +32,16 @@ import java.util.Map;
  *
  * <p>账号治理：口令由调用方必传并按复杂度校验（不再下发默认弱口令、不回显明文）；
  * 建号/改角色/启停用/重置口令均落审计，安全相关变更递增 token_version 吊销既有会话。</p>
+ *
+ * <p>路线A数据域口径（effectiveOrg，服务端强制）：
+ * <ul>
+ *   <li>建号：全局 ADMIN 可传 orgKey 建机构用户（含机构 ADMIN，机构主由全局任命）或不传=全局用户；
+ *       机构 ADMIN 只能建本机构用户，且不可建/改 ADMIN 角色，不可建全局用户；越域请求 403。</li>
+ *   <li>列表：机构用户只见本机构；全局用户可按 ?orgKey= 过滤，不传=全部
+ *       ——这是唯一允许的跨机构"读"口（全局 ADMIN 总览），不构成写旁路。</li>
+ *   <li>改角色/停用/重置口令：目标用户必须落在操作者数据域（机构 ADMIN 改别机构/全局用户→403）；
+ *       审计记录带目标用户机构。</li>
+ * </ul></p>
  */
 @RestController
 @RequestMapping("/admin/users")
@@ -39,17 +50,24 @@ public class AdminUserController {
 
     private final SysUserMapper userMapper;
     private final AuditService auditService;
+    private final OrgService orgService;
 
-    /** 用户列表（分页 + 角色筛选） */
+    /** 用户列表（分页 + 角色/机构筛选；机构用户强制本机构，全局用户 orgKey 缺省=跨机构总览只读） */
     @GetMapping
     public Result<Page<SysUser>> page(@RequestParam(defaultValue = "1") long pageNo,
                                       @RequestParam(defaultValue = "10") long pageSize,
                                       @RequestParam(required = false) String roleCode,
+                                      @RequestParam(required = false) String orgKey,
                                       HttpServletRequest request) {
         RoleCode.require(request, RoleCode.ADMIN);
+        // readOrgScope：机构用户锁本机构（传别机构 403）；全局用户不传=null=全部（唯一跨机构读口）
+        String scope = RoleCode.readOrgScope(request, orgKey);
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         if (roleCode != null && !roleCode.isBlank()) {
             qw.eq(SysUser::getRoleCode, roleCode);
+        }
+        if (scope != null) {
+            qw.eq(SysUser::getOrgKey, scope);
         }
         qw.orderByAsc(SysUser::getId);
         Page<SysUser> page = userMapper.selectPage(new Page<>(pageNo, pageSize), qw);
@@ -57,7 +75,11 @@ public class AdminUserController {
         return Result.success("查询成功", page);
     }
 
-    /** 创建管理账号（admin/操作员/审核员/审计员）：口令必传且满足复杂度，服务端不落默认口令 */
+    /**
+     * 创建管理账号：全局 ADMIN 可建全局/各机构账号（orgKey 显式指定，缺省=全局）；
+     * 机构 ADMIN 仅可建本机构 OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN，
+     * 不可建 ADMIN（机构主由全局 ADMIN 任命）、不可建全局用户；越域 403。
+     */
     @PostMapping
     public Result<SysUser> create(@RequestBody Map<String, String> body, HttpServletRequest request) {
         RoleCode.require(request, RoleCode.ADMIN);
@@ -75,6 +97,22 @@ public class AdminUserController {
             throw new IllegalArgumentException("不支持的角色：" + role
                     + "（仅支持 ADMIN / OPERATOR / APPROVER / AUDITOR / SECURITY_ADMIN / KEY_ADMIN）");
         }
+        String myOrg = RoleCode.currentOrg(request);
+        String reqOrg = blankToNull(body.get("orgKey"));
+        String targetOrg;
+        if (myOrg != null) {
+            // 机构 ADMIN：一律落本机构；请求 orgKey 与本人机构不一致=越域 403；不可任命机构主（ADMIN）
+            targetOrg = RoleCode.effectiveOrg(request, reqOrg);
+            if (RoleCode.ADMIN.equals(role)) {
+                throw new SecurityException("权限不足：机构管理员不可创建 ADMIN 角色账号（机构主由全局 ADMIN 任命）");
+            }
+        } else {
+            // 全局 ADMIN：显式 orgKey=建该机构用户（机构须存在）；缺省=全局用户（org_key NULL）
+            targetOrg = reqOrg;
+            if (targetOrg != null) {
+                orgService.get(targetOrg);
+            }
+        }
         String password = body.get("password");
         AuthService.checkPasswordComplexity(password);
         SysUser user = new SysUser();
@@ -83,19 +121,25 @@ public class AdminUserController {
         user.setRealName(body.get("realName") == null || body.get("realName").isBlank()
                 ? username.trim() : body.get("realName").trim());
         user.setRoleCode(role);
+        user.setOrgKey(targetOrg);
         user.setStatus(1);
         user.setFailedAttempts(0);
         user.setTokenVersion(0);
         user.setCreatedAt(LocalDateTime.now());
         userMapper.insert(user);
         auditService.record(RoleCode.currentUser(request), "USER_CREATE", String.valueOf(user.getId()),
-                "创建账号：" + user.getUsername() + "，角色=" + role + "，姓名=" + user.getRealName(),
-                clientIp(request));
+                "创建账号：" + user.getUsername() + "，角色=" + role + "，姓名=" + user.getRealName()
+                        + "，机构=" + (targetOrg == null ? "全局" : targetOrg),
+                clientIp(request), auditOrg(targetOrg, myOrg));
         user.setPassword(null);
         return Result.success("创建成功", user);
     }
 
-    /** 更新角色/姓名/启停用（password 可选重置）；口令/角色/状态变更后旧会话即刻失效 */
+    /**
+     * 更新角色/姓名/启停用（password 可选重置）；口令/角色/状态变更后旧会话即刻失效。
+     * 目标用户必须落在操作者数据域（机构 ADMIN 改别机构/全局用户→403）；
+     * 机构 ADMIN 不可把角色改为 ADMIN（机构主任命权保留在全局 ADMIN）。
+     */
     @PostMapping("/{id}")
     public Result<SysUser> update(@PathVariable Long id, @RequestBody Map<String, String> body,
                                   HttpServletRequest request) {
@@ -106,6 +150,18 @@ public class AdminUserController {
         }
         String operator = RoleCode.currentUser(request);
         String ip = clientIp(request);
+        String myOrg = RoleCode.currentOrg(request);
+        String targetOrg = user.getOrgKey();
+        if (myOrg != null) {
+            // 机构 ADMIN：目标必须为本机构用户（全局用户 org_key=NULL 亦不可触碰）
+            if (targetOrg == null || !myOrg.equals(targetOrg)) {
+                throw new SecurityException("权限不足：不能操作其他机构或全局账号");
+            }
+            String newRole = blankToNull(body.get("roleCode"));
+            if (newRole != null && RoleCode.ADMIN.equals(newRole.trim().toUpperCase())) {
+                throw new SecurityException("权限不足：机构管理员不可任命/变更为 ADMIN 角色（机构主由全局 ADMIN 任命）");
+            }
+        }
 
         LambdaUpdateWrapper<SysUser> uw = new LambdaUpdateWrapper<SysUser>().eq(SysUser::getId, id);
         List<String> changes = new ArrayList<>();
@@ -160,16 +216,26 @@ public class AdminUserController {
         if (touched) {
             userMapper.update(null, uw);
         }
+        // 审计归位：按目标用户机构（全局用户=default 域留痕）
+        String auditOrg = auditOrg(targetOrg, myOrg);
         if (!changes.isEmpty()) {
             auditService.record(operator, "USER_UPDATE", String.valueOf(id),
-                    "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip);
+                    "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip, auditOrg);
         }
         if (resetPassword) {
             auditService.record(operator, "USER_RESET_PWD", String.valueOf(id),
-                    "重置账号 " + user.getUsername() + " 的登录口令（口令不入库留痕、需该用户重新登录）", ip);
+                    "重置账号 " + user.getUsername() + " 的登录口令（口令不入库留痕、需该用户重新登录）", ip, auditOrg);
         }
         user.setPassword(null);
         return Result.success("更新成功", user);
+    }
+
+    /** 审计机构归位：目标账号机构优先；全局账号（org_key NULL）按操作者域，操作者亦全局则 default */
+    private static String auditOrg(String targetUserOrg, String operatorOrg) {
+        if (targetUserOrg != null && !targetUserOrg.isBlank()) {
+            return targetUserOrg;
+        }
+        return operatorOrg == null || operatorOrg.isBlank() ? RoleCode.DEFAULT_ORG : operatorOrg;
     }
 
     private boolean isSupportedRole(String role) {
@@ -180,6 +246,10 @@ public class AdminUserController {
 
     private static boolean isBlank(String v) {
         return v == null || v.isBlank();
+    }
+
+    private static String blankToNull(String v) {
+        return v == null || v.isBlank() ? null : v.trim();
     }
 
     private String clientIp(HttpServletRequest request) {

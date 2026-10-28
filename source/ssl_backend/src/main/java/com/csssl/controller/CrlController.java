@@ -4,11 +4,14 @@ import com.csssl.common.Result;
 import com.csssl.dto.CertVo;
 import com.csssl.entity.CaCert;
 import com.csssl.service.AuditService;
+import com.csssl.service.CaService;
 import com.csssl.service.CrlService;
+import com.csssl.service.OrgService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
@@ -17,6 +20,8 @@ import java.util.Map;
 
 /**
  * 吊销列表（CRL）接口：管理端查看吊销记录与下载 CRL。
+ * 路线A多机构：管理端支持 ?orgKey= 切域查看（缺省 default，行为与单根时代一致）。
+ * 只读视图不因机构 SUSPENDED/CLOSED 关闭——历史证书的吊销信息必须持续可得（合规点）。
  */
 @RestController
 @RequestMapping("/admin/crl")
@@ -25,13 +30,19 @@ public class CrlController {
 
     private final CrlService crlService;
     private final AuditService auditService;
+    private final OrgService orgService;
 
-    /** 吊销记录 + 当前 CRL PEM + thisUpdate/nextUpdate（管理页） */
+    /** 吊销记录 + 当前 CRL PEM + thisUpdate/nextUpdate（管理页；?orgKey= 切机构域，缺省 default） */
     @GetMapping
-    public Result<Map<String, Object>> view() {
-        List<CaCert> revoked = crlService.revokedList();
-        CrlService.CrlInfo info = crlService.publishIfNeeded();
+    public Result<Map<String, Object>> view(@RequestParam(required = false) String orgKey) {
+        String org = resolveOrg(orgKey);
+        List<CaCert> revoked = crlService.revokedList(org);
+        CrlService.CrlInfo info = crlService.publishIfNeeded(org);
         Map<String, Object> data = new LinkedHashMap<>();
+        // default 域响应体不加 orgKey 字段（存量 URL 逐字节兼容）；非 default 标注归属域
+        if (!CaService.DEFAULT_ORG_KEY.equals(org)) {
+            data.put("orgKey", org);
+        }
         data.put("revoked", revoked.stream().map(CertVo::from).toList());
         data.put("crlPem", revoked.isEmpty() ? "" : info.pem());
         data.put("thisUpdate", revoked.isEmpty() ? null : info.thisUpdate());
@@ -41,20 +52,26 @@ public class CrlController {
         return Result.success("查询成功", data);
     }
 
-    /** 下载 CRL PEM（判重发布：内容未变直接复用已发布 CRL，不自增编号） */
+    /** 下载 CRL PEM（判重发布：内容未变直接复用已发布 CRL，不自增编号；?orgKey= 切机构域） */
     @GetMapping("/download")
-    public String download(HttpServletRequest request) {
+    public String download(@RequestParam(required = false) String orgKey, HttpServletRequest request) {
+        String org = resolveOrg(orgKey);
         String username = (String) request.getAttribute("ssl.username");
-        String crlPem = crlService.publishIfNeeded().pem();
-        auditService.record(username, "CRL_DOWNLOAD", null, "下载CRL吊销列表", clientIp(request));
+        String crlPem = crlService.publishIfNeeded(org).pem();
+        auditService.record(username, "CRL_DOWNLOAD", null,
+                "下载CRL吊销列表" + (CaService.DEFAULT_ORG_KEY.equals(org) ? "" : "（机构 " + org + "）"), clientIp(request));
         return crlPem;
     }
 
-    /** 增量 CRL（dCRL）：自最近全量发布以来新增的吊销/挂起条目，供依赖方增量同步 */
+    /** 增量 CRL（dCRL）：指定机构域自最近全量发布以来新增的吊销/挂起条目，供依赖方增量同步 */
     @GetMapping("/delta")
-    public Result<Map<String, Object>> delta() {
-        CrlService.DeltaCrlInfo info = crlService.buildDeltaCrl();
+    public Result<Map<String, Object>> delta(@RequestParam(required = false) String orgKey) {
+        String org = resolveOrg(orgKey);
+        CrlService.DeltaCrlInfo info = crlService.buildDeltaCrl(org);
         Map<String, Object> data = new LinkedHashMap<>();
+        if (!CaService.DEFAULT_ORG_KEY.equals(org)) {
+            data.put("orgKey", org);
+        }
         data.put("deltaPem", info.pem());
         data.put("thisUpdate", info.thisUpdate());
         data.put("nextUpdate", info.nextUpdate());
@@ -62,6 +79,17 @@ public class CrlController {
         data.put("crlNumber", info.crlNumber());
         data.put("baseCrlNumber", info.baseCrlNumber());
         return Result.success("查询成功", data);
+    }
+
+    /** orgKey 缺省=default（存量行为）；显式传入时机构必须存在（非法标识/不存在按现有 IAE 口径回 4xx） */
+    private String resolveOrg(String orgKey) {
+        if (orgKey == null || orgKey.isBlank()) {
+            return CaService.DEFAULT_ORG_KEY;
+        }
+        if (orgService.findByKey(orgKey) == null) {
+            throw new IllegalArgumentException("机构不存在: " + orgKey);
+        }
+        return orgKey;
     }
 
     private String clientIp(HttpServletRequest request) {

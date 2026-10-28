@@ -14,9 +14,19 @@
         >
           {{ rootKeyLabel }}
         </el-tag>
+        <el-tag type="primary" effect="dark" size="small" style="margin-left: 8px">
+          当前操作域：{{ org }}
+        </el-tag>
       </div>
       <div>
-        <el-button type="primary" :loading="initLoading" @click="onInit">初始化 / 重建根CA</el-button>
+        <el-button
+            type="primary"
+            :loading="initLoading"
+            :disabled="!canInitHere"
+            :title="canInitHere ? '' : '该机构已有独立根CA，非 default 域仅在机构尚无根时可初始化'"
+            @click="onInit"
+        >初始化 / 重建根CA
+        </el-button>
         <el-button :disabled="!root.initialized" @click="onDownloadRoot">导出根证书</el-button>
         <el-button
             v-if="root.rootKeyState === 'ONLINE'"
@@ -31,6 +41,15 @@
         </el-button>
       </div>
     </div>
+
+    <el-alert
+        v-if="isGlobal"
+        :title="`当前在机构域「${org}」上操作根CA（顶栏「机构域」切换）。各机构根独立、互不可信。`"
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 14px"
+    />
 
     <el-alert
         v-if="!root.initialized && root.message"
@@ -147,6 +166,11 @@ import {
   unsealRootKey
 } from '@/api/system'
 import {downloadText} from '@/lib/download'
+import {currentOrg, isGlobalUser} from '@/lib/org'
+
+// 当前机构域：全局用户=顶栏选择域；机构用户=本机构（页面随域切换重建重载）
+const org = ref(currentOrg())
+const isGlobal = ref(isGlobalUser())
 
 const root = ref({})
 const initLoading = ref(false)
@@ -156,6 +180,9 @@ const shares = ref({generated: false, total: 5, threshold: 3, shares: []})
 const shareInputs = ref(['', '', ''])
 
 const shareList = computed(() => shares.value.shares || [])
+
+// 非 default 域仅在机构尚无独立根时允许初始化（机构创建即自动生成根，防误重建）
+const canInitHere = computed(() => org.value === 'default' || !root.value.initialized)
 
 const rootKeyTagType = computed(() => {
   const state = root.value.rootKeyState
@@ -173,14 +200,14 @@ const rootKeyLabel = computed(() => {
 })
 
 async function load() {
-  const res = await getCaStatus()
+  const res = await getCaStatus(org.value)
   root.value = res.data
   await loadShares()
 }
 
 async function loadShares() {
   try {
-    const res = await getCaShares()
+    const res = await getCaShares(org.value)
     shares.value = res.data || {generated: false, total: 5, threshold: 3, shares: []}
   } catch (e) {
     shares.value = {generated: false, total: 5, threshold: 3, shares: []}
@@ -189,14 +216,14 @@ async function loadShares() {
 
 async function onInit() {
   const confirmed = await ElMessageBox.confirm(
-      '初始化将生成（或重建）根CA。若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？',
-      '初始化根CA',
+      `将在机构域「${org.value}」上初始化独立根CA。${org.value === 'default' ? '若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。' : '非 default 域仅在机构尚无根时允许初始化。'}新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？`,
+      `初始化根CA（${org.value}）`,
       {type: 'warning', confirmButtonText: '确定初始化', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return
   initLoading.value = true
   try {
-    const res = await initCa()
+    const res = await initCa(org.value)
     root.value = res.data
     ElMessage.success(res.data.message || '根CA初始化完成')
     await loadShares()
@@ -214,7 +241,7 @@ async function onSeal() {
       {type: 'warning', confirmButtonText: '确定封存', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return
-  const res = await sealRootKey()
+  const res = await sealRootKey(org.value)
   root.value = res.data
   ElMessage.success(res.message || '根密钥已封存')
   await loadShares()
@@ -227,7 +254,7 @@ async function onUnseal() {
       {type: 'warning', confirmButtonText: '确定解封', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return
-  const res = await unsealRootKey()
+  const res = await unsealRootKey(org.value)
   root.value = res.data
   ElMessage.success(res.message || '根密钥已解封')
   await loadShares()
@@ -242,7 +269,7 @@ async function onMigrateShares() {
   if (!confirmed) return
   migrating.value = true
   try {
-    const res = await migrateCaShares()
+    const res = await migrateCaShares(org.value)
     shares.value = res.data
     ElMessage.success(res.message || '门限分持完成，请下载 5 份份额离线保管')
   } finally {
@@ -251,16 +278,16 @@ async function onMigrateShares() {
 }
 
 async function onDownloadShare(index) {
-  const res = await downloadCaShare(index)
+  const res = await downloadCaShare(index, org.value)
   const share = res.data
-  downloadText(JSON.stringify(share, null, 2), `csssl-root-share-${index}.json`)
+  downloadText(JSON.stringify(share, null, 2), `csssl-root-share-${org.value}-${index}.json`)
   ElMessage.success(`份额 ${index} 已导出，请离线保管（勿与本机同存）`)
 }
 
 async function onUnsealShares() {
   unsealing.value = true
   try {
-    const res = await unsealCaShares(shareInputs.value.map(s => s.trim()).filter(Boolean))
+    const res = await unsealCaShares(shareInputs.value.map(s => s.trim()).filter(Boolean), org.value)
     root.value = res.data
     ElMessage.success(res.message || '根私钥已通过份额解封（内存缓存）')
   } finally {
@@ -269,14 +296,14 @@ async function onUnsealShares() {
 }
 
 async function onDownloadRoot() {
-  const pem = await downloadRootCert()
-  downloadText(pem, 'csssl-root-ca.pem')
+  const pem = await downloadRootCert(org.value)
+  downloadText(pem, `csssl-root-ca-${org.value}.pem`)
   ElMessage.success('根证书已导出')
 }
 
 async function onDownloadSubCa() {
-  const pem = await downloadSubCaCert()
-  downloadText(pem, 'csssl-sub-ca.pem')
+  const pem = await downloadSubCaCert(org.value)
+  downloadText(pem, `csssl-sub-ca-${org.value}.pem`)
   ElMessage.success('SUB_CA证书已导出')
 }
 

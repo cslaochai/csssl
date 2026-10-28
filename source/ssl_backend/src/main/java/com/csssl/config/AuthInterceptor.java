@@ -31,6 +31,8 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     public static final String ATTR_USERNAME = "ssl.username";
     public static final String ATTR_ROLE = "ssl.role";
+    /** 登录人机构数据域（权威值，回库取得）；全局用户该属性为 null */
+    public static final String ATTR_ORG_KEY = "ssl.orgKey";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final JwtUtil jwtUtil;
@@ -63,6 +65,10 @@ public class AuthInterceptor implements HandlerInterceptor {
         request.setAttribute(ATTR_USERNAME, user.getUsername());
         // 角色以库中当前值为准（令牌角色仅作签发时快照）
         request.setAttribute(ATTR_ROLE, user.getRoleCode());
+        // 机构数据域以库中当前值为准：机构用户=本人机构；全局用户=NullAttribute（各控制器按 effectiveOrg 口径处理）
+        if (user.getOrgKey() != null && !user.getOrgKey().isBlank()) {
+            request.setAttribute(ATTR_ORG_KEY, user.getOrgKey());
+        }
         return true;
     }
 

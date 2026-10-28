@@ -1,5 +1,6 @@
 package com.csssl.util;
 
+import com.csssl.entity.CaOrg;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 
@@ -32,6 +33,9 @@ public final class RoleCode {
     /** 密钥管理员（根密钥门限分持/封存/解封） */
     public static final String KEY_ADMIN = "KEY_ADMIN";
 
+    /** 院内默认机构域兜底标识（与 CaOrg/CaService 的 DEFAULT_ORG_KEY 同源） */
+    public static final String DEFAULT_ORG = CaOrg.DEFAULT_ORG_KEY;
+
     private RoleCode() {
     }
 
@@ -43,6 +47,92 @@ public final class RoleCode {
     /** 当前登录人用户名（登录拦截器写入） */
     public static String currentUser(HttpServletRequest request) {
         return (String) request.getAttribute("ssl.username");
+    }
+
+    /**
+     * 当前登录人机构数据域（登录拦截器回库写入 ssl.orgKey）。
+     * 返回 null=全局用户（org_key 为空，跨机构账号）；非空=机构用户，一律锁定本机构。
+     */
+    public static String currentOrg(HttpServletRequest request) {
+        Object v = request.getAttribute("ssl.orgKey");
+        return v == null ? null : String.valueOf(v);
+    }
+
+    /**
+     * 机构数据域统一口径（effectiveOrg，所有机构域操作唯一入口，安全红线不设旁路）：
+     * <ul>
+     *   <li>机构用户（本人 org_key 非空）→ 一律用本机构；请求显式 orgKey 与本人机构不一致直接 403；</li>
+     *   <li>全局用户（org_key 为空）→ 用请求显式 orgKey，缺省 default 域。</li>
+     * </ul>
+     * 即：不存在"全部机构"的写旁路，跨机构写必须逐机构显式传参且缺省只落 default。
+     */
+    public static String effectiveOrg(HttpServletRequest request, String reqOrgKey) {
+        return effectiveOrg(currentOrg(request), reqOrgKey);
+    }
+
+    /** effectiveOrg 的无请求对象版本（供服务层单测/复用） */
+    public static String effectiveOrg(String operatorOrg, String reqOrgKey) {
+        String req = reqOrgKey == null || reqOrgKey.isBlank() ? null : reqOrgKey.trim();
+        if (operatorOrg != null && !operatorOrg.isBlank()) {
+            if (req != null && !req.equals(operatorOrg)) {
+                log.warn("[数据域] 机构用户 {} 越域访问机构 {}，拒绝", operatorOrg, req);
+                throw new SecurityException("权限不足：不能操作其他机构数据");
+            }
+            return operatorOrg;
+        }
+        return req == null ? DEFAULT_ORG : req;
+    }
+
+    /**
+     * 机构数据域"读"口径（列表/查询类端点）：
+     * 机构用户强制本机构过滤（显式传别机构 403）；全局用户传 orgKey=按机构过滤，
+     * 不传=null 表示跨机构全量只读——这是唯一允许的跨机构读口（监督/总览职能，只读放行）。
+     */
+    public static String readOrgScope(HttpServletRequest request, String reqOrgKey) {
+        String myOrg = currentOrg(request);
+        if (myOrg != null && !myOrg.isBlank()) {
+            return effectiveOrg(myOrg, reqOrgKey);
+        }
+        return reqOrgKey == null || reqOrgKey.isBlank() ? null : reqOrgKey.trim();
+    }
+
+    /**
+     * 行级"读"校验：机构用户仅可访问本机构数据行（不属本机构→403）；
+     * 全局用户放行（跨机构只读为总览/监督职能的合规设计）。rowOrg 空按 default 归位。
+     */
+    public static void requireRowVisible(HttpServletRequest request, String rowOrgKey) {
+        requireRowVisible(currentOrg(request), rowOrgKey);
+    }
+
+    /** requireRowVisible 的无请求对象版本（服务层复用同一口径） */
+    public static void requireRowVisible(String operatorOrg, String rowOrgKey) {
+        if (operatorOrg == null || operatorOrg.isBlank()) {
+            return;
+        }
+        String row = rowOrgKey == null || rowOrgKey.isBlank() ? DEFAULT_ORG : rowOrgKey;
+        if (!operatorOrg.equals(row)) {
+            log.warn("[数据域] 机构用户越域读取数据行（机构 {}），拒绝", row);
+            throw new SecurityException("权限不足：不能访问其他机构数据");
+        }
+    }
+
+    /**
+     * 行级"写"校验：操作必须落在操作者数据域（effectiveOrg 与数据行归属机构一致，否则 403）。
+     * 机构用户经 effectiveOrg 天然锁本机构；全局用户缺省只落 default，写他机构必须显式传 orgKey。
+     */
+    public static String requireWriteOrg(HttpServletRequest request, String reqOrgKey, String rowOrgKey) {
+        String eff = effectiveOrg(request, reqOrgKey);
+        String row = rowOrgKey == null || rowOrgKey.isBlank() ? DEFAULT_ORG : rowOrgKey;
+        if (!eff.equals(row)) {
+            log.warn("[数据域] 操作域 {} 与数据行归属机构 {} 不一致，拒绝", eff, row);
+            throw new SecurityException("权限不足：不能操作其他机构数据");
+        }
+        return eff;
+    }
+
+    /** 数据行归属机构兜底：org_key 列 NOT NULL DEFAULT 'default'，历史语义空=默认域 */
+    public static String orgOfRow(String rowOrgKey) {
+        return rowOrgKey == null || rowOrgKey.isBlank() ? DEFAULT_ORG : rowOrgKey;
     }
 
     /**

@@ -25,6 +25,12 @@
           </template>
         </el-table-column>
         <el-table-column prop="templateName" label="名称" min-width="140" />
+        <el-table-column label="归属" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
+            <el-tag v-else size="small" type="warning">{{ row.orgKey }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="类型" width="100">
           <template #default="{ row }">{{ typeText(row.certType) }}</template>
         </el-table-column>
@@ -64,6 +70,16 @@
         </el-form-item>
         <el-form-item label="模板名称" required>
           <el-input v-model="form.templateName" placeholder="如 机构通信证书" />
+        </el-form-item>
+        <el-form-item v-if="!editing" label="归属">
+          <template v-if="isGlobal">
+            <el-radio-group v-model="form.orgScope">
+              <el-radio-button value="GLOBAL">全局模板</el-radio-button>
+              <el-radio-button value="ORG">当前机构域（{{ orgDomain }}）</el-radio-button>
+            </el-radio-group>
+            <div class="org-tip">全局模板归属传空（全域可用）；选择机构域则仅 {{ orgDomain }} 域可见。</div>
+          </template>
+          <el-tag v-else size="small" type="warning">机构 SECURITY_ADMIN 建模板自动归本域：{{ orgDomain }}</el-tag>
         </el-form-item>
         <el-form-item label="证书类型" required>
           <el-radio-group v-model="form.certType">
@@ -117,6 +133,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { pageTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/api/system'
+import { currentOrg, isGlobalUser } from '@/lib/org'
+
+const isGlobal = ref(isGlobalUser())
+const orgDomain = ref(currentOrg())
 
 const loading = ref(false)
 const rows = ref([])
@@ -127,7 +147,7 @@ const editing = ref(false)
 const submitting = ref(false)
 const form = reactive({
   id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2',
-  validityDays: 365, keyUsageList: [], extKeyUsage: '', policyOid: '', description: ''
+  validityDays: 365, keyUsageList: [], extKeyUsage: '', policyOid: '', description: '', orgScope: 'GLOBAL'
 })
 
 function typeText(t) {
@@ -139,7 +159,8 @@ function fillForm(row) {
     id: row.id, templateCode: row.templateCode, templateName: row.templateName, certType: row.certType,
     algorithm: row.algorithm, validityDays: row.validityDays,
     keyUsageList: row.keyUsage ? row.keyUsage.split(',').map(s => s.trim()) : [],
-    extKeyUsage: row.extKeyUsage || '', policyOid: row.policyOid || '', description: row.description || ''
+    extKeyUsage: row.extKeyUsage || '', policyOid: row.policyOid || '', description: row.description || '',
+    orgScope: 'GLOBAL'
   })
 }
 
@@ -168,6 +189,8 @@ function reload() {
 function openCreate() {
   editing.value = false
   fillForm({ id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2', validityDays: 365, keyUsage: '', extKeyUsage: '', policyOid: '', description: '' })
+  // 全局用户在 default 域默认建全局模板；已切到机构域则默认归该域
+  form.orgScope = isGlobal.value && orgDomain.value === 'default' ? 'GLOBAL' : 'ORG'
   dialogVisible.value = true
 }
 
@@ -196,6 +219,10 @@ async function onSave() {
     extKeyUsage: form.extKeyUsage || '',
     policyOid: form.policyOid || '',
     description: form.description || ''
+  }
+  // 建模板归属口径显式传：全局模板 orgKey=''；机构域=当前域（机构用户由后端强制本域）
+  if (!editing.value) {
+    payload.orgKey = !isGlobal.value || form.orgScope === 'ORG' ? orgDomain.value : ''
   }
   submitting.value = true
   try {
@@ -228,5 +255,10 @@ onMounted(load)
   display: flex;
   gap: 8px;
   align-items: center;
+}
+.org-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
 }
 </style>

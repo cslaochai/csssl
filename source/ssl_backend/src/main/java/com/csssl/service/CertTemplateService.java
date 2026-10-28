@@ -2,6 +2,7 @@ package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.csssl.entity.CaOrg;
 import com.csssl.entity.CertTemplate;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.util.CertUtil;
@@ -19,6 +20,11 @@ import java.util.Set;
  * 固化证书类型/算法/有效期/KeyUsage/EKU/策略OID，签发必须按模板进行。
  *
  * <p>模板决定证书用途与密钥用法，属策略变更，故增删改一律落审计（TEMPLATE_*）。</p>
+ *
+ * <p>路线A数据域：ssl_cert_template.org_key NULL=全局模板（所有机构可见，内置模板保持全局）；
+ * 机构模板仅本机构可见。机构 SECURITY_ADMIN 创建/修改/删除仅限本机构模板（不可改全局模板）；
+ * 全局 ADMIN/SECURITY_ADMIN 可管全局模板与各机构模板（模板域用 orgKey 指定，全局建模板 orgKey 传空=全局）。
+ * 可见集过滤=全局模板 ∪ 本机构模板；RA/签发引用模板时必须校验"该模板对该机构可见"。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -28,14 +34,26 @@ public class CertTemplateService {
     private static final Set<String> ALGORITHMS = Set.of(CertUtil.ALG_RSA2048, CertUtil.ALG_SM2);
 
     private final CertTemplateMapper templateMapper;
+    private final OrgService orgService;
     private final AuditService auditService;
 
-    /** 分页查询模板 */
+    /** 分页查询模板（兼容入口=全量，仅全局用户经控制器到达） */
     public Page<CertTemplate> page(long pageNo, long pageSize, String keyword) {
+        return page(pageNo, pageSize, keyword, null);
+    }
+
+    /**
+     * 分页查询模板（机构域版）：orgScope=null 跨机构全量（全局用户总览，只读放行）；
+     * orgScope 非空=可见集过滤——全局模板（org_key NULL）+ 该机构模板。
+     */
+    public Page<CertTemplate> page(long pageNo, long pageSize, String keyword, String orgScope) {
         LambdaQueryWrapper<CertTemplate> qw = new LambdaQueryWrapper<>();
         if (keyword != null && !keyword.isBlank()) {
             qw.and(w -> w.like(CertTemplate::getTemplateName, keyword).or()
                     .like(CertTemplate::getTemplateCode, keyword));
+        }
+        if (orgScope != null && !orgScope.isBlank()) {
+            qw.and(w -> w.isNull(CertTemplate::getOrgKey).or().eq(CertTemplate::getOrgKey, orgScope));
         }
         qw.orderByAsc(CertTemplate::getTemplateCode);
         return templateMapper.selectPage(new Page<>(pageNo, pageSize), qw);
@@ -50,9 +68,43 @@ public class CertTemplateService {
         return tpl;
     }
 
-    /** 创建模板（仅安全管理员/系统管理员） */
-    public CertTemplate create(Map<String, String> body, String operator, String ip) {
+    /**
+     * 按数据域取模板（RA/签发/详情引用模板的统一入口）：
+     * 机构域仅可见全局模板与本机构模板，其余按"不存在"处理（不泄露他机构模板存在性）。
+     */
+    public CertTemplate detailVisible(Long id, String orgScope) {
+        CertTemplate tpl = detail(id);
+        if (!visibleTo(tpl, orgScope)) {
+            throw new IllegalArgumentException("证书模板不存在（id=" + id + "）");
+        }
+        return tpl;
+    }
+
+    /** 模板对操作域是否可见：全局模板（org_key NULL）人人可见；机构模板仅归属机构可见；全局域（null）全可见 */
+    public static boolean visibleTo(CertTemplate tpl, String operatorOrg) {
+        if (operatorOrg == null || operatorOrg.isBlank()) {
+            return true;
+        }
+        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() || tpl.getOrgKey().equals(operatorOrg);
+    }
+
+    /** 模板行归属机构兜底（NULL=全局模板，审计归位用） */
+    private static String rowOrg(CertTemplate tpl) {
+        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() ? CaOrg.DEFAULT_ORG_KEY : tpl.getOrgKey();
+    }
+
+    /**
+     * 创建模板（仅安全管理员/系统管理员；变更落审计）。
+     * tplOrg=模板归属域：机构操作者已由 effectiveOrg 锁本机构；全局操作者传 null=全局模板、
+     * 非空=为该机构建模板（机构必须存在）。
+     */
+    public CertTemplate create(Map<String, String> body, String operator, String ip,
+                               String tplOrg, String operatorOrg) {
+        if (tplOrg != null && !tplOrg.isBlank()) {
+            orgService.get(tplOrg);
+        }
         CertTemplate tpl = new CertTemplate();
+        tpl.setOrgKey(tplOrg == null || tplOrg.isBlank() ? null : tplOrg);
         tpl.setTemplateCode(required(body, "templateCode"));
         tpl.setTemplateName(required(body, "templateName"));
         tpl.setCertType(validateType(body.get("certType")));
@@ -83,13 +135,20 @@ public class CertTemplateService {
                         + "，类型=" + tpl.getCertType() + "，算法=" + tpl.getAlgorithm()
                         + "，有效期=" + tpl.getValidityDays() + "天"
                         + "，KeyUsage=" + tpl.getKeyUsage() + "，EKU=" + nz(tpl.getExtKeyUsage())
-                        + "，策略OID=" + nz(tpl.getPolicyOid()), ip);
+                        + "，策略OID=" + nz(tpl.getPolicyOid())
+                        + "，归属=" + (tpl.getOrgKey() == null ? "全局" : tpl.getOrgKey()),
+                ip, rowOrg(tpl));
         return tpl;
     }
 
-    /** 更新模板（仅安全管理员/系统管理员；内置模板可更新参数但编码与类型不可改） */
-    public CertTemplate update(Long id, Map<String, String> body, String operator, String ip) {
+    /**
+     * 更新模板（仅安全管理员/系统管理员；内置模板可更新参数但编码与类型不可改）。
+     * 数据域：机构操作者（operatorOrg 非空）仅可改本机构模板，全局模板与其他机构模板不可触碰；
+     * 全局操作者可改全局模板与各机构模板。
+     */
+    public CertTemplate update(Long id, Map<String, String> body, String operator, String ip, String operatorOrg) {
         CertTemplate tpl = detail(id);
+        requireManaged(tpl, operatorOrg);
         // 变更前后快照对比，审计 detail 只记真正变化的关键项
         String oldName = tpl.getTemplateName();
         String oldAlgorithm = tpl.getAlgorithm();
@@ -141,13 +200,18 @@ public class CertTemplateService {
         addChange(changes, "描述", oldDescription, tpl.getDescription());
         auditService.record(operator, "TEMPLATE_UPDATE", String.valueOf(id),
                 "更新证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
-                        + (changes.isEmpty() ? "，无字段变化" : "；变化：" + String.join("；", changes)), ip);
+                        + (changes.isEmpty() ? "，无字段变化" : "；变化：" + String.join("；", changes)),
+                ip, rowOrg(tpl));
         return tpl;
     }
 
-    /** 删除模板（仅安全管理员/系统管理员；内置模板不可删除） */
-    public void delete(Long id, String operator, String ip) {
+    /**
+     * 删除模板（仅安全管理员/系统管理员；内置模板不可删除）。
+     * 数据域：机构操作者仅可删本机构模板；全局操作者可删各机构自定义模板（全局模板同样受内置保护）。
+     */
+    public void delete(Long id, String operator, String ip, String operatorOrg) {
         CertTemplate tpl = detail(id);
+        requireManaged(tpl, operatorOrg);
         if (tpl.getBuiltin() != null && tpl.getBuiltin() == 1) {
             throw new IllegalArgumentException("内置模板（" + tpl.getTemplateCode() + "）不可删除，可停用或改参数");
         }
@@ -155,7 +219,17 @@ public class CertTemplateService {
         auditService.record(operator, "TEMPLATE_DELETE", String.valueOf(id),
                 "删除证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
                         + "，类型=" + tpl.getCertType() + "，算法=" + tpl.getAlgorithm()
-                        + "，有效期=" + tpl.getValidityDays() + "天", ip);
+                        + "，有效期=" + tpl.getValidityDays() + "天", ip, rowOrg(tpl));
+    }
+
+    /** 管理权校验：机构操作者（org 非空）仅能管理"本机构"模板——全局模板（org_key NULL）与其他机构模板一律 403 */
+    private static void requireManaged(CertTemplate tpl, String operatorOrg) {
+        if (operatorOrg == null || operatorOrg.isBlank()) {
+            return;
+        }
+        if (tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() || !tpl.getOrgKey().equals(operatorOrg)) {
+            throw new SecurityException("权限不足：机构管理员仅能管理本机构模板");
+        }
     }
 
     private static void addChange(List<String> changes, String label, String before, String after) {

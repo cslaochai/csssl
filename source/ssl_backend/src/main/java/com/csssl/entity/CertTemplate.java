@@ -18,6 +18,9 @@ public class CertTemplate {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 归属机构；NULL=全局模板（所有机构可用，兼容内置模板） */
+    private String orgKey;
+
     /** 模板编码（唯一）：SERVER_COMM-机构通信 / DOCTOR_SIGN-医生签名 / SUB_CA-二级CA */
     private String templateCode;
 

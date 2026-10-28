@@ -1,10 +1,11 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { currentOrg } from '@/lib/org'
 
 // CSSSL 后端 context-path 为 /ssl（vite 代理 /ssl → http://localhost:8092）
 const request = axios.create({
   baseURL: '/ssl',
-  timeout: 30000,
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -42,11 +43,33 @@ function httpStatusFallback(status) {
   return map[status] || `请求失败（${status}）`
 }
 
+// 全域业务接口路径：GET 自动附加 ?orgKey=（当前机构域），POST 缺省并入 body.orgKey；
+// /admin/orgs（机构管理本身）与 /admin/users（归属需显式口径）不参与自动注入
+const ORG_BIZ_RE = /^\/admin\/(ca|certs|applications|templates|audit|crl)(\/|$)/
+
 request.interceptors.request.use(
   config => {
     const token = localStorage.getItem('token')
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`
+    }
+    const url = config.url || ''
+    if (ORG_BIZ_RE.test(url) && !url.startsWith('/admin/orgs')) {
+      const org = currentOrg()
+      const method = (config.method || '').toLowerCase()
+      if (org && method === 'get') {
+        const params = config.params || {}
+        if (params.orgKey === undefined) {
+          config.params = { ...params, orgKey: org }
+        }
+      } else if (org && method === 'post') {
+        const data = config.data
+        const isPlain = data === undefined || data === null || (typeof data === 'object' && !Array.isArray(data))
+        // 调用方显式带 orgKey（含空串=全局口径）时不覆盖
+        if (isPlain && !(data && 'orgKey' in data)) {
+          config.data = { ...(data || {}), orgKey: org }
+        }
+      }
     }
     return config
   },
@@ -93,6 +116,8 @@ request.interceptors.response.use(
           localStorage.removeItem('token')
           localStorage.removeItem('username')
           localStorage.removeItem('role')
+          localStorage.removeItem('orgKey')
+          localStorage.removeItem('caDomain')
           if (!redirectingToLogin) {
             redirectingToLogin = true
             window.location.href = '/login'
@@ -100,10 +125,10 @@ request.interceptors.response.use(
         }
         return Promise.reject(error)
       }
-      // 真实 HTTP 403：已登录但角色不足，只提示权限不足，不跳登录页
+      // 真实 HTTP 403：越域/角色不足，统一越域口径提示，不跳登录页
       if (status === 403) {
         if (!silent) {
-          notifyError('权限不足，无法执行该操作')
+          notifyError(message || '越域访问被拒：当前账号无该机构权限')
         }
         return Promise.reject(error)
       }

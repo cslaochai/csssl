@@ -1,7 +1,10 @@
 import request from './request'
+import { currentOrg } from '@/lib/org'
 
 /**
  * CSSSL · CA根认证中心 API 封装（与后端 /ssl context-path 对齐）。
+ * 多机构（路线A）：/admin 全域业务接口的机构域参数由 request 拦截器按 currentOrg() 自动附加；
+ * 根CA/CRL 等按域操作在本文件中显式带 orgKey（缺省取当前域）。
  */
 
 // ===== 登录鉴权 =====
@@ -19,38 +22,73 @@ export function changePassword(data) {
   return request.post('/auth/changePassword', data)
 }
 
-// ===== 根CA =====
-export function getCaStatus() {
-  return request.get('/admin/ca/status')
+// ===== 机构管理（多机构域，仅全局 ADMIN） =====
+export function listOrgs() {
+  return request.get('/admin/orgs')
 }
-export function initCa() {
-  return request.post('/admin/ca/init')
+export function getOrg(orgKey) {
+  return request.get(`/admin/orgs/${orgKey}`)
 }
-export function downloadRootCert() {
-  return request.get('/admin/ca/root/download')
+/** 创建即生成该机构独立根CA+SUB_CA，可能耗时数秒 */
+export function createOrg(data) {
+  return request.post('/admin/orgs', data)
 }
-export function sealRootKey() {
-  return request.post('/admin/ca/seal')
+export function suspendOrg(orgKey) {
+  return request.post(`/admin/orgs/${orgKey}/suspend`)
 }
-export function unsealRootKey() {
-  return request.post('/admin/ca/unseal')
+export function resumeOrg(orgKey) {
+  return request.post(`/admin/orgs/${orgKey}/resume`)
 }
-export function downloadSubCaCert() {
-  return request.get('/admin/ca/subca/download')
+export function closeOrg(orgKey) {
+  return request.post(`/admin/orgs/${orgKey}/close`)
 }
 
-// ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN） =====
-export function getCaShares() {
-  return request.get('/admin/ca/shares')
+/** 机构列表模块级缓存（顶栏/各页机构下拉共用；失败返回空数组不阻断页面） */
+let orgsCache = null
+export async function listOrgsCached(force = false) {
+  if (orgsCache && !force) return orgsCache
+  try {
+    const res = await listOrgs()
+    const d = res.data
+    orgsCache = Array.isArray(d) ? d : d?.records || []
+  } catch (e) {
+    orgsCache = orgsCache || []
+  }
+  return orgsCache
 }
-export function migrateCaShares() {
-  return request.post('/admin/ca/shares/migrate')
+
+// ===== 根CA（按机构域） =====
+export function getCaStatus(orgKey = currentOrg()) {
+  return request.get('/admin/ca/status', { params: { orgKey } })
 }
-export function downloadCaShare(index) {
-  return request.get(`/admin/ca/shares/${index}`)
+export function initCa(orgKey = currentOrg()) {
+  return request.post('/admin/ca/init', { orgKey })
 }
-export function unsealCaShares(shares) {
-  return request.post('/admin/ca/unseal-shares', { shares })
+export function downloadRootCert(orgKey = currentOrg()) {
+  return request.get('/admin/ca/root/download', { params: { orgKey } })
+}
+export function sealRootKey(orgKey = currentOrg()) {
+  return request.post('/admin/ca/seal', { orgKey })
+}
+export function unsealRootKey(orgKey = currentOrg()) {
+  return request.post('/admin/ca/unseal', { orgKey })
+}
+export function downloadSubCaCert(orgKey = currentOrg()) {
+  return request.get('/admin/ca/subca/download', { params: { orgKey } })
+}
+
+// ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN；按机构域） =====
+export function getCaShares(orgKey = currentOrg()) {
+  return request.get('/admin/ca/shares', { params: { orgKey } })
+}
+export function migrateCaShares(orgKey = currentOrg()) {
+  return request.post('/admin/ca/shares/migrate', { orgKey })
+}
+export function downloadCaShare(index, orgKey = currentOrg()) {
+  return request.get(`/admin/ca/shares/${index}`, { params: { orgKey } })
+}
+export function unsealCaShares(shares, orgKey = currentOrg()) {
+  return request.post('/admin/ca/unseal-shares', { shares, orgKey })
 }
 
 // ===== 证书管理 =====
@@ -83,16 +121,16 @@ export function getOverview() {
   return request.get('/admin/overview')
 }
 
-// ===== CRL 吊销列表 =====
-export function getCrlView() {
-  return request.get('/admin/crl')
+// ===== CRL 吊销列表（按机构域） =====
+export function getCrlView(orgKey = currentOrg()) {
+  return request.get('/admin/crl', { params: { orgKey } })
 }
-export function downloadCrl() {
-  return request.get('/admin/crl/download')
+export function downloadCrl(orgKey = currentOrg()) {
+  return request.get('/admin/crl/download', { params: { orgKey } })
 }
 /** 增量 CRL（dCRL）：{deltaPem, thisUpdate, nextUpdate, entryCount, crlNumber, baseCrlNumber} */
-export function getDeltaCrl() {
-  return request.get('/admin/crl/delta')
+export function getDeltaCrl(orgKey = currentOrg()) {
+  return request.get('/admin/crl/delta', { params: { orgKey } })
 }
 
 // ===== 审计日志 =====
@@ -183,4 +221,10 @@ export function exportAuditCsv() {
 // ===== TSA 可信时间戳（公开） =====
 export function getTsaPublicKey() {
   return request.get('/tsa/publicKey')
+}
+
+// ===== 公开验证端点（按机构域，无需登录） =====
+/** 证书在线验证三态：POST /ca/public/{orgKey}/verify，body {certPem, purpose} */
+export function verifyCertPublic(orgKey, data) {
+  return request.post(`/ca/public/${orgKey}/verify`, data)
 }

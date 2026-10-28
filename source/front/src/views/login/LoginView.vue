@@ -37,6 +37,7 @@ import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { login } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache } from '@/lib/password'
+import { saveSessionOrg } from '@/lib/org'
 import logo from '@/assets/logo.svg'
 
 const router = useRouter()
@@ -65,6 +66,8 @@ async function onSubmit() {
     localStorage.setItem('username', res.data.username)
     // 不再缺省回退 ADMIN：后端未返回角色即视为异常，由守卫按未登录处理
     localStorage.setItem('role', res.data.role || '')
+    // 机构域：orgKey=null 全局用户（可选域），非空机构用户（固定本域）
+    saveSessionOrg(res.data.orgKey || '')
     ElMessage.success('登录成功')
     const redirect = route.query.redirect || '/dashboard'
     router.push(redirect)

@@ -22,6 +22,11 @@ import java.util.Locale;
  * 证书链在线校验：业务系统（cslk / csmig）调用 /ca/public/verify 校验对方证书。
  * 支持多级链：叶子 → 服务签发二级CA（SUB_CA）→ 根CA。
  * 校验项：签发者=本站CA → 逐级验签 → 未过期 → 未吊销 → 用途匹配（TLS/SIGN）。
+ *
+ * <p>路线A多机构：链验证沿指定机构根域（loadRootCert(orgKey)，SUB_CA/吊销查询均限本域）；
+ * 老端点（无 orgKey）委托 default 域，行为不变。机构间互不信任——他域证书在本域校验按
+ * "签发者不是本站CA" 失败。SUSPENDED/CLOSED 机构的历史证书必须仍可沿其链验证（合规点），
+ * 本服务不做机构状态门禁。</p>
  */
 @Slf4j
 @Service
@@ -31,12 +36,18 @@ public class VerifyService {
     private final CaCertMapper certMapper;
     private final CaService caService;
 
+    /** 校验（兼容入口=default 机构域） */
     public VerifyResult verify(VerifyRequest req) {
+        return verify(req, CaService.DEFAULT_ORG_KEY);
+    }
+
+    /** 校验（机构域版）：沿该机构 根CA ← SUB_CA ← 叶子 链验证 */
+    public VerifyResult verify(VerifyRequest req, String orgKey) {
         if (req.getCertPem() == null || req.getCertPem().isBlank()) {
             throw new IllegalArgumentException("待校验证书PEM不能为空");
         }
         X509Certificate cert = PemUtil.parseCert(req.getCertPem());
-        X509Certificate root = caService.loadRootCert();
+        X509Certificate root = caService.loadRootCert(orgKey);
 
         VerifyResult r = new VerifyResult();
         r.setSerialHex(cert.getSerialNumber().toString(16));
@@ -55,8 +66,8 @@ public class VerifyService {
                 return r;
             }
         } else {
-            // 链②：叶子 → SUB_CA → 根（当前主流签发路径）
-            CaCert subRow = findSubCaByIssuer(issuer);
+            // 链②：叶子 → SUB_CA → 根（当前主流签发路径；SUB_CA 限定本机构域）
+            CaCert subRow = findSubCaByIssuer(issuer, orgKey);
             if (subRow == null) {
                 fail(r, "证书签发者不是本站CA（" + cert.getIssuerX500Principal().getName() + "）");
                 return r;
@@ -88,9 +99,10 @@ public class VerifyService {
             fail(r, "证书已过期或未生效");
             return r;
         }
-        // 吊销状态
+        // 吊销状态（本机构域账内查询；serial 全局唯一，域过滤兜住跨域撞号）
         CaCert row = certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getSerialHex, cert.getSerialNumber().toString(16)));
+                .eq(CaCert::getSerialHex, cert.getSerialNumber().toString(16))
+                .eq(CaCert::getOrgKey, orgKey));
         if (row != null && "REVOKED".equals(row.getStatus())) {
             fail(r, "证书已被吊销（原因：" + row.getRevokeReason() + "）");
             return r;
@@ -124,10 +136,11 @@ public class VerifyService {
         }
     }
 
-    /** 按签发者 DN 查找本站签发的 SUB_CA（按 RDN 集合匹配） */
-    private CaCert findSubCaByIssuer(X500Name issuer) {
+    /** 按签发者 DN 查找指定机构域的 SUB_CA（按 RDN 集合匹配；机构间互不代验） */
+    private CaCert findSubCaByIssuer(X500Name issuer, String orgKey) {
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, CaService.TYPE_SUB_CA)
+                .eq(CaCert::getOrgKey, orgKey)
                 .orderByDesc(CaCert::getCreatedAt));
         for (CaCert sub : subs) {
             X509Certificate subCert = PemUtil.parseCert(sub.getCertPem());

@@ -3,6 +3,7 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.entity.AuditLog;
+import com.csssl.entity.CaOrg;
 import com.csssl.mapper.AuditLogMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,11 +38,24 @@ public class AuditService {
     private final AuditLogMapper auditLogMapper;
     private final AuditSigner auditSigner;
 
-    /** 记录一条审计日志（自动签名防篡改 + 哈希链） */
+    /** 记录一条审计日志（自动签名防篡改 + 哈希链；机构归属缺省 default=院内默认域/全局操作） */
     @Transactional(rollbackFor = Exception.class)
     public void record(String username, String action, String target, String detail, String ip) {
+        record(username, action, target, detail, ip, CaOrg.DEFAULT_ORG_KEY);
+    }
+
+    /**
+     * 记录一条审计日志（机构域版）：orgKey 落到审计行 org_key 列，供数据域强制过滤。
+     *
+     * <p>口径：签发/吊销/挂起等记对象（证书/申请单）所属机构；登录/建号等按用户机构；
+     * 全局操作与 orgKey 为空的入参统一归位 default（列 NOT NULL DEFAULT 'default'）。
+     * 注意 org_key 不参与 canonical 签名串——存量记录签名口径不变，机构归属仅作检索/过滤维度。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void record(String username, String action, String target, String detail, String ip, String orgKey) {
         AuditLog logRow = new AuditLog();
         logRow.setUsername(username == null || username.isBlank() ? "SYSTEM" : username);
+        logRow.setOrgKey(orgKey == null || orgKey.isBlank() ? CaOrg.DEFAULT_ORG_KEY : orgKey);
         logRow.setAction(action);
         logRow.setTarget(target);
         logRow.setDetail(truncate(detail));
@@ -145,6 +159,11 @@ public class AuditService {
      * <p>威胁模型：攻击者删除中间记录后无法伪造签名补链（他拿不到审计私钥），
      * 但删除会把链剪成 prev_id 指向不存在的空洞——对账正是靠 prev_id 指向缺失检出删除，而非靠重算签名。</p>
      *
+     * <p><b>链构造/对账不分机构（有意设计）</b>：审计哈希链是全局单链，prev_id 跨机构连续。
+     * 若对账按机构分段扫描，跨机构相邻行的 prev 引用会被误判为断链，链条反而不可审计。
+     * 因此机构数据域过滤只作用于"查"（page/export 按 org_key 收敛结果集），
+     * 不作用于链构造与链对账；本接口对任何有权角色均呈现全局链完整性视角（只读，无内容泄露）。</p>
+     *
      * @param fromId 起始记录ID（含，可空=从头开始）
      * @param toId   结束记录ID（含，可空=到最新）
      * @return {checked, broken:[{id, reason}]}
@@ -231,30 +250,61 @@ public class AuditService {
         return Map.of("id", id, "reason", reason);
     }
 
-    /** 分页查询审计日志 */
+    /** 分页查询审计日志（orgKey 为空=跨机构全量；仅全局用户可达此口径，调用方已按数据域强制收敛） */
     public Page<AuditLog> page(long pageNo, long pageSize, String action) {
+        return page(pageNo, pageSize, action, null);
+    }
+
+    /** 分页查询审计日志（机构域版：orgKey 非空=仅该机构） */
+    public Page<AuditLog> page(long pageNo, long pageSize, String action, String orgKey) {
         LambdaQueryWrapper<AuditLog> qw = new LambdaQueryWrapper<>();
         if (action != null && !action.isBlank()) {
             qw.eq(AuditLog::getAction, action);
+        }
+        if (orgKey != null && !orgKey.isBlank()) {
+            qw.eq(AuditLog::getOrgKey, orgKey);
         }
         qw.orderByDesc(AuditLog::getCreatedAt);
         return auditLogMapper.selectPage(new Page<>(pageNo, pageSize), qw);
     }
 
+    /** 取审计原始行（控制器层数据域校验用；不存在抛异常） */
+    public AuditLog load(Long id) {
+        AuditLog row = auditLogMapper.selectById(id);
+        if (row == null) {
+            throw new IllegalArgumentException("审计记录不存在（id=" + id + "）");
+        }
+        return row;
+    }
+
+    /** 审计行归属机构（历史行为空按 default 归位，与列默认值语义一致） */
+    public static String orgOf(AuditLog row) {
+        return row.getOrgKey() == null || row.getOrgKey().isBlank() ? CaOrg.DEFAULT_ORG_KEY : row.getOrgKey();
+    }
+
+    /** 归档导出（兼容入口=跨机构全量，调用方按数据域收敛后传入 orgKey） */
+    public Map<String, Object> exportCsv() {
+        return exportCsv(null);
+    }
+
     /**
-     * 审计归档导出（留存 ≥5 年材料，等保要求）：全量日志导出 CSV（UTF-8 BOM），
+     * 审计归档导出（留存 ≥5 年材料，等保要求）：按机构过滤（orgKey 空=全量）后导出 CSV（UTF-8 BOM），
      * 并对导出内容做审计 SM2 报告签名（§10.5 审计记录创建人数字签名延伸）——归档文件完整性可在线验签。
      *
      * @return {csv, sign, count}：sign 是对 CSV 全文的 SM3withSM2 签名（hex），验签=对下载的 CSV 内容重算比对
      */
-    public Map<String, Object> exportCsv() {
-        List<AuditLog> logs = auditLogMapper.selectList(new LambdaQueryWrapper<AuditLog>()
-                .orderByAsc(AuditLog::getId));
+    public Map<String, Object> exportCsv(String orgKey) {
+        LambdaQueryWrapper<AuditLog> qw = new LambdaQueryWrapper<AuditLog>().orderByAsc(AuditLog::getId);
+        if (orgKey != null && !orgKey.isBlank()) {
+            qw.eq(AuditLog::getOrgKey, orgKey);
+        }
+        List<AuditLog> logs = auditLogMapper.selectList(qw);
         StringBuilder sb = new StringBuilder("\uFEFF"); // UTF-8 BOM，Excel 直接识别中文
-        sb.append("id,username,action,target,detail,ip,created_at,prev_sign,sign\n");
+        sb.append("id,username,org_key,action,target,detail,ip,created_at,prev_sign,sign\n");
         for (AuditLog l : logs) {
             sb.append(l.getId()).append(',')
                     .append(csv(l.getUsername())).append(',')
+                    .append(csv(orgOf(l))).append(',')
                     .append(csv(l.getAction())).append(',')
                     .append(csv(l.getTarget())).append(',')
                     .append(csv(l.getDetail())).append(',')
@@ -271,7 +321,8 @@ public class AuditService {
             log.warn("[审计] 归档报告签名失败: {}", e.getMessage());
             sign = "";
         }
-        log.info("[审计] 归档导出完成，记录数={}，报告已签名", logs.size());
+        log.info("[审计] 归档导出完成，机构={}，记录数={}，报告已签名",
+                orgKey == null || orgKey.isBlank() ? "全部" : orgKey, logs.size());
         return Map.of("csv", csv, "sign", sign, "count", logs.size());
     }
 

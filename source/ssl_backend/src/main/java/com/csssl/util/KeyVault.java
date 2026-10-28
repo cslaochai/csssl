@@ -16,6 +16,8 @@ import java.security.SecureRandom;
  *       未配置时首启生成随机密钥落盘 store-dir/master.key。</li>
  *   <li>封存（seal）：加密文件移名为 *.key.pem.enc.sealed，密钥进入离线状态，仅解封后可加载。</li>
  *   <li>兼容迁移：发现旧版明文 key.pem 时自动加密迁移并删除明文。</li>
+ *   <li>路线A多机构：每机构域一个实例——default 以 store-dir 为根（master.key 语义不变），
+ *       其他机构以 store-dir/orgs/{orgKey} 为根、主密钥独立（orgs/{orgKey}/master.key），机构间不共享密钥材料。</li>
  *   <li>HSM 预留：后续接入 GM/T 0018 服务器密码机时，以同类接口替换本类实现即可。</li>
  * </ul>
  */

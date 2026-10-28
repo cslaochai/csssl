@@ -93,10 +93,16 @@ public final class CertUtil {
         return new BigInteger(bytes);
     }
 
-    /** 根CA自签证书 */
+    /** 根CA自签证书（默认域：主体 O 固定 CSSSL，保持存量根DN逐字节兼容） */
     public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String algorithm, int validityDays) {
+        return selfSignRoot(rootKey, cn, "CSSSL", algorithm, validityDays);
+    }
+
+    /** 根CA自签证书（多机构版：主体 O 取自机构注册表 subject_o，机构受控） */
+    public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String organization,
+                                               String algorithm, int validityDays) {
         try {
-            X500Name subject = new X500Name("CN=" + cn + ",O=CSSSL");
+            X500Name subject = new X500Name("CN=" + escapeX500(cn) + ",O=" + escapeX500(organization));
             BigInteger serial = randomSerial();
             Date notBefore = new Date();
             Date notAfter = Date.from(LocalDateTime.now().plusDays(validityDays)
@@ -437,7 +443,9 @@ public final class CertUtil {
      * RSA 根CA完全可以签发 SM2 主体的证书（PKIX 允许跨算法签发）。
      */
     public static String signatureAlgorithmForKey(PrivateKey key) {
-        if (key != null && "EC".equals(key.getAlgorithm())) {
+        // 按 JCA 密钥类型判定而非 getAlgorithm() 字符串：BC 的 SM2 私钥（BCECPrivateKey）
+        // 算法标识并非恒为 "EC"，字符串判等会把国密签发者错分给 SHA256withRSA
+        if (key instanceof java.security.interfaces.ECPrivateKey) {
             return "SM3withSM2";
         }
         return "SHA256withRSA";
@@ -466,6 +474,21 @@ public final class CertUtil {
             if (name.isEmpty()) {
                 continue;
             }
+            // 兼容 OpenSSL -addext 风格前缀（DNS:xxx / IP:xxx）：前缀只作类型提示，
+            // 不剥离会把 "DNS:xxx" 整串当域名写进 SAN，产出非法证书
+            String upper = name.toUpperCase();
+            if (upper.startsWith("DNS:")) {
+                names.add(new GeneralName(GeneralName.dNSName, name.substring(4).trim()));
+                continue;
+            }
+            if (upper.startsWith("IP:")) {
+                String ip = name.substring(3).trim();
+                if (!IPV4.matcher(ip).matches() && !IPV6.matcher(ip).matches()) {
+                    throw new IllegalArgumentException("SAN 非法IP条目：" + item);
+                }
+                names.add(new GeneralName(GeneralName.iPAddress, ip));
+                continue;
+            }
             if (IPV4.matcher(name).matches() || IPV6.matcher(name).matches()) {
                 names.add(new GeneralName(GeneralName.iPAddress, name));
             } else {
@@ -473,6 +496,26 @@ public final class CertUtil {
             }
         }
         return names;
+    }
+
+    /** 组装主体 DN（CN+O，多机构场景 O 受控于机构注册表；特殊字符按 RFC2253 转义） */
+    public static X500Name subjectDn(String cn, String organization) {
+        return new X500Name("CN=" + escapeX500(cn) + ",O=" + escapeX500(organization));
+    }
+
+    /** RFC2253 DN 值转义（, + " = < > ; \ 前置反斜杠） */
+    private static String escapeX500(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (char c : value.toCharArray()) {
+            if (c == ',' || c == '+' || c == '"' || c == '=' || c == '<' || c == '>' || c == ';' || c == '\\') {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     /** 从证书提取 CN */

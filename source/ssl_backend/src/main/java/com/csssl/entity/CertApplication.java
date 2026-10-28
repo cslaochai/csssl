@@ -18,6 +18,9 @@ public class CertApplication {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 受理机构（签发落到该机构根域）；default=院内默认域 */
+    private String orgKey;
+
     /** 申请单号（RA20261027xxx） */
     private String applyNo;
 

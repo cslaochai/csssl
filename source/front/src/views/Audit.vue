@@ -1,7 +1,10 @@
 <template>
   <div class="page-card">
     <div class="table-toolbar">
-      <div class="section-title">审计日志</div>
+      <div class="section-title">
+        审计日志
+        <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain" style="margin-left: 8px">当前域：{{ orgDomain }}</el-tag>
+      </div>
       <el-select v-model="action" placeholder="操作类型" clearable style="width: 160px" @change="reload">
         <el-option v-for="item in actions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
@@ -14,6 +17,12 @@
     <el-table :data="rows" v-loading="loading" border stripe>
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="username" label="操作人" width="130" />
+      <el-table-column label="机构" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
+          <span v-else class="mono-cell">{{ row.orgKey }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="130">
         <template #default="{ row }">{{ actionText(row.action) }}</template>
       </el-table-column>
@@ -62,6 +71,13 @@
       <p style="margin-bottom: 12px; color: #606266; font-size: 13px">
         对指定 ID 区间（可空，默认全域）逐条重算规范化哈希并验证签名链，检出被增删改动的记录。
       </p>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="链为全局构造（跨机构连续），对账为跨机构视角——属合规设计：审计链完整性覆盖所有机构域记录，不随机构域切换分段。"
+        style="margin-bottom: 12px"
+      />
       <el-form inline>
         <el-form-item label="起始ID">
           <el-input-number v-model="chainFrom" :min="1" :controls="false" placeholder="可空" style="width: 120px" />
@@ -121,6 +137,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { pageAudit, verifyAuditLog, exportAuditCsv, chainVerify } from '@/api/system'
 import { downloadText } from '@/lib/download'
+import { currentOrg } from '@/lib/org'
+
+// 列表/导出/对账请求由 request 封装自动附带 orgKey=currentOrg()（机构域过滤）
+const orgDomain = ref(currentOrg())
 
 const loading = ref(false)
 const rows = ref([])
@@ -172,7 +192,11 @@ const actions = [
   { value: 'PWD_CHANGE', label: '修改口令' },
   { value: 'TEMPLATE_CREATE', label: '创建模板' },
   { value: 'TEMPLATE_UPDATE', label: '更新模板' },
-  { value: 'TEMPLATE_DELETE', label: '删除模板' }
+  { value: 'TEMPLATE_DELETE', label: '删除模板' },
+  { value: 'ORG_CREATE', label: '创建机构' },
+  { value: 'ORG_SUSPEND', label: '暂停机构' },
+  { value: 'ORG_RESUME', label: '恢复机构' },
+  { value: 'ORG_CLOSE', label: '关闭机构' }
 ]
 
 function actionText(a) {
@@ -258,5 +282,9 @@ onMounted(load)
   max-height: 120px;
   overflow-y: auto;
   white-space: pre-wrap;
+}
+.mono-cell {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
 }
 </style>

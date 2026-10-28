@@ -17,6 +17,9 @@ public class CaCert {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 所属机构（独立根CA域）；default=院内默认域（存量单根） */
+    private String orgKey;
+
     /** 证书序列号（16进制，唯一） */
     private String serialHex;
 
