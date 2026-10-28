@@ -4,11 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
+import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
+import com.csssl.mapper.SysRoleMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.AuditService;
 import com.csssl.service.AuthService;
 import com.csssl.service.OrgService;
+import com.csssl.service.PermissionService;
+import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import cn.hutool.crypto.digest.BCrypt;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,8 +53,10 @@ import java.util.Map;
 public class AdminUserController {
 
     private final SysUserMapper userMapper;
+    private final SysRoleMapper roleMapper;
     private final AuditService auditService;
     private final OrgService orgService;
+    private final PermissionService permissionService;
 
     /** 用户列表（分页 + 角色/机构筛选；机构用户强制本机构，全局用户 orgKey 缺省=跨机构总览只读） */
     @GetMapping
@@ -59,7 +65,7 @@ public class AdminUserController {
                                       @RequestParam(required = false) String roleCode,
                                       @RequestParam(required = false) String orgKey,
                                       HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.USER_LIST);
         // readOrgScope：机构用户锁本机构（传别机构 403）；全局用户不传=null=全部（唯一跨机构读口）
         String scope = RoleCode.readOrgScope(request, orgKey);
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
@@ -82,7 +88,7 @@ public class AdminUserController {
      */
     @PostMapping
     public Result<SysUser> create(@RequestBody Map<String, String> body, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.USER_CREATE);
         String username = body.get("username");
         if (username == null || username.isBlank()) {
             throw new IllegalArgumentException("账号不能为空");
@@ -97,6 +103,7 @@ public class AdminUserController {
             throw new IllegalArgumentException("不支持的角色：" + role
                     + "（仅支持 ADMIN / OPERATOR / APPROVER / AUDITOR / SECURITY_ADMIN / KEY_ADMIN）");
         }
+        requireAssignableRole(role);
         String myOrg = RoleCode.currentOrg(request);
         String reqOrg = blankToNull(body.get("orgKey"));
         String targetOrg;
@@ -143,7 +150,7 @@ public class AdminUserController {
     @PostMapping("/{id}")
     public Result<SysUser> update(@PathVariable Long id, @RequestBody Map<String, String> body,
                                   HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.USER_UPDATE);
         SysUser user = userMapper.selectById(id);
         if (user == null) {
             throw new IllegalArgumentException("用户不存在（id=" + id + "）");
@@ -182,6 +189,7 @@ public class AdminUserController {
             if (!isSupportedRole(role)) {
                 throw new IllegalArgumentException("不支持的角色：" + role);
             }
+            requireAssignableRole(role);
             if (!role.equals(user.getRoleCode())) {
                 changes.add("角色：" + user.getRoleCode() + "→" + role);
                 revoke = true;
@@ -242,6 +250,19 @@ public class AdminUserController {
         return RoleCode.ADMIN.equals(role) || RoleCode.OPERATOR.equals(role)
                 || RoleCode.APPROVER.equals(role) || RoleCode.AUDITOR.equals(role)
                 || RoleCode.SECURITY_ADMIN.equals(role) || RoleCode.KEY_ADMIN.equals(role);
+    }
+
+    /** 建号/改角色时校验：角色档案存在且已启用（角色配置页停用后不得再分配） */
+    private SysRole requireAssignableRole(String roleCode) {
+        SysRole role = roleMapper.selectOne(new LambdaQueryWrapper<SysRole>()
+                .eq(SysRole::getRoleCode, roleCode));
+        if (role == null) {
+            throw new IllegalArgumentException("角色不存在：" + roleCode);
+        }
+        if (role.getStatus() == null || role.getStatus() != 1) {
+            throw new IllegalArgumentException("角色已停用，不能分配：" + role.getRoleName() + "（" + roleCode + "）");
+        }
+        return role;
     }
 
     private static boolean isBlank(String v) {

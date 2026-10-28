@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.entity.CertTemplate;
 import com.csssl.service.CertTemplateService;
+import com.csssl.service.PermissionService;
+import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ import java.util.Map;
 public class CertTemplateController {
 
     private final CertTemplateService templateService;
+    private final PermissionService permissionService;
 
     /** 模板列表（分页 + 关键字；机构用户=全局+本机构可见集，全局用户 orgKey 缺省=全量总览） */
     @GetMapping
@@ -56,7 +59,7 @@ public class CertTemplateController {
      */
     @PostMapping
     public Result<CertTemplate> create(@RequestBody Map<String, String> body, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.SECURITY_ADMIN);
+        permissionService.require(request, PermissionCatalog.TEMPLATE_CREATE);
         String myOrg = RoleCode.currentOrg(request);
         String reqOrg = body.get("orgKey");
         String tplOrg = myOrg != null && !myOrg.isBlank()
@@ -70,7 +73,7 @@ public class CertTemplateController {
     @PostMapping("/{id}")
     public Result<CertTemplate> update(@PathVariable Long id, @RequestBody Map<String, String> body,
                                        HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.SECURITY_ADMIN);
+        permissionService.require(request, PermissionCatalog.TEMPLATE_UPDATE);
         return Result.success("模板更新成功",
                 templateService.update(id, body, RoleCode.currentUser(request), clientIp(request),
                         RoleCode.currentOrg(request)));
@@ -79,7 +82,7 @@ public class CertTemplateController {
     /** 删除模板（仅安全管理员/系统管理员；内置模板不可删；变更落审计；机构操作者仅限本机构模板） */
     @PostMapping("/{id}/delete")
     public Result<Void> delete(@PathVariable Long id, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.SECURITY_ADMIN);
+        permissionService.require(request, PermissionCatalog.TEMPLATE_DELETE);
         templateService.delete(id, RoleCode.currentUser(request), clientIp(request),
                 RoleCode.currentOrg(request));
         return Result.success("模板已删除", null);

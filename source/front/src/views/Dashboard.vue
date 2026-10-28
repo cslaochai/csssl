@@ -51,7 +51,7 @@ const overview = ref({})
 const root = ref({})
 
 const statCards = computed(() => [
-  { key: 'total', label: '证书总量', value: overview.value.total ?? 0, color: '#1d2a4a' },
+  { key: 'total', label: '证书总量', value: overview.value.total ?? 0, color: '#134b77' },
   { key: 'valid', label: '有效', value: overview.value.valid ?? 0, color: '#67c23a' },
   { key: 'revoked', label: '已吊销', value: overview.value.revoked ?? 0, color: '#f56c6c' },
   { key: 'expiring30d', label: '30天内到期', value: overview.value.expiring30d ?? 0, color: '#e6a23c' }
@@ -74,7 +74,7 @@ onMounted(load)
 .section-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1d2a4a;
+  color: var(--his-title);
   margin-bottom: 14px;
   display: flex;
   align-items: center;

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.entity.AuditLog;
 import com.csssl.service.AuditService;
+import com.csssl.service.PermissionService;
+import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ import java.util.Map;
 public class AuditController {
 
     private final AuditService auditService;
+    private final PermissionService permissionService;
 
     /** 审计日志分页查询（仅审计员；机构用户强制本机构，全局用户 orgKey 缺省=全量只读） */
     @GetMapping
@@ -40,7 +43,7 @@ public class AuditController {
                                       @RequestParam(required = false) String action,
                                       @RequestParam(required = false) String orgKey,
                                       HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.AUDITOR);
+        permissionService.require(request, PermissionCatalog.AUDIT_VIEW);
         return Result.success("查询成功", auditService.page(pageNo, pageSize, action,
                 RoleCode.readOrgScope(request, orgKey)));
     }
@@ -51,7 +54,7 @@ public class AuditController {
      */
     @PostMapping("/verify")
     public Result<Map<String, Object>> verify(@RequestBody Map<String, Long> body, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.AUDITOR);
+        permissionService.require(request, PermissionCatalog.AUDIT_VERIFY);
         Long id = body.get("id");
         if (id == null) {
             throw new IllegalArgumentException("参数 id 不能为空");
@@ -68,7 +71,7 @@ public class AuditController {
     @GetMapping("/export")
     public Result<Map<String, Object>> export(@RequestParam(required = false) String orgKey,
                                               HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.AUDITOR);
+        permissionService.require(request, PermissionCatalog.AUDIT_EXPORT);
         return Result.success("导出完成", auditService.exportCsv(RoleCode.readOrgScope(request, orgKey)));
     }
 
@@ -84,7 +87,7 @@ public class AuditController {
     public Result<Map<String, Object>> chainVerify(@RequestParam(required = false) Long fromId,
                                                   @RequestParam(required = false) Long toId,
                                                   HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.AUDITOR);
+        permissionService.require(request, PermissionCatalog.AUDIT_CHAIN);
         return Result.success("链对账完成", auditService.verifyChain(fromId, toId));
     }
 }

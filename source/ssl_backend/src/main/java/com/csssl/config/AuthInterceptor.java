@@ -3,7 +3,9 @@ package com.csssl.config;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.common.Result;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
+import com.csssl.mapper.SysRoleMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.util.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,6 +39,7 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final SysUserMapper userMapper;
+    private final SysRoleMapper roleMapper;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
@@ -61,6 +64,14 @@ public class AuthInterceptor implements HandlerInterceptor {
             log.info("[会话] 令牌版本不符，已吊销 user={} tokenTv={} dbTv={}",
                     user.getUsername(), claims.tokenVersion(), currentVersion);
             return reject(request, response, 401, "登录状态已失效，请重新登录");
+        }
+        // 角色停用即整类账号会话失效（角色配置页可启停角色，即时收口，不等令牌自然过期）
+        SysRole role = user.getRoleCode() == null || user.getRoleCode().isBlank() ? null
+                : roleMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysRole>()
+                .eq(SysRole::getRoleCode, user.getRoleCode().trim().toUpperCase()));
+        if (role != null && (role.getStatus() == null || role.getStatus() != 1)) {
+            log.info("[会话] 角色已停用，拒绝 user={} role={}", user.getUsername(), user.getRoleCode());
+            return reject(request, response, 401, "账号所属角色已停用，请联系系统管理员");
         }
         request.setAttribute(ATTR_USERNAME, user.getUsername());
         // 角色以库中当前值为准（令牌角色仅作签发时快照）

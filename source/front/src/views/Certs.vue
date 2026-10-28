@@ -1,39 +1,54 @@
 <template>
   <div>
-    <div class="page-card">
-      <div class="table-toolbar">
-        <div class="filters">
-          <el-select v-model="query.certType" placeholder="证书类型" clearable style="width: 130px" @change="reload">
-            <el-option label="服务端" value="SERVER" />
-            <el-option label="客户端" value="CLIENT" />
-            <el-option label="二级CA" value="SUB_CA" />
-          </el-select>
-          <el-select v-model="query.status" placeholder="状态" clearable style="width: 120px" @change="reload">
-            <el-option label="有效" value="VALID" />
-            <el-option label="已吊销" value="REVOKED" />
-            <el-option label="已挂起" value="FROZEN" />
-            <el-option label="已过期" value="EXPIRED" />
-          </el-select>
-          <el-input
-            v-model="query.keyword"
-            placeholder="CN / 序列号"
-            clearable
-            style="width: 220px"
-            @keyup.enter="reload"
-            @clear="reload"
-          />
-          <el-button type="primary" plain @click="reload">查询</el-button>
+    <!-- 查询卡 -->
+    <el-card ref="queryCardRef" class="query-card" shadow="never">
+      <div class="query-wrap">
+        <el-form :model="query" inline>
+          <el-form-item label="证书类型">
+            <el-select v-model="query.certType" clearable placeholder="全部" style="width: 130px" @change="handleSearch">
+              <el-option label="服务端" value="SERVER" />
+              <el-option label="客户端" value="CLIENT" />
+              <el-option label="二级CA" value="SUB_CA" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="query.status" clearable placeholder="全部" style="width: 120px" @change="handleSearch">
+              <el-option label="有效" value="VALID" />
+              <el-option label="已吊销" value="REVOKED" />
+              <el-option label="已挂起" value="FROZEN" />
+              <el-option label="已过期" value="EXPIRED" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="关键字">
+            <el-input
+              v-model="query.keyword"
+              placeholder="CN / 序列号"
+              clearable
+              style="width: 220px"
+              @keyup.enter="handleSearch"
+              @clear="handleSearch"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <div class="query-actions">
           <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
-        </div>
-        <div v-if="canIssue">
-          <el-button type="primary" @click="openIssue">签发证书</el-button>
-          <el-button @click="openCsr">CSR签发</el-button>
-          <el-button @click="openPubKey">公钥直签</el-button>
+          <template v-if="canIssue">
+            <el-button v-perm="'cert:issue'" type="primary" @click="openIssue">签发证书</el-button>
+            <el-button v-perm="'cert:issue'" @click="openCsr">CSR签发</el-button>
+            <el-button v-perm="'cert:issue'" @click="openPubKey">公钥直签</el-button>
+          </template>
         </div>
       </div>
+    </el-card>
 
-      <el-table :data="rows" v-loading="loading" border stripe>
-        <el-table-column prop="id" label="ID" width="70" />
+    <!-- 表格卡 -->
+    <el-card class="table-card" shadow="never">
+      <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
+        <el-table-column prop="id" label="ID" width="70" class-name="cell-mono" />
         <el-table-column prop="subjectCn" label="主体CN" min-width="180" show-overflow-tooltip />
         <el-table-column label="类型" width="90">
           <template #default="{ row }">
@@ -44,7 +59,7 @@
           <template #default="{ row }">{{ row.algorithm }}</template>
         </el-table-column>
         <el-table-column prop="issuerCn" label="颁发CA" min-width="170" show-overflow-tooltip />
-        <el-table-column prop="serialHex" label="序列号" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="serialHex" label="序列号" min-width="150" show-overflow-tooltip class-name="cell-mono" />
         <el-table-column label="有效期" width="300">
           <template #default="{ row }">{{ row.validFrom }} ~ {{ row.validTo }}</template>
         </el-table-column>
@@ -54,18 +69,20 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" label="用途说明" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="490" fixed="right">
+        <el-table-column align="right" label="操作" width="490" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canDownloadCert" link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
-            <el-button v-if="canDownloadKey" link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
+            <el-button v-if="canDownloadCert" v-perm="'cert:download'" link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
+            <el-button v-if="canDownloadKey" v-perm="'cert:key:download'" link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
             <el-button
               v-if="canDownloadKey && ['SERVER', 'CLIENT'].includes(row.certType)"
+              v-perm="'cert:export'"
               link
               size="small"
               @click="openExportP12(row)"
             >导出P12</el-button>
             <el-button
               v-if="row.status === 'VALID'"
+              v-perm="'cert:suspend'"
               link
               type="warning"
               size="small"
@@ -74,6 +91,7 @@
             >挂起</el-button>
             <el-button
               v-if="row.status === 'FROZEN'"
+              v-perm="'cert:suspend'"
               link
               type="success"
               size="small"
@@ -81,6 +99,7 @@
             >解除挂起</el-button>
             <el-button
               v-if="['VALID', 'FROZEN'].includes(row.status)"
+              v-perm="'cert:renew'"
               link
               type="primary"
               size="small"
@@ -89,12 +108,14 @@
             >更新</el-button>
             <el-button
               v-if="['VALID', 'FROZEN'].includes(row.status) && row.certType === 'SERVER'"
+              v-perm="'cert:rekey'"
               link
               type="primary"
               size="small"
               @click="openRenew(row, 'rekey')"
             >重签</el-button>
             <el-button
+              v-perm="'cert:revoke'"
               link
               type="danger"
               size="small"
@@ -104,17 +125,19 @@
           </template>
         </el-table-column>
       </el-table>
-
-      <el-pagination
-        v-model:current-page="query.pageNo"
-        v-model:page-size="query.pageSize"
-        :total="total"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next"
-        style="margin-top: 14px; justify-content: flex-end"
-        @change="reload"
-      />
-    </div>
+      <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的证书记录</div>
+      <div ref="footerRef" class="list-footer">
+        <el-pagination
+          v-model:current-page="query.pageNo"
+          v-model:page-size="query.pageSize"
+          :page-sizes="PAGE_SIZES"
+          :total="total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </el-card>
 
     <!-- 签发证书 -->
     <el-dialog v-model="issueVisible" title="签发证书" width="520px" :close-on-click-modal="false">
@@ -340,6 +363,7 @@
 <script setup>
 import { computed, reactive, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import {
   pageCerts,
   issueCert,
@@ -357,12 +381,16 @@ import {
 } from '@/api/system'
 import { downloadText } from '@/lib/download'
 import { currentOrg } from '@/lib/org'
+import { hasPerm, permReady } from '@/lib/perm'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
-// 下载权限与后端兜底 403 对齐：cert.pem=OPERATOR/ADMIN；key.pem 与 p12=ADMIN/KEY_ADMIN
+// 按钮权限点与后端接口校验一一对应；旧会话（无权限缓存）回退角色判断，服务端仍强校验
 const role = localStorage.getItem('role') || ''
-const canIssue = ['ADMIN', 'OPERATOR'].includes(role)
-const canDownloadCert = ['ADMIN', 'OPERATOR'].includes(role)
-const canDownloadKey = ['ADMIN', 'KEY_ADMIN'].includes(role)
+const permLoaded = permReady()
+const canIssue = permLoaded ? hasPerm('cert:issue') : ['ADMIN', 'OPERATOR'].includes(role)
+const canDownloadCert = permLoaded ? hasPerm('cert:download') : ['ADMIN', 'OPERATOR'].includes(role)
+const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : ['ADMIN', 'KEY_ADMIN'].includes(role)
 
 // 当前机构域：列表/签发/吊销等请求由 request 封装自动附带 orgKey=currentOrg()
 const orgDomain = ref(currentOrg())
@@ -371,7 +399,10 @@ const isOrgDomain = computed(() => orgDomain.value !== 'default')
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ pageNo: 1, pageSize: 10, certType: '', status: '', keyword: '' })
+const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, certType: '', status: '', keyword: '' })
+
+// 两卡式列表页：表格只设最大高度，超高内部滚动
+const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 
 const issueVisible = ref(false)
 const csrVisible = ref(false)
@@ -453,8 +484,26 @@ async function load() {
   }
 }
 
-function reload() {
+function handleSearch() {
   query.pageNo = 1
+  load()
+}
+
+function handleReset() {
+  query.certType = ''
+  query.status = ''
+  query.keyword = ''
+  handleSearch()
+}
+
+function handleSizeChange(val) {
+  query.pageSize = val
+  query.pageNo = 1
+  load()
+}
+
+function handleCurrentChange(val) {
+  query.pageNo = val
   load()
 }
 
@@ -681,12 +730,3 @@ async function onDownloadKey(row) {
 
 onMounted(load)
 </script>
-
-<style scoped>
-.filters {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-</style>

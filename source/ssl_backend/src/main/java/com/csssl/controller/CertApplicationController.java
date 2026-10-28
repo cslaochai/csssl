@@ -5,6 +5,8 @@ import com.csssl.common.Result;
 import com.csssl.dto.CertVo;
 import com.csssl.entity.CertApplication;
 import com.csssl.service.CertApplicationService;
+import com.csssl.service.PermissionService;
+import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +36,7 @@ import java.util.Map;
 public class CertApplicationController {
 
     private final CertApplicationService applicationService;
+    private final PermissionService permissionService;
 
     /** 申请单分页查询（登录即可查看；机构用户强制本机构，全局用户可按 ?orgKey= 过滤，不传=全量只读） */
     @GetMapping
@@ -59,7 +62,7 @@ public class CertApplicationController {
     public Result<CertApplication> submit(@RequestBody Map<String, String> body,
                                           @RequestParam(required = false) String orgKey,
                                           HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.APP_SUBMIT);
         String org = RoleCode.effectiveOrg(request, orgKey == null || orgKey.isBlank() ? body.get("orgKey") : orgKey);
         return Result.success("申请提交成功", applicationService.submit(body,
                 RoleCode.currentUser(request), clientIp(request), org));
@@ -70,7 +73,7 @@ public class CertApplicationController {
     public Result<CertApplication> approve(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
                                            @RequestParam(required = false) String orgKey,
                                            HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.APPROVER, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.APP_APPROVE);
         String comment = body == null ? null : body.get("comment");
         return Result.success("已批准", applicationService.approve(id, comment,
                 RoleCode.currentUser(request), clientIp(request),
@@ -82,7 +85,7 @@ public class CertApplicationController {
     public Result<CertApplication> reject(@PathVariable Long id, @RequestBody Map<String, String> body,
                                           @RequestParam(required = false) String orgKey,
                                           HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.APPROVER, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.APP_REJECT);
         return Result.success("已驳回", applicationService.reject(id, body.get("comment"),
                 RoleCode.currentUser(request), clientIp(request),
                 RoleCode.effectiveOrg(request, orgKey)));
@@ -92,7 +95,7 @@ public class CertApplicationController {
     @PostMapping("/{id}/issue")
     public Result<CertVo> issue(@PathVariable Long id, @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.APP_ISSUE);
         return Result.success("签发成功", applicationService.issue(id,
                 RoleCode.currentUser(request), clientIp(request),
                 RoleCode.effectiveOrg(request, orgKey)));
@@ -102,7 +105,7 @@ public class CertApplicationController {
     @PostMapping("/{id}/cancel")
     public Result<CertApplication> cancel(@PathVariable Long id, @RequestParam(required = false) String orgKey,
                                           HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.APP_CANCEL);
         return Result.success("已撤销", applicationService.cancel(id,
                 RoleCode.currentUser(request), RoleCode.currentRole(request), clientIp(request),
                 RoleCode.effectiveOrg(request, orgKey)));

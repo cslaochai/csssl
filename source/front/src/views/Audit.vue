@@ -1,53 +1,66 @@
 <template>
-  <div class="page-card">
-    <div class="table-toolbar">
-      <div class="section-title">
-        审计日志
-        <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain" style="margin-left: 8px">当前域：{{ orgDomain }}</el-tag>
+  <div>
+    <!-- 查询卡 -->
+    <el-card ref="queryCardRef" class="query-card" shadow="never">
+      <div class="query-wrap">
+        <el-form :model="query" inline>
+          <el-form-item label="操作类型">
+            <el-select v-model="action" placeholder="全部" clearable style="width: 160px" @change="handleSearch">
+              <el-option v-for="item in actions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <div class="query-actions">
+          <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
+          <el-button v-perm="'audit:chain'" type="warning" plain @click="openChain">链对账</el-button>
+          <el-button v-perm="'audit:export'" type="primary" plain :loading="exporting" @click="onExport">导出归档CSV</el-button>
+        </div>
       </div>
-      <el-select v-model="action" placeholder="操作类型" clearable style="width: 160px" @change="reload">
-        <el-option v-for="item in actions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
-      <div>
-        <el-button type="warning" plain @click="openChain">链对账</el-button>
-        <el-button type="primary" plain :loading="exporting" @click="onExport">导出归档CSV</el-button>
+    </el-card>
+
+    <!-- 表格卡 -->
+    <el-card class="table-card" shadow="never">
+      <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
+        <el-table-column prop="id" label="ID" width="70" class-name="cell-mono" />
+        <el-table-column prop="username" label="操作人" width="130" />
+        <el-table-column label="机构" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
+            <span v-else class="mono-cell">{{ row.orgKey }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="130">
+          <template #default="{ row }">{{ actionText(row.action) }}</template>
+        </el-table-column>
+        <el-table-column prop="target" label="对象" width="120" />
+        <el-table-column prop="detail" label="详情" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="ip" label="来源IP" width="140" />
+        <el-table-column prop="createdAt" label="时间" width="170" />
+        <el-table-column align="right" label="防篡改" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button v-perm="'audit:verify'" link type="primary" size="small" @click="onVerify(row)">验签</el-button>
+            <el-tag v-if="row.sign" size="small" type="success">已签名</el-tag>
+            <el-tag v-else size="small" type="info">无签名</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的审计记录</div>
+      <div ref="footerRef" class="list-footer">
+        <el-pagination
+          v-model:current-page="query.pageNo"
+          v-model:page-size="query.pageSize"
+          :page-sizes="PAGE_SIZES"
+          :total="total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
       </div>
-    </div>
-
-    <el-table :data="rows" v-loading="loading" border stripe>
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="username" label="操作人" width="130" />
-      <el-table-column label="机构" width="110">
-        <template #default="{ row }">
-          <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
-          <span v-else class="mono-cell">{{ row.orgKey }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="130">
-        <template #default="{ row }">{{ actionText(row.action) }}</template>
-      </el-table-column>
-      <el-table-column prop="target" label="对象" width="120" />
-      <el-table-column prop="detail" label="详情" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="ip" label="来源IP" width="140" />
-      <el-table-column prop="createdAt" label="时间" width="170" />
-      <el-table-column label="防篡改" width="150" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="onVerify(row)">验签</el-button>
-          <el-tag v-if="row.sign" size="small" type="success">已签名</el-tag>
-          <el-tag v-else size="small" type="info">无签名</el-tag>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <el-pagination
-      v-model:current-page="query.pageNo"
-      v-model:page-size="query.pageSize"
-      :total="total"
-      :page-sizes="[10, 20, 50]"
-      layout="total, sizes, prev, pager, next"
-      style="margin-top: 14px; justify-content: flex-end"
-      @change="load"
-    />
+    </el-card>
 
     <el-dialog v-model="verifyVisible" title="审计验签（GM/T 0034 §10.1/§10.5 防篡改校验）" width="640px">
       <el-result v-if="verify?.valid" icon="success" title="签名有效" sub-title="记录未被篡改，由审计签名密钥签发，哈希链指向的记录签名一致" />
@@ -135,9 +148,12 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import { pageAudit, verifyAuditLog, exportAuditCsv, chainVerify } from '@/api/system'
 import { downloadText } from '@/lib/download'
 import { currentOrg } from '@/lib/org'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
 // 列表/导出/对账请求由 request 封装自动附带 orgKey=currentOrg()（机构域过滤）
 const orgDomain = ref(currentOrg())
@@ -146,7 +162,10 @@ const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const action = ref('')
-const query = reactive({ pageNo: 1, pageSize: 10 })
+const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE })
+
+// 两卡式列表页：表格只设最大高度，超高内部滚动
+const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 const verifyVisible = ref(false)
 const verify = ref(null)
 const exporting = ref(false)
@@ -261,8 +280,24 @@ async function load() {
   }
 }
 
-function reload() {
+function handleSearch() {
   query.pageNo = 1
+  load()
+}
+
+function handleReset() {
+  action.value = ''
+  handleSearch()
+}
+
+function handleSizeChange(val) {
+  query.pageSize = val
+  query.pageNo = 1
+  load()
+}
+
+function handleCurrentChange(val) {
+  query.pageNo = val
   load()
 }
 
@@ -270,11 +305,6 @@ onMounted(load)
 </script>
 
 <style scoped>
-.section-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1d2a4a;
-}
 .mono-wrap {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;

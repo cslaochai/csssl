@@ -12,6 +12,8 @@ import com.csssl.mapper.CaCertMapper;
 import com.csssl.service.AuditService;
 import com.csssl.service.CertService;
 import com.csssl.service.CertTemplateService;
+import com.csssl.service.PermissionService;
+import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +54,7 @@ public class CertController {
     private final CaCertMapper certMapper;
     private final AuditService auditService;
     private final CertTemplateService templateService;
+    private final PermissionService permissionService;
 
     /** 证书列表（分页 + 类型/状态/关键字/机构筛选；需 操作员/管理员/密钥管理员） */
     @GetMapping("/certs")
@@ -62,7 +65,7 @@ public class CertController {
                                      @RequestParam(required = false) String keyword,
                                      @RequestParam(required = false) String orgKey,
                                      HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_LIST);
         // 机构用户锁本机构（显式传别机构 403）；全局用户不传=null=跨机构全量只读
         String scope = RoleCode.readOrgScope(request, orgKey);
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<>();
@@ -96,7 +99,7 @@ public class CertController {
     public Result<CertVo> issue(@RequestBody IssueCertRequest req,
                                 @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_ISSUE);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), org, request);
         String username = RoleCode.currentUser(request);
@@ -108,7 +111,7 @@ public class CertController {
     public Result<CertVo> issueFromCsr(@RequestBody CsrIssueRequest req,
                                        @RequestParam(required = false) String orgKey,
                                        HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_ISSUE);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), org, request);
         String username = RoleCode.currentUser(request);
@@ -122,7 +125,7 @@ public class CertController {
     public Result<CertVo> issueWithPublicKey(@RequestBody com.csssl.dto.PublicKeyIssueRequest req,
                                              @RequestParam(required = false) String orgKey,
                                              HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_ISSUE);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), org, request);
         String username = RoleCode.currentUser(request);
@@ -134,7 +137,7 @@ public class CertController {
     public Result<CertVo> revoke(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
                                  @RequestParam(required = false) String orgKey,
                                  HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_REVOKE);
         requireWriteScope(id, orgKey, request);
         String username = RoleCode.currentUser(request);
         String reason = body == null ? null : body.get("reason");
@@ -146,7 +149,7 @@ public class CertController {
     public Result<CertVo> suspend(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
                                   @RequestParam(required = false) String orgKey,
                                   HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_SUSPEND);
         requireWriteScope(id, orgKey, request);
         String username = RoleCode.currentUser(request);
         String reason = body == null ? null : body.get("reason");
@@ -158,7 +161,7 @@ public class CertController {
     public Result<CertVo> unsuspend(@PathVariable Long id,
                                     @RequestParam(required = false) String orgKey,
                                     HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_SUSPEND);
         requireWriteScope(id, orgKey, request);
         return Result.success("已解除挂起，恢复有效",
                 certService.unsuspend(id, RoleCode.currentUser(request), clientIp(request)));
@@ -169,7 +172,7 @@ public class CertController {
     public Result<CertVo> renew(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
                                 @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_RENEW);
         String org = requireWriteScope(id, orgKey, request);
         Integer days = body == null || body.get("validityDays") == null
                 ? null : Integer.valueOf(body.get("validityDays"));
@@ -182,7 +185,7 @@ public class CertController {
     public Result<CertVo> rekey(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
                                 @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_REKEY);
         String org = requireWriteScope(id, orgKey, request);
         Integer days = body == null || body.get("validityDays") == null
                 ? null : Integer.valueOf(body.get("validityDays"));
@@ -193,7 +196,7 @@ public class CertController {
     /** 下载证书 PEM（公钥证书；需 操作员/管理员，落审计；行级读按数据域收敛） */
     @GetMapping("/certs/{id}/cert.pem")
     public String downloadCert(@PathVariable Long id, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.OPERATOR, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_DOWNLOAD);
         CaCert row = certService.findById(id);
         RoleCode.requireRowVisible(request, row.getOrgKey());
         String username = RoleCode.currentUser(request);
@@ -205,7 +208,7 @@ public class CertController {
     /** 下载私钥 PEM（需 管理员/密钥管理员；受 allow-private-key-download 开关控制，落审计；行级读按数据域收敛） */
     @GetMapping("/certs/{id}/key.pem")
     public String downloadKey(@PathVariable Long id, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_KEY_DOWNLOAD);
         CaCert row = certService.findById(id);
         RoleCode.requireRowVisible(request, row.getOrgKey());
         String username = RoleCode.currentUser(request);
@@ -223,7 +226,7 @@ public class CertController {
     public ResponseEntity<byte[]> exportP12(@PathVariable Long id,
                                             @RequestBody(required = false) Map<String, String> body,
                                             HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CERT_EXPORT);
         CaCert row = certService.findById(id);
         RoleCode.requireRowVisible(request, row.getOrgKey());
         String password = body == null ? null : body.get("password");
@@ -253,12 +256,12 @@ public class CertController {
         if (templateId != null) {
             CertTemplate tpl = templateService.detailVisible(templateId, org);
             if ("SUB_CA".equalsIgnoreCase(tpl.getCertType())) {
-                RoleCode.require(request, RoleCode.ADMIN);
+                permissionService.require(request, PermissionCatalog.CERT_ISSUE_SUBCA);
             }
             return;
         }
         if ("SUB_CA".equalsIgnoreCase(reqCertType)) {
-            RoleCode.require(request, RoleCode.ADMIN);
+            permissionService.require(request, PermissionCatalog.CERT_ISSUE_SUBCA);
         }
     }
 

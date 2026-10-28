@@ -1,33 +1,44 @@
 <template>
   <div>
-    <div class="page-card">
-      <div class="table-toolbar">
-        <div class="filters">
-          <el-select v-model="query.status" placeholder="状态" clearable style="width: 130px" @change="reload">
-            <el-option label="待审核" value="PENDING" />
-            <el-option label="已批准" value="APPROVED" />
-            <el-option label="已驳回" value="REJECTED" />
-            <el-option label="已签发" value="ISSUED" />
-            <el-option label="已撤销" value="CANCELLED" />
-          </el-select>
-          <el-input
-            v-model="query.keyword"
-            placeholder="申请人/申请单号"
-            clearable
-            style="width: 220px"
-            @keyup.enter="reload"
-            @clear="reload"
-          />
-          <el-button type="primary" plain @click="reload">查询</el-button>
+    <!-- 查询卡 -->
+    <el-card ref="queryCardRef" class="query-card" shadow="never">
+      <div class="query-wrap">
+        <el-form :model="query" inline>
+          <el-form-item label="状态">
+            <el-select v-model="query.status" placeholder="全部" clearable style="width: 130px" @change="handleSearch">
+              <el-option label="待审核" value="PENDING" />
+              <el-option label="已批准" value="APPROVED" />
+              <el-option label="已驳回" value="REJECTED" />
+              <el-option label="已签发" value="ISSUED" />
+              <el-option label="已撤销" value="CANCELLED" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="关键字">
+            <el-input
+              v-model="query.keyword"
+              placeholder="申请人/申请单号"
+              clearable
+              style="width: 220px"
+              @keyup.enter="handleSearch"
+              @clear="handleSearch"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <div class="query-actions">
           <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
-        </div>
-        <div>
-          <el-button type="primary" @click="openSubmit">提交申请</el-button>
+          <el-button v-perm="'app:submit'" type="primary" @click="openSubmit">提交申请</el-button>
         </div>
       </div>
+    </el-card>
 
-      <el-table :data="rows" v-loading="loading" border stripe>
-        <el-table-column prop="applyNo" label="申请单号" width="180" show-overflow-tooltip />
+    <!-- 表格卡 -->
+    <el-card class="table-card" shadow="never">
+      <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
+        <el-table-column prop="applyNo" label="申请单号" class-name="cell-mono" width="180" show-overflow-tooltip />
         <el-table-column label="申请人类别" width="100">
           <template #default="{ row }">{{ row.applicantType === 'INSTITUTION' ? '机构' : '个人' }}</template>
         </el-table-column>
@@ -45,27 +56,29 @@
             <el-tag size="small" :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column align="right" label="操作" width="230" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.status === 'PENDING'" link type="success" size="small" @click="openReview(row, 'approve')">批准</el-button>
-            <el-button v-if="row.status === 'PENDING'" link type="danger" size="small" @click="openReview(row, 'reject')">驳回</el-button>
-            <el-button v-if="row.status === 'APPROVED'" link type="primary" size="small" @click="onIssue(row)">签发</el-button>
-            <el-button v-if="['PENDING', 'APPROVED'].includes(row.status)" link size="small" @click="onCancel(row)">撤销</el-button>
+            <el-button v-if="row.status === 'PENDING'" v-perm="'app:approve'" link type="success" size="small" @click="openReview(row, 'approve')">批准</el-button>
+            <el-button v-if="row.status === 'PENDING'" v-perm="'app:reject'" link type="danger" size="small" @click="openReview(row, 'reject')">驳回</el-button>
+            <el-button v-if="row.status === 'APPROVED'" v-perm="'app:issue'" link type="primary" size="small" @click="onIssue(row)">签发</el-button>
+            <el-button v-if="['PENDING', 'APPROVED'].includes(row.status)" v-perm="'app:cancel'" link size="small" @click="onCancel(row)">撤销</el-button>
             <el-button link size="small" @click="onDetail(row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
-
-      <el-pagination
-        v-model:current-page="query.pageNo"
-        v-model:page-size="query.pageSize"
-        :total="total"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next"
-        style="margin-top: 14px; justify-content: flex-end"
-        @change="load"
-      />
-    </div>
+      <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的申请记录</div>
+      <div ref="footerRef" class="list-footer">
+        <el-pagination
+          v-model:current-page="query.pageNo"
+          v-model:page-size="query.pageSize"
+          :page-sizes="PAGE_SIZES"
+          :total="total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </el-card>
 
     <!-- 提交申请 -->
     <el-dialog v-model="submitVisible" title="提交证书申请（录入员代录）" width="620px" :close-on-click-modal="false">
@@ -152,17 +165,23 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import {
   pageApplications, submitApplication, approveApplication, rejectApplication,
   issueApplication, cancelApplication, pageTemplates
 } from '@/api/system'
 import { currentOrg } from '@/lib/org'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const templates = ref([])
-const query = reactive({ pageNo: 1, pageSize: 10, status: '', keyword: '' })
+const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, status: '', keyword: '' })
+
+// 两卡式列表页：表格只设最大高度，超高内部滚动
+const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 
 // 机构域：列表/审批/签发请求由 request 封装自动附带 orgKey=currentOrg()
 const orgDomain = ref(currentOrg())
@@ -215,8 +234,25 @@ async function load() {
   }
 }
 
-function reload() {
+function handleSearch() {
   query.pageNo = 1
+  load()
+}
+
+function handleReset() {
+  query.status = ''
+  query.keyword = ''
+  handleSearch()
+}
+
+function handleSizeChange(val) {
+  query.pageSize = val
+  query.pageNo = 1
+  load()
+}
+
+function handleCurrentChange(val) {
+  query.pageNo = val
   load()
 }
 
@@ -313,11 +349,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.filters {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 .dn-tip {
   font-size: 12px;
   color: #909399;

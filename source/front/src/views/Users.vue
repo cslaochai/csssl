@@ -1,25 +1,41 @@
 <template>
   <div>
-    <div class="page-card">
-      <div class="table-toolbar">
-        <div class="filters">
-          <el-select v-model="query.roleCode" placeholder="角色" clearable style="width: 150px" @change="reload">
-            <el-option v-for="r in roles" :key="r.value" :label="r.label" :value="r.value" />
-          </el-select>
-          <el-select v-if="isGlobal" v-model="query.orgKey" placeholder="机构域" clearable style="width: 170px" @change="reload">
-            <el-option label="default（全局/默认域）" value="default" />
-            <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
-          </el-select>
-          <el-button type="primary" plain @click="reload">查询</el-button>
-        </div>
-        <div>
-          <el-button type="primary" @click="openCreate">创建管理账号</el-button>
+    <!-- 查询卡 -->
+    <el-card ref="queryCardRef" class="query-card" shadow="never">
+      <div class="query-wrap">
+        <el-form :model="query" inline>
+          <el-form-item label="角色">
+            <el-select v-model="query.roleCode" placeholder="全部" clearable style="width: 150px" @change="handleSearch">
+              <el-option
+                v-for="r in roleOptions"
+                :key="r.roleCode"
+                :label="roleLabel(r)"
+                :value="r.roleCode"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="isGlobal" label="机构域">
+            <el-select v-model="query.orgKey" placeholder="全部" clearable style="width: 170px" @change="handleSearch">
+              <el-option label="default（全局/默认域）" value="default" />
+              <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <div class="query-actions">
+          <el-button v-perm="'user:create'" type="primary" :icon="Plus" @click="openCreate">创建管理账号</el-button>
         </div>
       </div>
+    </el-card>
 
-      <el-table :data="rows" v-loading="loading" border stripe>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="username" label="账号" min-width="130" />
+    <!-- 表格卡 -->
+    <el-card class="table-card" shadow="never">
+      <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
+        <el-table-column prop="id" label="ID" width="60" class-name="cell-mono" />
+        <el-table-column prop="username" label="账号" min-width="130" class-name="cell-mono" />
         <el-table-column prop="realName" label="姓名" min-width="130" />
         <el-table-column label="角色" width="110">
           <template #default="{ row }">
@@ -38,10 +54,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="lastLoginTime" label="最近登录" width="170" />
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column align="right" label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" :disabled="row.username === 'admin'" @click="openEdit(row)">编辑</el-button>
+            <el-button v-perm="'user:update'" link type="primary" size="small" :disabled="row.username === 'admin'" @click="openEdit(row)">编辑</el-button>
             <el-button
+              v-perm="'user:update'"
               link
               size="small"
               :type="row.status === 1 ? 'danger' : 'success'"
@@ -51,17 +68,19 @@
           </template>
         </el-table-column>
       </el-table>
-
-      <el-pagination
-        v-model:current-page="query.pageNo"
-        v-model:page-size="query.pageSize"
-        :total="total"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next"
-        style="margin-top: 14px; justify-content: flex-end"
-        @change="load"
-      />
-    </div>
+      <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的用户记录</div>
+      <div ref="footerRef" class="list-footer">
+        <el-pagination
+          v-model:current-page="query.pageNo"
+          v-model:page-size="query.pageSize"
+          :page-sizes="PAGE_SIZES"
+          :total="total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑账号' : '创建管理账号'" width="480px" :close-on-click-modal="false">
       <el-form :model="form" label-width="100px">
@@ -81,8 +100,15 @@
         </el-form-item>
         <el-form-item label="角色" required>
           <el-select v-model="form.roleCode" style="width: 100%">
-            <el-option v-for="r in roles" :key="r.value" :label="r.label" :value="r.value" />
+            <el-option
+              v-for="r in roleOptions"
+              :key="r.roleCode"
+              :label="roleLabel(r)"
+              :value="r.roleCode"
+              :disabled="r.status !== 1"
+            />
           </el-select>
+          <div class="org-tip">角色由角色配置页维护：停用角色不可分配，名称/职责以角色配置为准</div>
         </el-form-item>
         <el-form-item v-if="!editing" label="归属机构">
           <template v-if="isGlobal">
@@ -110,19 +136,29 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { pageUsers, createUser, updateUser, listOrgsCached } from '@/api/system'
+import { Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { pageUsers, createUser, updateUser, listOrgsCached, listRoles } from '@/api/system'
 import { isGlobalUser, userOrgKey } from '@/lib/org'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
-const roles = [
-  { value: 'ADMIN', label: '系统管理员' },
-  { value: 'OPERATOR', label: 'CA操作员（录入/签发）' },
-  { value: 'APPROVER', label: '审核员（审批申请）' },
-  { value: 'AUDITOR', label: '审计员（只读）' },
-  { value: 'SECURITY_ADMIN', label: '安全管理员（证书策略）' },
-  { value: 'KEY_ADMIN', label: '密钥管理员（根密钥门限）' }
+// 角色下拉的兜底清单（接口不可用时页面仍可操作；正常以角色配置页档案为准）
+const DEFAULT_ROLES = [
+  { roleCode: 'ADMIN', roleName: '系统管理员', status: 1 },
+  { roleCode: 'OPERATOR', roleName: 'CA操作员', status: 1 },
+  { roleCode: 'APPROVER', roleName: '审核员', status: 1 },
+  { roleCode: 'AUDITOR', roleName: '审计员', status: 1 },
+  { roleCode: 'SECURITY_ADMIN', roleName: '安全管理员', status: 1 },
+  { roleCode: 'KEY_ADMIN', roleName: '密钥管理员', status: 1 }
 ]
+const roleOptions = ref([...DEFAULT_ROLES])
+const roleMap = computed(() => Object.fromEntries(roleOptions.value.map(r => [r.roleCode, r])))
+
+function roleLabel(r) {
+  return r.status === 1 ? r.roleName : `${r.roleName}（停用）`
+}
 
 const isGlobal = ref(isGlobalUser())
 const userOrg = ref(userOrgKey())
@@ -131,14 +167,17 @@ const orgOptions = ref([])
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ pageNo: 1, pageSize: 10, roleCode: '', orgKey: '' })
+const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, roleCode: '', orgKey: '' })
+
+// 两卡式列表页：表格只设最大高度，超高内部滚动
+const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
 const form = reactive({ id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, orgKey: '' })
 
 function roleText(r) {
-  return roles.find(i => i.value === r)?.label || r
+  return roleMap.value[r]?.roleName || r
 }
 function roleTag(r) {
   return { ADMIN: 'danger', OPERATOR: '', APPROVER: 'warning', AUDITOR: 'info', SECURITY_ADMIN: 'primary', KEY_ADMIN: 'warning' }[r] || ''
@@ -163,8 +202,25 @@ async function load() {
   }
 }
 
-function reload() {
+function handleSearch() {
   query.pageNo = 1
+  load()
+}
+
+function handleReset() {
+  query.roleCode = ''
+  query.orgKey = ''
+  handleSearch()
+}
+
+function handleSizeChange(val) {
+  query.pageSize = val
+  query.pageNo = 1
+  load()
+}
+
+function handleCurrentChange(val) {
+  query.pageNo = val
   load()
 }
 
@@ -229,7 +285,18 @@ async function toggleStatus(row) {
   load()
 }
 
+async function loadRoles() {
+  try {
+    const res = await listRoles()
+    const list = Array.isArray(res.data) ? res.data : []
+    if (list.length) roleOptions.value = list
+  } catch (e) {
+    // 角色接口失败时沿用兜底清单，不阻断账号管理
+  }
+}
+
 onMounted(async () => {
+  await loadRoles()
   load()
   if (isGlobal.value) {
     orgOptions.value = await listOrgsCached()
@@ -238,11 +305,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.filters {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 .mono {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;

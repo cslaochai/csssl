@@ -1,25 +1,34 @@
 <template>
   <div>
-    <div class="page-card">
-      <div class="table-toolbar">
-        <div class="filters">
-          <el-input
-            v-model="query.keyword"
-            placeholder="模板编码/名称"
-            clearable
-            style="width: 220px"
-            @keyup.enter="reload"
-            @clear="reload"
-          />
-          <el-button type="primary" plain @click="reload">查询</el-button>
-        </div>
-        <div>
-          <el-button type="primary" @click="openCreate">新建模板</el-button>
+    <!-- 查询卡 -->
+    <el-card ref="queryCardRef" class="query-card" shadow="never">
+      <div class="query-wrap">
+        <el-form :model="query" inline>
+          <el-form-item label="关键字">
+            <el-input
+              v-model="query.keyword"
+              placeholder="模板编码/名称"
+              clearable
+              style="width: 220px"
+              @keyup.enter="handleSearch"
+              @clear="handleSearch"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <div class="query-actions">
+          <el-button v-perm="'template:create'" type="primary" :icon="Plus" @click="openCreate">新建模板</el-button>
         </div>
       </div>
+    </el-card>
 
-      <el-table :data="rows" v-loading="loading" border stripe>
-        <el-table-column prop="templateCode" label="编码" width="130">
+    <!-- 表格卡 -->
+    <el-card class="table-card" shadow="never">
+      <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
+        <el-table-column prop="templateCode" label="编码" class-name="cell-mono" width="130">
           <template #default="{ row }">
             <el-tag size="small" :type="row.builtin === 1 ? 'warning' : ''">{{ row.templateCode }}</el-tag>
           </template>
@@ -44,24 +53,26 @@
         <el-table-column label="内置" width="70">
           <template #default="{ row }">{{ row.builtin === 1 ? '是' : '否' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column align="right" label="操作" width="140" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" size="small" :disabled="row.builtin === 1" @click="onDelete(row)">删除</el-button>
+            <el-button v-perm="'template:update'" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button v-perm="'template:delete'" link type="danger" size="small" :disabled="row.builtin === 1" @click="onDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
-
-      <el-pagination
-        v-model:current-page="query.pageNo"
-        v-model:page-size="query.pageSize"
-        :total="total"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next"
-        style="margin-top: 14px; justify-content: flex-end"
-        @change="load"
-      />
-    </div>
+      <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的模板记录</div>
+      <div ref="footerRef" class="list-footer">
+        <el-pagination
+          v-model:current-page="query.pageNo"
+          v-model:page-size="query.pageSize"
+          :page-sizes="PAGE_SIZES"
+          :total="total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑模板' : '新建证书模板'" width="600px" :close-on-click-modal="false">
       <el-form :model="form" label-width="120px">
@@ -132,8 +143,11 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { pageTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/api/system'
 import { currentOrg, isGlobalUser } from '@/lib/org'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
+import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
 const isGlobal = ref(isGlobalUser())
 const orgDomain = ref(currentOrg())
@@ -141,7 +155,10 @@ const orgDomain = ref(currentOrg())
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ pageNo: 1, pageSize: 10, keyword: '' })
+const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, keyword: '' })
+
+// 两卡式列表页：表格只设最大高度，超高内部滚动
+const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
@@ -181,8 +198,24 @@ async function load() {
   }
 }
 
-function reload() {
+function handleSearch() {
   query.pageNo = 1
+  load()
+}
+
+function handleReset() {
+  query.keyword = ''
+  handleSearch()
+}
+
+function handleSizeChange(val) {
+  query.pageSize = val
+  query.pageNo = 1
+  load()
+}
+
+function handleCurrentChange(val) {
+  query.pageNo = val
   load()
 }
 
@@ -251,11 +284,6 @@ onMounted(load)
 </script>
 
 <style scoped>
-.filters {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 .org-tip {
   font-size: 12px;
   color: #909399;

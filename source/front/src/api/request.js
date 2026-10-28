@@ -116,6 +116,8 @@ request.interceptors.response.use(
           localStorage.removeItem('token')
           localStorage.removeItem('username')
           localStorage.removeItem('role')
+          localStorage.removeItem('roleName')
+          localStorage.removeItem('perms')
           localStorage.removeItem('orgKey')
           localStorage.removeItem('caDomain')
           if (!redirectingToLogin) {

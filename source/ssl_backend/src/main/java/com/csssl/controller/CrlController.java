@@ -1,5 +1,6 @@
 package com.csssl.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.dto.CertVo;
 import com.csssl.entity.CaCert;
@@ -50,6 +51,17 @@ public class CrlController {
         data.put("entryCount", info.entries());
         data.put("issuerCn", info.issuerCn());
         return Result.success("查询成功", data);
+    }
+
+    /** 吊销记录分页查询（管理页表格；keyword=CN/序列号，status=REVOKED/FROZEN，reason=吊销原因） */
+    @GetMapping("/records")
+    public Result<Page<CertVo>> records(@RequestParam(required = false) String orgKey,
+                                        @RequestParam(defaultValue = "1") long pageNo,
+                                        @RequestParam(defaultValue = "10") long pageSize,
+                                        @RequestParam(required = false) String keyword,
+                                        @RequestParam(required = false) String status,
+                                        @RequestParam(required = false) String reason) {
+        return Result.success("查询成功", crlService.recordsPage(resolveOrg(orgKey), keyword, status, reason, pageNo, pageSize));
     }
 
     /** 下载 CRL PEM（判重发布：内容未变直接复用已发布 CRL，不自增编号；?orgKey= 切机构域） */

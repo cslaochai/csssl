@@ -254,3 +254,33 @@ SET @c19 = (SELECT COUNT(*) FROM information_schema.statistics
             WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_org_serial');
 SET @s19 = IF(@c19 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_org_serial (org_key, serial_hex)', 'SELECT 1');
 PREPARE s19 FROM @s19; EXECUTE s19; DEALLOCATE PREPARE s19;
+
+-- =============================================================================
+-- ===== 角色配置（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡） =====
+-- 六类法定角色固化：编码不可改、角色不可增删，仅可维护名称/职责/排序/启停；
+-- 可授权权限点上限由代码内的 PermissionCatalog 固化（保存与读取双向收口），本表只存档案。
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS ssl_sys_role (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    role_code   VARCHAR(32)  NOT NULL COMMENT '角色编码：ADMIN/OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN（法定，不可改）',
+    role_name   VARCHAR(64)  NOT NULL COMMENT '角色名称（可维护）',
+    role_desc   VARCHAR(500) NULL COMMENT '职责说明（对应 GM/T 0034 分权职责）',
+    sort_order  INT          NOT NULL DEFAULT 0 COMMENT '排序号（升序）',
+    status      TINYINT      NOT NULL DEFAULT 1 COMMENT '1-启用 0-停用（停用后该角色账号不可登录）',
+    builtin     TINYINT      NOT NULL DEFAULT 1 COMMENT '1-法定内置角色（角色不可增删）',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_role_code (role_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理角色档案（六类法定角色，不可增删）';
+
+CREATE TABLE IF NOT EXISTS ssl_role_perm (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    role_code   VARCHAR(32)  NOT NULL COMMENT '角色编码',
+    perm_code   VARCHAR(64)  NOT NULL COMMENT '权限点：menu:xxx 页面菜单 / cert:issue 等操作权限',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_role_perm (role_code, perm_code),
+    KEY idx_perm_code (perm_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色-权限点授权（保存/读取双向与法定上限取交集）';

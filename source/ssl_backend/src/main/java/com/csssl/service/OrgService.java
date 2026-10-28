@@ -1,6 +1,7 @@
 package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
 import com.csssl.dto.CaStatusVo;
@@ -47,6 +48,21 @@ public class OrgService {
             rows.add(buildRow(org));
         }
         return rows;
+    }
+
+    /** 机构分页查询（管理页：关键字命中 标识/名称/主体O，状态精确匹配；根状态仅对当前页计算） */
+    public Page<Map<String, Object>> page(String keyword, String status, long pageNo, long pageSize) {
+        LambdaQueryWrapper<CaOrg> qw = new LambdaQueryWrapper<>();
+        if (status != null && !status.isBlank()) {
+            qw.eq(CaOrg::getStatus, status.trim());
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.trim();
+            qw.and(w -> w.like(CaOrg::getOrgKey, kw).or().like(CaOrg::getOrgName, kw).or().like(CaOrg::getSubjectO, kw));
+        }
+        qw.orderByAsc(CaOrg::getId);
+        Page<CaOrg> page = orgMapper.selectPage(new Page<>(pageNo, pageSize), qw);
+        return (Page<Map<String, Object>>) page.convert(this::buildRow);
     }
 
     /** 单机构状态摘要（详情/创建回执用） */

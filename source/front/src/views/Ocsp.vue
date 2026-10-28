@@ -233,7 +233,7 @@ function onDownload() {
 .section-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1d2a4a;
+  color: var(--his-title);
 }
 .cmd-block {
   background: #f5f7fa;

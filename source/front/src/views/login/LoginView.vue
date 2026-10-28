@@ -38,6 +38,7 @@ import { User, Lock } from '@element-plus/icons-vue'
 import { login } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache } from '@/lib/password'
 import { saveSessionOrg } from '@/lib/org'
+import { savePerms, saveRoleName } from '@/lib/perm'
 import logo from '@/assets/logo.svg'
 
 const router = useRouter()
@@ -66,6 +67,9 @@ async function onSubmit() {
     localStorage.setItem('username', res.data.username)
     // 不再缺省回退 ADMIN：后端未返回角色即视为异常，由守卫按未登录处理
     localStorage.setItem('role', res.data.role || '')
+    // 角色名称与生效权限点：侧栏/守卫/按钮均按权限点收敛（服务端仍逐接口强校验）
+    saveRoleName(res.data.roleName || '')
+    savePerms(res.data.perms || [])
     // 机构域：orgKey=null 全局用户（可选域），非空机构用户（固定本域）
     saveSessionOrg(res.data.orgKey || '')
     ElMessage.success('登录成功')
@@ -86,7 +90,7 @@ async function onSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #1d2a4a 0%, #2d4a7a 55%, #3d6aa8 100%);
+  background: linear-gradient(135deg, #063059 0%, var(--his-primary-deep) 55%, #1b6fb8 100%);
 }
 .login-card {
   width: 400px;
@@ -111,7 +115,7 @@ async function onSubmit() {
 }
 .login-title h1 {
   font-size: 20px;
-  color: #1d2a4a;
+  color: var(--his-title);
 }
 .login-title p {
   margin-top: 6px;

@@ -1,9 +1,12 @@
 package com.csssl.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.entity.CaOrg;
 import com.csssl.service.AuditService;
 import com.csssl.service.OrgService;
+import com.csssl.service.PermissionService;
+import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -28,11 +32,21 @@ public class OrgController {
 
     private final OrgService orgService;
     private final AuditService auditService;
+    private final PermissionService permissionService;
 
     /** 机构列表（附各机构根状态：有无根/SUB_CA 有效期/密钥形态 ONLINE/SEALED/SHARES） */
     @GetMapping
     public Result<List<Map<String, Object>>> list() {
         return Result.success("查询成功", orgService.overview());
+    }
+
+    /** 机构分页查询（管理页：keyword 命中 标识/名称/主体O；status 精确） */
+    @GetMapping("/page")
+    public Result<Page<Map<String, Object>>> page(@RequestParam(defaultValue = "1") long pageNo,
+                                                  @RequestParam(defaultValue = "10") long pageSize,
+                                                  @RequestParam(required = false) String keyword,
+                                                  @RequestParam(required = false) String status) {
+        return Result.success("查询成功", orgService.page(keyword, status, pageNo, pageSize));
     }
 
     /** 机构详情（含根CA状态与门限份额状态） */
@@ -55,7 +69,7 @@ public class OrgController {
     /** 新建机构（仅 ADMIN）：登记后立即为该机构生成独立根CA+SUB_CA+Shamir(3,5) 门限份额 */
     @PostMapping
     public Result<Map<String, Object>> create(@RequestBody Map<String, String> body, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.ORG_CREATE);
         String username = RoleCode.currentUser(request);
         CaOrg org = orgService.create(body.get("orgKey"), body.get("orgName"), body.get("subjectO"),
                 body.get("algorithm"), body.get("contact"), body.get("description"));
@@ -69,7 +83,7 @@ public class OrgController {
     /** 暂停机构（仅 ADMIN；停止对外签发由后续波次在签发链路 enforce，本波落状态） */
     @PostMapping("/{orgKey}/suspend")
     public Result<CaOrg> suspend(@PathVariable String orgKey, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.ORG_SUSPEND);
         String username = RoleCode.currentUser(request);
         CaOrg org = orgService.suspend(orgKey);
         auditService.record(username, "ORG_SUSPEND", orgKey, "暂停机构 " + org.getOrgName(), clientIp(request));
@@ -79,7 +93,7 @@ public class OrgController {
     /** 恢复机构（仅 ADMIN） */
     @PostMapping("/{orgKey}/resume")
     public Result<CaOrg> resume(@PathVariable String orgKey, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.ORG_RESUME);
         String username = RoleCode.currentUser(request);
         CaOrg org = orgService.resume(orgKey);
         auditService.record(username, "ORG_RESUME", orgKey, "恢复机构 " + org.getOrgName(), clientIp(request));
@@ -89,7 +103,7 @@ public class OrgController {
     /** 关闭机构（仅 ADMIN；CLOSED 终态） */
     @PostMapping("/{orgKey}/close")
     public Result<CaOrg> close(@PathVariable String orgKey, HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN);
+        permissionService.require(request, PermissionCatalog.ORG_CLOSE);
         String username = RoleCode.currentUser(request);
         CaOrg org = orgService.close(orgKey);
         auditService.record(username, "ORG_CLOSE", orgKey, "关闭机构 " + org.getOrgName(), clientIp(request));

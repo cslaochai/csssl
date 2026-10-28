@@ -20,6 +20,7 @@
       </div>
       <div>
         <el-button
+            v-perm="'ca:init'"
             type="primary"
             :loading="initLoading"
             :disabled="!canInitHere"
@@ -27,15 +28,17 @@
             @click="onInit"
         >初始化 / 重建根CA
         </el-button>
-        <el-button :disabled="!root.initialized" @click="onDownloadRoot">导出根证书</el-button>
+        <el-button v-perm="'ca:root:download'" :disabled="!root.initialized" @click="onDownloadRoot">导出根证书</el-button>
         <el-button
             v-if="root.rootKeyState === 'ONLINE'"
+            v-perm="'ca:seal'"
             type="warning"
             @click="onSeal"
         >封存根密钥（离线化）
         </el-button>
         <el-button
             v-if="root.rootKeyState === 'SEALED'"
+            v-perm="'ca:unseal'"
             @click="onUnseal"
         >解封根密钥
         </el-button>
@@ -87,7 +90,7 @@
           剩余 &lt; {{ root.subCa.renewBeforeDays }} 天
         </el-descriptions-item>
       </el-descriptions>
-      <el-button size="small" style="margin-top: 8px" @click="onDownloadSubCa">
+      <el-button v-perm="'ca:subca:download'" size="small" style="margin-top: 8px" @click="onDownloadSubCa">
         导出SUB_CA证书（中间CA链）
       </el-button>
     </div>
@@ -113,6 +116,7 @@
       <div style="margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
         <el-button
             v-if="root.rootKeyState === 'ONLINE'"
+            v-perm="'ca:share:migrate'"
             type="warning"
             :loading="migrating"
             @click="onMigrateShares"
@@ -121,13 +125,14 @@
         <template v-if="shares.generated">
           <el-button
               v-for="s in shareList"
+              v-perm="'ca:share:download'"
               :key="s.index"
               size="small"
               :disabled="!s.exists"
               @click="onDownloadShare(s.index)"
           >下载份额{{ s.index }}
           </el-button>
-          <el-button type="danger" plain @click="onSeal">清除解封缓存（封存）</el-button>
+          <el-button v-perm="'ca:seal'" type="danger" plain @click="onSeal">清除解封缓存（封存）</el-button>
         </template>
       </div>
       <div v-if="shares.generated" class="unseal-form">
@@ -141,7 +146,7 @@
             :placeholder="`份额 JSON（从“下载份额${i}”获取）`"
             style="margin-bottom: 8px"
         />
-        <el-button type="primary" :loading="unsealing" :disabled="shareInputs.filter(s => s && s.trim()).length < 3"
+        <el-button v-perm="'ca:share:unseal'" type="primary" :loading="unsealing" :disabled="shareInputs.filter(s => s && s.trim()).length < 3"
                    @click="onUnsealShares">
           提交份额解封
         </el-button>
@@ -314,7 +319,7 @@ onMounted(load)
 .section-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1d2a4a;
+  color: var(--his-title);
   display: flex;
   align-items: center;
 }
@@ -331,7 +336,7 @@ onMounted(load)
 .subca-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1d2a4a;
+  color: var(--his-title);
   margin-bottom: 10px;
   display: flex;
   align-items: center;
@@ -352,7 +357,7 @@ onMounted(load)
 .unseal-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1d2a4a;
+  color: var(--his-title);
   margin-bottom: 8px;
 }
 </style>

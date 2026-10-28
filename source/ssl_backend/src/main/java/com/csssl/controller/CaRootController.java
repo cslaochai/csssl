@@ -5,6 +5,8 @@ import com.csssl.dto.CaStatusVo;
 import com.csssl.service.AuditService;
 import com.csssl.service.CaService;
 import com.csssl.service.OrgService;
+import com.csssl.service.PermissionService;
+import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +39,7 @@ public class CaRootController {
     private final CaService caService;
     private final AuditService auditService;
     private final OrgService orgService;
+    private final PermissionService permissionService;
 
     /** 根CA状态（含 SUB_CA 与根密钥封存/门限状态）；机构用户锁本机构 */
     @GetMapping("/status")
@@ -51,7 +54,7 @@ public class CaRootController {
     @PostMapping("/init")
     public Result<CaStatusVo> init(@RequestParam(required = false) String orgKey,
                                    HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CA_INIT);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
         String username = RoleCode.currentUser(request);
@@ -66,7 +69,7 @@ public class CaRootController {
     @PostMapping("/seal")
     public Result<CaStatusVo> seal(@RequestParam(required = false) String orgKey,
                                    HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CA_SEAL);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
         String username = RoleCode.currentUser(request);
@@ -81,7 +84,7 @@ public class CaRootController {
     @PostMapping("/unseal")
     public Result<CaStatusVo> unseal(@RequestParam(required = false) String orgKey,
                                      HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CA_UNSEAL);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
         String username = RoleCode.currentUser(request);
@@ -97,7 +100,7 @@ public class CaRootController {
     @GetMapping("/shares")
     public Result<Map<String, Object>> shares(@RequestParam(required = false) String orgKey,
                                               HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CA_SHARE_VIEW);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForRead(org);
         return Result.success("查询成功", caService.shareState(org));
@@ -110,7 +113,7 @@ public class CaRootController {
     @PostMapping("/shares/migrate")
     public Result<Map<String, Object>> migrateShares(@RequestParam(required = false) String orgKey,
                                                      HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CA_SHARE_MIGRATE);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
         String username = RoleCode.currentUser(request);
@@ -126,7 +129,7 @@ public class CaRootController {
     public Result<Map<String, Object>> downloadShare(@PathVariable int index,
                                                      @RequestParam(required = false) String orgKey,
                                                      HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CA_SHARE_DOWNLOAD);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForRead(org);
         if (index < 1 || index > CaService.SHARE_TOTAL) {
@@ -151,7 +154,7 @@ public class CaRootController {
     public Result<CaStatusVo> unsealShares(@RequestParam(required = false) String orgKey,
                                            @RequestBody Map<String, List<String>> body,
                                            HttpServletRequest request) {
-        RoleCode.require(request, RoleCode.ADMIN, RoleCode.KEY_ADMIN);
+        permissionService.require(request, PermissionCatalog.CA_SHARE_UNSEAL);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
         List<String> shares = body == null ? null : body.get("shares");

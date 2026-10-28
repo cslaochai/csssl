@@ -1,99 +1,110 @@
 <template>
-  <el-container class="layout">
-    <el-aside width="220px" class="sidebar">
-      <div class="sidebar-logo">
-        <img class="sidebar-logo-icon" :src="logo" alt="长沙麓康CA认证中心" />
-        <span>长沙麓康CA认证中心</span>
+  <el-container class="layout app-shell">
+    <!-- 顶部 Header：与 cslk HIS 同风格（深蓝顶栏 + logo + 面包屑 + 用户区） -->
+    <el-header class="app-header">
+      <div class="header-left">
+        <router-link to="/" class="brand" title="返回首页" :style="brandStyle">
+          <img class="brand-logo" :src="logo" alt="长沙麓康CA认证中心" />
+          <span v-if="!sidebarCollapsed" class="brand-name">长沙麓康CA认证中心</span>
+        </router-link>
+        <button class="collapse-btn" :title="sidebarCollapsed ? '展开菜单' : '收起菜单'" @click="toggleSidebar">
+          <el-icon v-if="sidebarCollapsed"><Expand /></el-icon>
+          <el-icon v-else><Fold /></el-icon>
+        </button>
+        <nav class="breadcrumb-nav">
+          <el-icon class="crumb-icon"><HomeFilled /></el-icon>
+          <span class="crumb-label">长沙麓康CA认证中心</span>
+          <el-icon v-if="currentTitle" class="crumb-sep"><ArrowRight /></el-icon>
+          <span v-if="currentTitle" class="crumb-current">{{ currentTitle }}</span>
+        </nav>
       </div>
-      <el-menu
-        :default-active="activeMenu"
-        background-color="#1d2a4a"
-        text-color="#c8d0e4"
-        active-text-color="#ffffff"
-        router
-      >
-        <el-menu-item index="/dashboard">
-          <el-icon><DataBoard /></el-icon>
-          <span>概览</span>
-        </el-menu-item>
-        <el-menu-item v-if="can('/root-ca')" index="/root-ca">
-          <el-icon><Key /></el-icon>
-          <span>根CA管理</span>
-        </el-menu-item>
-        <el-menu-item v-if="can('/certs')" index="/certs">
-          <el-icon><Document /></el-icon>
-          <span>证书管理</span>
-        </el-menu-item>
-        <el-menu-item index="/crl">
-          <el-icon><CircleClose /></el-icon>
-          <span>CRL吊销</span>
-        </el-menu-item>
-        <el-menu-item v-if="can('/audit')" index="/audit">
-          <el-icon><Memo /></el-icon>
-          <span>审计日志</span>
-        </el-menu-item>
-        <el-menu-item v-if="can('/applications')" index="/applications">
-          <el-icon><EditPen /></el-icon>
-          <span>RA申请审核</span>
-        </el-menu-item>
-        <el-menu-item v-if="can('/templates')" index="/templates">
-          <el-icon><Collection /></el-icon>
-          <span>证书模板</span>
-        </el-menu-item>
-        <el-menu-item v-if="can('/users')" index="/users">
-          <el-icon><User /></el-icon>
-          <span>用户与角色</span>
-        </el-menu-item>
-        <el-menu-item v-if="can('/orgs') && isGlobal" index="/orgs">
-          <el-icon><OfficeBuilding /></el-icon>
-          <span>机构管理</span>
-        </el-menu-item>
-        <el-menu-item index="/tsa">
-          <el-icon><Clock /></el-icon>
-          <span>时间戳TSA</span>
-        </el-menu-item>
-        <el-menu-item index="/ocsp">
-          <el-icon><Search /></el-icon>
-          <span>OCSP查询</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
+      <div class="header-right">
+        <!-- 机构域：全局用户可选域（默认 default）；机构用户只读徽标 -->
+        <template v-if="isGlobal">
+          <span class="domain-label">机构域</span>
+          <el-select v-model="domain" size="small" style="width: 200px" @change="onDomainChange">
+            <el-option label="default（默认域）" value="default" />
+            <el-option
+              v-for="o in orgOptions"
+              :key="o.orgKey"
+              :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey"
+              :value="o.orgKey"
+            />
+          </el-select>
+        </template>
+        <el-tag v-else type="warning" effect="dark" size="small">机构：{{ userOrg }}</el-tag>
 
-    <el-container>
-      <el-header class="header">
-        <div class="header-title">{{ currentTitle }}</div>
-        <div class="header-right">
-          <!-- 机构域：全局用户可选域（默认 default）；机构用户只读徽标 -->
-          <template v-if="isGlobal">
-            <span class="domain-label">机构域</span>
-            <el-select v-model="domain" size="small" style="width: 200px" @change="onDomainChange">
-              <el-option label="default（默认域）" value="default" />
-              <el-option
-                v-for="o in orgOptions"
-                :key="o.orgKey"
-                :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey"
-                :value="o.orgKey"
-              />
-            </el-select>
-          </template>
-          <el-tag v-else type="warning" effect="dark" size="small">机构：{{ userOrg }}</el-tag>
-          <el-dropdown @command="onCommand">
-            <span class="user-box">
-              <el-icon><UserFilled /></el-icon>
-              <span>{{ username }}</span>
-              <el-tag size="small" type="info" effect="plain">{{ roleText }}</el-tag>
-              <el-icon><ArrowDown /></el-icon>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="changePassword">修改口令</el-dropdown-item>
-                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+        <el-badge :value="0" :hidden="true">
+          <button class="header-icon-btn" title="消息通知">
+            <el-icon><Bell /></el-icon>
+          </button>
+        </el-badge>
+        <div class="header-divider"></div>
+        <div class="header-user">
+          <span class="header-user-name">{{ username }}</span>
+          <span class="header-user-role">{{ roleText }}</span>
         </div>
-      </el-header>
-      <el-main class="main">
+        <div class="header-divider"></div>
+        <div class="header-clock">
+          <el-icon><Calendar /></el-icon>
+          <span class="clock-time">{{ currentTime }}</span>
+          <span class="clock-week">{{ currentWeekday }}</span>
+        </div>
+        <div class="header-divider"></div>
+        <el-dropdown trigger="click" @command="onCommand">
+          <button class="header-icon-btn" title="设置">
+            <el-icon><Setting /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="changePassword">
+                <el-icon><Key /></el-icon>修改口令
+              </el-dropdown-item>
+              <el-dropdown-item command="logout" divided>
+                <el-icon><SwitchButton /></el-icon>退出登录
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+    </el-header>
+
+    <!-- 下方：左侧导航 + 主内容 -->
+    <el-container class="app-body">
+      <el-aside :width="sidebarCollapsed ? '64px' : '264px'" class="app-sidebar">
+        <el-scrollbar class="flex-1">
+          <el-menu
+            :collapse="sidebarCollapsed"
+            :collapse-transition="false"
+            :default-active="activeMenu"
+            :default-openeds="openedGroups"
+            background-color="#0a3d6b"
+            text-color="#c8d0e4"
+            active-text-color="#ffffff"
+            router
+            class="app-menu !border-none"
+          >
+            <template v-for="entry in menuTree" :key="entry.key || entry.path">
+              <el-menu-item v-if="entry.type === 'item'" :index="entry.path">
+                <el-icon><component :is="entry.icon" /></el-icon>
+                <span>{{ entry.title }}</span>
+              </el-menu-item>
+              <el-sub-menu v-else :index="entry.key">
+                <template #title>
+                  <el-icon><component :is="entry.icon" /></el-icon>
+                  <span>{{ entry.title }}</span>
+                </template>
+                <el-menu-item v-for="child in entry.children" :key="child.path" :index="child.path">
+                  <el-icon><component :is="child.icon" /></el-icon>
+                  <span>{{ child.title }}</span>
+                </el-menu-item>
+              </el-sub-menu>
+            </template>
+          </el-menu>
+        </el-scrollbar>
+      </el-aside>
+
+      <el-main class="app-main">
         <!-- 切换机构域时按域重建页面组件，当前页数据自动重载 -->
         <router-view :key="`${route.path}@${domainFlag}`" />
       </el-main>
@@ -130,12 +141,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { logout, changePassword, listOrgsCached } from '@/api/system'
+import { logout, changePassword, listOrgsCached, getMyPerms } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
 import { isGlobalUser, userOrgKey, getDomain, setDomain, currentOrg, clearOrgState } from '@/lib/org'
+import { hasPerm, permReady, loadRoleName, savePerms, saveRoleName, clearPerms } from '@/lib/perm'
 import logo from '@/assets/logo.svg'
 
 const route = useRoute()
@@ -146,9 +158,44 @@ const currentTitle = computed(() => route.meta.title || '长沙麓康CA认证中
 const username = computed(() => localStorage.getItem('username') || '')
 // 不做角色缺省回退：role 丢失由守卫按未登录处理（清会话跳登录页）
 const role = computed(() => localStorage.getItem('role') || '')
-const roleText = computed(() =>
-  ({ ADMIN: '系统管理员', OPERATOR: 'CA操作员', APPROVER: '审核员', AUDITOR: '审计员', SECURITY_ADMIN: '安全管理员', KEY_ADMIN: '密钥管理员' })[role.value] || role.value
+// 角色名称以角色配置页维护的档案为准（登录/刷新时落 localStorage），编码仅作兜底
+const roleName = ref(loadRoleName())
+const roleText = computed(() => roleName.value || role.value)
+// 权限版本号：刷新权限后自增，驱动侧栏重算（localStorage 本身非响应式）
+const permVersion = ref(0)
+
+// ========== 侧栏折叠（与 HIS 一致：按钮在顶栏，侧栏收成图标） ==========
+const sidebarCollapsed = ref(false)
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+// 顶栏品牌区宽度与左侧菜单栏对齐（抄 HIS）：
+// 展开 240px + 顶栏 24px 左内边距 = 侧栏 264px，右边缘对齐并带竖线；
+// 折叠时 marginLeft -24px + 宽 64px，右边缘对齐侧栏折叠态 64px。
+const brandStyle = computed(() =>
+  sidebarCollapsed.value
+    ? { width: '64px', marginLeft: '-24px', justifyContent: 'center' }
+    : { width: '240px' }
 )
+
+// ========== 实时时钟 ==========
+const currentTime = ref('')
+const currentWeekday = ref('')
+const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+let clockTimer = null
+
+const updateClock = () => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const mon = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  currentTime.value = `${y}-${mon}-${d} ${hh}:${mm}:${ss}`
+  currentWeekday.value = dayNames[now.getDay()]
+}
 
 // ===== 机构域状态（全局用户=顶栏选择器；机构用户=只读徽标） =====
 const isGlobal = ref(isGlobalUser())
@@ -159,9 +206,37 @@ const orgOptions = ref([])
 const domainFlag = ref(currentOrg())
 
 onMounted(async () => {
+  updateClock()
+  clockTimer = setInterval(updateClock, 1000)
   if (isGlobal.value) {
     orgOptions.value = await listOrgsCached()
   }
+  window.addEventListener('perms-updated', onPermsUpdated)
+  await refreshMyPerms()
+})
+
+/** 角色配置页保存后广播：侧栏与顶栏角色名即时重建，无需重新登录 */
+function onPermsUpdated() {
+  roleName.value = loadRoleName() || role.value
+  permVersion.value++
+}
+
+/** 拉取当前角色与生效权限（角色配置变更后无需重新登录；401 由拦截器统一跳登录） */
+async function refreshMyPerms() {
+  try {
+    const res = await getMyPerms()
+    savePerms(res.data?.perms || [])
+    saveRoleName(res.data?.roleName || '')
+    roleName.value = res.data?.roleName || role.value
+    permVersion.value++
+  } catch (e) {
+    // 角色停用/会话失效由拦截器处理，这里不重复提示
+  }
+}
+
+onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer)
+  window.removeEventListener('perms-updated', onPermsUpdated)
 })
 
 function onDomainChange(v) {
@@ -170,24 +245,42 @@ function onDomainChange(v) {
   ElMessage.success(`已切换到机构域 ${v}`)
 }
 
-// 菜单显隐与 router/index.js 的 meta.roles 保持一致
-const MENU_ROLES = {
-  '/root-ca': ['ADMIN', 'KEY_ADMIN'],
-  '/certs': ['ADMIN', 'OPERATOR'],
-  '/crl': null, // 登录即可
-  '/audit': ['AUDITOR'],
-  '/applications': ['ADMIN', 'OPERATOR', 'APPROVER'],
-  '/templates': ['ADMIN', 'SECURITY_ADMIN'],
-  '/users': ['ADMIN'],
-  '/orgs': ['ADMIN'], // 另限全局用户（模板 v-if isGlobal）
-  '/tsa': null,
-  '/ocsp': null
+// ===== 菜单树：页面属性（标题/图标/角色）单一来源=路由 meta，此处只定义分组 =====
+const GROUP_DEFS = [
+  { key: 'business', title: '证书业务', icon: 'Tickets' },
+  { key: 'trust', title: '信任域管理', icon: 'Connection' },
+  { key: 'system', title: '系统管理', icon: 'Setting' }
+]
+// 默认收起全部二级分组；仅当直达/刷新在组内页面时展开该组，保证激活项可见
+const openedGroups = computed(() => {
+  const cur = router.options.routes.find(r => r.path === '/').children.find(c => '/' + c.path === route.path)
+  const g = cur?.meta?.group
+  return g && g !== 'top' && g !== 'bottom' ? [g] : []
+})
+
+function visibleChild(c) {
+  // 依赖权限版本号：角色配置保存/刷新后侧栏即时重建
+  void permVersion.value
+  // 新会话按权限点过滤（角色配置即时生效）；旧会话（无权限缓存）回退角色 meta
+  if (permReady()) {
+    if (c.meta.perm && !hasPerm(c.meta.perm)) return false
+  } else if (c.meta.roles && !c.meta.roles.includes(role.value)) {
+    return false
+  }
+  if (c.meta.globalOnly && !isGlobal.value) return false
+  return true
 }
-function can(path) {
-  const roles = MENU_ROLES[path]
-  if (!roles) return true
-  return !!role.value && roles.includes(role.value)
-}
+
+const menuTree = computed(() => {
+  const kids = router.options.routes.find(r => r.path === '/').children.filter(visibleChild)
+  const toItem = c => ({ type: 'item', path: '/' + c.path, title: c.meta.title, icon: c.meta.icon })
+  const direct = g => kids.filter(c => c.meta.group === g).map(toItem)
+  const groups = GROUP_DEFS.map(g => {
+    const children = direct(g.key)
+    return children.length ? { type: 'sub', key: g.key, title: g.title, icon: g.icon, children } : null
+  }).filter(Boolean)
+  return [...direct('top'), ...groups, ...direct('bottom')]
+})
 
 // ===== 修改口令 =====
 const pwdVisible = ref(false)
@@ -225,6 +318,7 @@ function clearSession() {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
   localStorage.removeItem('role')
+  clearPerms()
   clearOrgState()
   resetSm2Cache()
 }
@@ -240,7 +334,7 @@ async function onChangePassword() {
     ])
     await changePassword({ oldPassword, newPassword })
     pwdVisible.value = false
-    ElMessage.success('口令修改成功，请使用新口令重新登录')
+    ElMessage.success('口令修改成功，需使用新口令重新登录')
     clearSession()
     router.push('/login')
   } finally {
@@ -268,49 +362,219 @@ async function onCommand(command) {
 </script>
 
 <style scoped>
-.layout {
+.app-shell {
   height: 100%;
 }
-.sidebar {
-  background: #1d2a4a;
-}
-.sidebar :deep(.el-menu) {
-  border-right: none;
-}
-.sidebar :deep(.el-menu-item.is-active) {
-  background: #2d4a7a;
-}
-.header {
+
+/* ---------- 深蓝顶栏（与 HIS 一致） ---------- */
+.app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  height: 64px;
+  padding: 0 24px;
+  background: #0b4f8a;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1), 0 2px 10px rgba(6, 45, 84, 0.16);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-right: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
   background: #fff;
-  border-bottom: 1px solid #e4e7ed;
-  height: 60px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
-.header-title {
-  font-size: 16px;
+
+.brand-name {
+  font-size: 18px;
   font-weight: 600;
-  color: #1d2a4a;
+  color: #fff;
+  letter-spacing: 1px;
+  white-space: nowrap;
 }
+
+.collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.breadcrumb-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+}
+
+.crumb-icon {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.crumb-sep {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.crumb-current {
+  color: #fff;
+  font-weight: 500;
+}
+
 .header-right {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
-.domain-label {
-  font-size: 13px;
-  color: #606266;
-}
-.user-box {
+
+.header-icon-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 18px;
   cursor: pointer;
-  color: #303133;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-.main {
-  background: #f0f2f5;
+
+.header-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.header-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.3);
+  margin: 0 4px;
+}
+
+.header-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
+}
+
+.header-user-name {
+  font-size: 13px;
+  color: #fff;
+  font-weight: 500;
+}
+
+.header-user-role {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.header-clock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.clock-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.clock-week {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.domain-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ---------- 侧栏（菜单区，移除了原品牌块） ---------- */
+.app-body {
+  height: calc(100vh - 64px);
+}
+
+.app-sidebar {
+  background: #0a3d6b;
+  transition: width 0.2s ease;
+}
+
+.app-menu :deep(.el-menu) {
+  border-right: none;
+}
+
+.app-menu :deep(.el-menu-item.is-active) {
+  background: #2d4a7a;
+}
+
+.app-main {
+  background: var(--his-bg);
   padding: 16px;
+}
+
+.app-menu :deep(.el-sub-menu__title) {
+  color: #c8d0e4;
+}
+
+.app-menu :deep(.el-sub-menu .el-menu) {
+  background: #0a3d6b;
+}
+
+.app-menu :deep(.el-sub-menu .el-menu-item) {
+  background: #0a3d6b;
+  min-width: 0;
+}
+
+.app-menu :deep(.el-sub-menu .el-menu-item:hover),
+.app-menu :deep(.el-sub-menu__title:hover) {
+  background: #22314f;
+}
+
+.app-menu :deep(.el-sub-menu .el-menu-item.is-active) {
+  background: #22314f;
+  color: #fff;
+}
+
+.app-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: #fff;
 }
 </style>

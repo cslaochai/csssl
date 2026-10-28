@@ -95,7 +95,7 @@ onMounted(load)
 .section-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1d2a4a;
+  color: var(--his-title);
 }
 .pem-preview {
   font-family: Consolas, Menlo, monospace;

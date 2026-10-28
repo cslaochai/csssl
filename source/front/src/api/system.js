@@ -26,6 +26,10 @@ export function changePassword(data) {
 export function listOrgs() {
   return request.get('/admin/orgs')
 }
+/** 机构分页查询：{pageNo,pageSize,keyword,status}（keyword 命中 标识/名称/主体O） */
+export function pageOrgs(params) {
+  return request.get('/admin/orgs/page', { params })
+}
 export function getOrg(orgKey) {
   return request.get(`/admin/orgs/${orgKey}`)
 }
@@ -125,6 +129,10 @@ export function getOverview() {
 export function getCrlView(orgKey = currentOrg()) {
   return request.get('/admin/crl', { params: { orgKey } })
 }
+/** 吊销记录分页查询：{pageNo,pageSize,keyword,status,reason}（orgKey 由请求层自动注入） */
+export function pageCrlRecords(params) {
+  return request.get('/admin/crl/records', { params })
+}
 export function downloadCrl(orgKey = currentOrg()) {
   return request.get('/admin/crl/download', { params: { orgKey } })
 }
@@ -156,6 +164,28 @@ export function createUser(data) {
 }
 export function updateUser(id, data) {
   return request.post(`/admin/users/${id}`, data)
+}
+
+// ===== 角色配置（GM/T 0034 法定六角色 + 菜单/按钮权限） =====
+/** 角色列表（角色档案 + 账号数/已授权数；账号页角色下拉共用） */
+export function listRoles() {
+  return request.get('/admin/roles')
+}
+/** 当前登录人角色与生效权限（角色配置保存后自刷新） */
+export function getMyPerms() {
+  return request.get('/admin/roles/my-perms')
+}
+/** 角色权限详情：已配置权限点 + 全量目录（allowed=是否在法定边界内） */
+export function getRolePerms(roleCode) {
+  return request.get(`/admin/roles/${roleCode}/perms`)
+}
+/** 更新角色档案（名称/职责/排序/启停；编码不可改） */
+export function updateRole(roleCode, data) {
+  return request.post(`/admin/roles/${roleCode}`, data)
+}
+/** 保存角色权限（菜单+按钮，整表替换；越法定边界服务端拒绝） */
+export function saveRolePerms(roleCode, perms) {
+  return request.post(`/admin/roles/${roleCode}/perms`, { perms })
 }
 
 // ===== 证书模板（GM/T 0034 §5.3.4） =====
