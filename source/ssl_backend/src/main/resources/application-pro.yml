@@ -1,0 +1,23 @@
+# 生产环境：只写「与 dev 取值不同」的项，真值由容器 .env 注入（清单见 docker/.env.example）
+spring:
+  datasource:
+    url: ${SSL_DB_URL:}
+    username: ${SSL_DB_USERNAME:}
+    password: ${SSL_DB_PASSWORD:}
+
+csssl:
+  # 对外公开基础地址：生成证书的 CDP/AIA/OCSP URL 用（各业务系统要能访问到）；localhost 默认值只够本机联调
+  public-base-url: ${SSL_PUBLIC_BASE_URL:http://localhost:8092/ssl}
+  # 私钥加密（SM4）主密钥：生产必须注入（不填则首启随机生成落盘 store-dir/master.key，compose 已挂载 data 目录，重启不丢）
+  key-vault:
+    master-key: ${SSL_MASTER_KEY:}
+  # 私钥下载开关：生产默认关闭，需要时在 .env 显式打开
+  allow-private-key-download: ${SSL_ALLOW_KEY_DOWNLOAD:false}
+  security:
+    sm2:
+      # 登录口令传输加密 SM2 私钥/公钥（16进制）：私钥写死固定值，重启不失效；公钥留空由私钥推导
+      private-key: b11554ae26326e07a066dcaaa622bc77da54926d4cc7e699567af1fd7a438c66
+      public-key: ""
+    jwt:
+      # JWT签名密钥：不注入则 token 签发/校验不可用
+      secret: ${SSL_JWT_SECRET:}
