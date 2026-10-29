@@ -30,9 +30,6 @@ public class CertApplication {
     /** 申请人/机构名称 */
     private String applicantName;
 
-    /** 证件号（个人身份证 / 机构统一社会信用代码） */
-    private String idNo;
-
     /** 证书主体DN（RFC2253） */
     private String subjectDn;
 

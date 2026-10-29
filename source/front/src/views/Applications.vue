@@ -92,9 +92,6 @@
         <el-form-item label="申请人/机构名称" required>
           <el-input v-model="submitForm.applicantName" :placeholder="submitForm.applicantType === 'INSTITUTION' ? '如 医保前置系统/结算经办' : '如 张三'" />
         </el-form-item>
-        <el-form-item :label="submitForm.applicantType === 'INSTITUTION' ? '统一社会信用代码' : '身份证号'" required>
-          <el-input v-model="submitForm.idNo" />
-        </el-form-item>
         <el-form-item label="证书模板" required>
           <el-select v-model="submitForm.templateId" style="width: 100%" placeholder="选择证书模板">
             <el-option v-for="t in templates" :key="t.id" :label="`${t.templateName}（${t.templateCode}）`" :value="t.id" />
@@ -151,7 +148,6 @@
         <el-descriptions-item label="申请单号">{{ detail?.applyNo }}</el-descriptions-item>
         <el-descriptions-item label="申请人类别">{{ detail?.applicantType === 'INSTITUTION' ? '机构' : '个人' }}</el-descriptions-item>
         <el-descriptions-item label="申请人/机构">{{ detail?.applicantName }}</el-descriptions-item>
-        <el-descriptions-item label="证件号">{{ detail?.idNo }}</el-descriptions-item>
         <el-descriptions-item label="主体DN">{{ detail?.subjectDn }}</el-descriptions-item>
         <el-descriptions-item label="SAN">{{ detail?.san || '-' }}</el-descriptions-item>
         <el-descriptions-item label="提交人/时间">{{ detail?.appliedBy }} / {{ detail?.appliedAt }}</el-descriptions-item>
@@ -197,7 +193,7 @@ const detail = ref(null)
 const submitting = ref(false)
 
 const submitForm = reactive({
-  applicantType: 'PERSON', applicantName: '', idNo: '', templateId: null,
+  applicantType: 'PERSON', applicantName: '', templateId: null,
   subjectDn: '', san: '', publicKeyPem: '', description: ''
 })
 
@@ -258,7 +254,7 @@ function handleCurrentChange(val) {
 
 function openSubmit() {
   Object.assign(submitForm, {
-    applicantType: 'PERSON', applicantName: '', idNo: '', templateId: null,
+    applicantType: 'PERSON', applicantName: '', templateId: null,
     subjectDn: '', san: '', publicKeyPem: '', description: ''
   })
   submitCn.value = ''
@@ -273,7 +269,7 @@ async function onSubmit() {
     }
     submitForm.subjectDn = `CN=${submitCn.value.trim()}`
   }
-  if (!submitForm.applicantName.trim() || !submitForm.idNo.trim() || !submitForm.subjectDn.trim() || !submitForm.publicKeyPem.trim() || !submitForm.templateId) {
+  if (!submitForm.applicantName.trim() || !submitForm.subjectDn.trim() || !submitForm.publicKeyPem.trim() || !submitForm.templateId) {
     ElMessage.warning('请完整填写申请信息（含公钥PEM）')
     return
   }

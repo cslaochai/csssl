@@ -100,7 +100,7 @@ public class CertApplicationService {
             throw new IllegalArgumentException("申请人类别仅支持 INSTITUTION-机构 / PERSON-个人");
         }
         String subjectDn = required(body, "subjectDn", "主体DN（如 CN=张三,O=麓康医院,OU=门诊部）");
-        String idNo = required(body, "idNo", applicantType.equals("INSTITUTION") ? "统一社会信用代码" : "身份证号");
+        // 身份核验材料（身份证/营业执照）由受理机构侧留存，平台只收主体与公钥，不落证件号
         String applicantName = required(body, "applicantName", "申请人/机构名称");
         Long templateId = Long.parseLong(required(body, "templateId", "证书模板ID"));
         // 模板可见集校验：受理域仅能引用全局模板或本机构模板
@@ -120,7 +120,6 @@ public class CertApplicationService {
         app.setApplyNo("RA" + APPLY_NO_TS.format(LocalDateTime.now()) + String.format("%04d", RANDOM.nextInt(10000)));
         app.setApplicantType(applicantType);
         app.setApplicantName(applicantName.trim());
-        app.setIdNo(idNo.trim());
         app.setSubjectDn(subjectDn.trim());
         app.setTemplateId(templateId);
         app.setSan(blankToNull(body.get("san")));

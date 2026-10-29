@@ -114,13 +114,12 @@ npm run dev                  # http://localhost:5175
 
 流程（对应 §5.2.2 + §10.1g 录入审核分离）：
 
-1. **提交申请（OPERATOR/ADMIN）**——代录医生/机构材料：
+1. **提交申请（OPERATOR/ADMIN）**——录入机构/个人主体与公钥（身份核验材料由机构侧留存，平台不采集证件号）：
    ```json
    POST /admin/applications
    {
      "applicantType": "PERSON",            // INSTITUTION-机构 / PERSON-个人
      "applicantName": "张三",
-     "idNo": "430102199001011234",         // 机构传统一社会信用代码
      "subjectDn": "CN=张三,O=麓康医院,OU=门诊部",
      "templateId": 2,                      // 用内置 DOCTOR_SIGN 模板
      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----",  // 申请方自持私钥，仅提交公钥
@@ -130,7 +129,7 @@ npm run dev                  # http://localhost:5175
    返回申请单号 `RA20261027...`，状态 PENDING。
 2. **审核（APPROVER/ADMIN，必须 ≠ 提交人）**：
    - 批准：`POST /admin/applications/{id}/approve` `{"comment":"材料核验通过"}`
-   - 驳回：`POST /admin/applications/{id}/reject` `{"comment":"证件号与执业信息不符"}`
+   - 驳回：`POST /admin/applications/{id}/reject` `{"comment":"执业信息与申请材料不符"}`
    - **审核人与提交人同一人 → 403**（违反 §10.1g 分权制衡）。
 3. **签发（OPERATOR/ADMIN）**：`POST /admin/applications/{id}/issue`——复用模板+公钥签发，私钥始终在申请方手中，服务器只落证书；签发后申请单状态 ISSUED 并回填证书ID。
 4. 撤销：`POST /admin/applications/{id}/cancel`（仅 PENDING/APPROVED 可撤）。

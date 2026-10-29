@@ -83,7 +83,6 @@ CREATE TABLE IF NOT EXISTS ssl_cert_application (
     apply_no        VARCHAR(32)  NOT NULL COMMENT '申请单号',
     applicant_type  VARCHAR(16)  NOT NULL COMMENT '申请人类别：INSTITUTION-机构 PERSON-个人',
     applicant_name  VARCHAR(64)  NOT NULL COMMENT '申请人/机构名称',
-    id_no           VARCHAR(32)  NULL COMMENT '证件号（个人身份证/机构统一社会信用代码）',
     subject_dn      VARCHAR(255) NOT NULL COMMENT '证书主体DN（RFC2253，如 CN=张三,O=医院,OU=门诊部）',
     template_id     BIGINT       NOT NULL COMMENT '证书模板ID',
     san             VARCHAR(500) NULL COMMENT 'SAN列表（DNS/IP，逗号分隔）',
