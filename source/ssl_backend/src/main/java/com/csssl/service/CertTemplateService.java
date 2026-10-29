@@ -2,6 +2,8 @@ package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.csssl.dto.TemplateCreateDTO;
+import com.csssl.dto.TemplateUpdateDTO;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.CertTemplate;
 import com.csssl.mapper.CertTemplateMapper;
@@ -12,7 +14,6 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -98,21 +99,21 @@ public class CertTemplateService {
      * tplOrg=模板归属域：机构操作者已由 effectiveOrg 锁本机构；全局操作者传 null=全局模板、
      * 非空=为该机构建模板（机构必须存在）。
      */
-    public CertTemplate create(Map<String, String> body, String operator, String ip,
+    public CertTemplate create(TemplateCreateDTO body, String operator, String ip,
                                String tplOrg, String operatorOrg) {
         if (tplOrg != null && !tplOrg.isBlank()) {
             orgService.get(tplOrg);
         }
         CertTemplate tpl = new CertTemplate();
         tpl.setOrgKey(tplOrg == null || tplOrg.isBlank() ? null : tplOrg);
-        tpl.setTemplateCode(required(body, "templateCode"));
-        tpl.setTemplateName(required(body, "templateName"));
-        tpl.setCertType(validateType(body.get("certType")));
-        tpl.setAlgorithm(validateAlgorithm(body.get("algorithm") == null || body.get("algorithm").isBlank()
-                ? CertUtil.ALG_SM2 : body.get("algorithm").trim().toUpperCase()));
-        tpl.setValidityDays(parseDays(body.get("validityDays")));
-        tpl.setKeyUsage(validateKeyUsage(body.get("keyUsage")));
-        String eku = body.get("extKeyUsage");
+        tpl.setTemplateCode(required(body.getTemplateCode(), "templateCode"));
+        tpl.setTemplateName(required(body.getTemplateName(), "templateName"));
+        tpl.setCertType(validateType(body.getCertType()));
+        tpl.setAlgorithm(validateAlgorithm(body.getAlgorithm() == null || body.getAlgorithm().isBlank()
+                ? CertUtil.ALG_SM2 : body.getAlgorithm().trim().toUpperCase()));
+        tpl.setValidityDays(parseDays(body.getValidityDays()));
+        tpl.setKeyUsage(validateKeyUsage(body.getKeyUsage()));
+        String eku = body.getExtKeyUsage();
         if (eku != null && !eku.isBlank()) {
             // 校验 EKU 合法性（SUB_CA 不应配置 EKU）
             if ("SUB_CA".equals(tpl.getCertType())) {
@@ -121,9 +122,9 @@ public class CertTemplateService {
             CertUtil.ekuPurpose(eku);
             tpl.setExtKeyUsage(eku.trim().toLowerCase());
         }
-        tpl.setPolicyOid(blankToNull(body.get("policyOid")));
+        tpl.setPolicyOid(blankToNull(body.getPolicyOid()));
         tpl.setBuiltin(0);
-        tpl.setDescription(blankToNull(body.get("description")));
+        tpl.setDescription(blankToNull(body.getDescription()));
         tpl.setCreatedAt(LocalDateTime.now());
         if (templateMapper.selectCount(new LambdaQueryWrapper<CertTemplate>()
                 .eq(CertTemplate::getTemplateCode, tpl.getTemplateCode())) > 0) {
@@ -146,7 +147,7 @@ public class CertTemplateService {
      * 数据域：机构操作者（operatorOrg 非空）仅可改本机构模板，全局模板与其他机构模板不可触碰；
      * 全局操作者可改全局模板与各机构模板。
      */
-    public CertTemplate update(Long id, Map<String, String> body, String operator, String ip, String operatorOrg) {
+    public CertTemplate update(Long id, TemplateUpdateDTO body, String operator, String ip, String operatorOrg) {
         CertTemplate tpl = detail(id);
         requireManaged(tpl, operatorOrg);
         // 变更前后快照对比，审计 detail 只记真正变化的关键项
@@ -158,20 +159,20 @@ public class CertTemplateService {
         String oldPolicyOid = tpl.getPolicyOid();
         String oldDescription = tpl.getDescription();
 
-        if (body.containsKey("templateName") && !body.get("templateName").isBlank()) {
-            tpl.setTemplateName(body.get("templateName").trim());
+        if (body.getTemplateName() != null && !body.getTemplateName().isBlank()) {
+            tpl.setTemplateName(body.getTemplateName().trim());
         }
-        if (body.containsKey("algorithm") && !body.get("algorithm").isBlank()) {
-            tpl.setAlgorithm(validateAlgorithm(body.get("algorithm").trim().toUpperCase()));
+        if (body.getAlgorithm() != null && !body.getAlgorithm().isBlank()) {
+            tpl.setAlgorithm(validateAlgorithm(body.getAlgorithm().trim().toUpperCase()));
         }
-        if (body.containsKey("validityDays")) {
-            tpl.setValidityDays(parseDays(body.get("validityDays")));
+        if (body.getValidityDays() != null) {
+            tpl.setValidityDays(parseDays(body.getValidityDays()));
         }
-        if (body.containsKey("keyUsage") && !body.get("keyUsage").isBlank()) {
-            tpl.setKeyUsage(validateKeyUsage(body.get("keyUsage")));
+        if (body.getKeyUsage() != null && !body.getKeyUsage().isBlank()) {
+            tpl.setKeyUsage(validateKeyUsage(body.getKeyUsage()));
         }
-        if (body.containsKey("extKeyUsage")) {
-            String eku = body.get("extKeyUsage");
+        if (body.getExtKeyUsage() != null) {
+            String eku = body.getExtKeyUsage();
             if (eku != null && !eku.isBlank()) {
                 if ("SUB_CA".equals(tpl.getCertType())) {
                     throw new IllegalArgumentException("SUB_CA 模板不应配置 EKU");
@@ -182,11 +183,11 @@ public class CertTemplateService {
                 tpl.setExtKeyUsage(null);
             }
         }
-        if (body.containsKey("policyOid")) {
-            tpl.setPolicyOid(blankToNull(body.get("policyOid")));
+        if (body.getPolicyOid() != null) {
+            tpl.setPolicyOid(blankToNull(body.getPolicyOid()));
         }
-        if (body.containsKey("description")) {
-            tpl.setDescription(blankToNull(body.get("description")));
+        if (body.getDescription() != null) {
+            tpl.setDescription(blankToNull(body.getDescription()));
         }
         templateMapper.updateById(tpl);
         List<String> changes = new ArrayList<>();
@@ -266,16 +267,15 @@ public class CertTemplateService {
         return keyUsage.trim();
     }
 
-    private int parseDays(String v) {
-        int days = v == null || v.isBlank() ? 365 : Integer.parseInt(v.trim());
+    private int parseDays(Integer v) {
+        int days = v == null ? 365 : v;
         if (days <= 0 || days > 36500) {
             throw new IllegalArgumentException("有效期需在 1~36500 天之间");
         }
         return days;
     }
 
-    private String required(Map<String, String> body, String key) {
-        String v = body.get(key);
+    private String required(String v, String key) {
         if (v == null || v.isBlank()) {
             throw new IllegalArgumentException("参数 " + key + " 不能为空");
         }

@@ -1,5 +1,10 @@
 package com.csssl.entity;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -15,6 +20,7 @@ import java.time.LocalDateTime;
 public class SysUser {
 
     @TableId(type = IdType.AUTO)
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
     /** 登录账号 */
@@ -36,6 +42,7 @@ public class SysUser {
     private Integer status;
 
     /** 最近登录时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastLoginTime;
 
     /** 最近登录IP */
@@ -45,11 +52,13 @@ public class SysUser {
     private Integer failedAttempts;
 
     /** 锁定截止时间（NULL=未锁定） */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lockedUntil;
 
     /** 会话版本号：口令/角色/状态变更时+1，JWT 携带比对，旧 token 即刻失效 */
     private Integer tokenVersion;
 
     /** 创建时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;
 }

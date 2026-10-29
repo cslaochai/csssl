@@ -266,7 +266,6 @@ async function refreshMyPerms() {
 
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
-  window.removeEventListener('orgs-updated', refreshOrgOptions)
   window.removeEventListener('perms-updated', onPermsUpdated)
 })
 

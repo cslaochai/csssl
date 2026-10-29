@@ -3,9 +3,9 @@ package com.csssl.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
-import com.csssl.dto.CertVo;
-import com.csssl.dto.CsrIssueRequest;
-import com.csssl.dto.IssueCertRequest;
+import com.csssl.dto.*;
+import com.csssl.vo.CertOverviewVO;
+import com.csssl.vo.CertVO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CertTemplate;
 import com.csssl.mapper.CaCertMapper;
@@ -16,6 +16,7 @@ import com.csssl.service.PermissionService;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -28,8 +29,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 /**
  * 证书管理接口（需登录）：列表/详情/签发/CSR签发/吊销/下载/概览。
@@ -58,45 +57,39 @@ public class CertController {
 
     /** 证书列表（分页 + 类型/状态/关键字/机构筛选；需 操作员/管理员/密钥管理员） */
     @GetMapping("/certs")
-    public Result<Page<CertVo>> page(@RequestParam(defaultValue = "1") long pageNo,
-                                     @RequestParam(defaultValue = "10") long pageSize,
-                                     @RequestParam(required = false) String certType,
-                                     @RequestParam(required = false) String status,
-                                     @RequestParam(required = false) String keyword,
-                                     @RequestParam(required = false) String orgKey,
-                                     HttpServletRequest request) {
+    public Result<Page<CertVO>> page(@Valid CertPageQueryDTODTO query, HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_LIST);
         // 机构用户锁本机构（显式传别机构 403）；全局用户不传=null=跨机构全量只读
-        String scope = RoleCode.readOrgScope(request, orgKey);
+        String scope = RoleCode.readOrgScope(request, query.getOrgKey());
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<>();
         if (scope != null) {
             qw.eq(CaCert::getOrgKey, scope);
         }
-        if (certType != null && !certType.isBlank()) {
-            qw.eq(CaCert::getCertType, certType);
+        if (query.getCertType() != null && !query.getCertType().isBlank()) {
+            qw.eq(CaCert::getCertType, query.getCertType());
         }
-        if (status != null && !status.isBlank()) {
-            qw.eq(CaCert::getStatus, status);
+        if (query.getStatus() != null && !query.getStatus().isBlank()) {
+            qw.eq(CaCert::getStatus, query.getStatus());
         }
-        if (keyword != null && !keyword.isBlank()) {
-            qw.and(w -> w.like(CaCert::getSubjectCn, keyword).or().like(CaCert::getSerialHex, keyword));
+        if (query.getKeyword() != null && !query.getKeyword().isBlank()) {
+            qw.and(w -> w.like(CaCert::getSubjectCn, query.getKeyword()).or().like(CaCert::getSerialHex, query.getKeyword()));
         }
         qw.orderByDesc(CaCert::getCreatedAt);
-        Page<CaCert> page = certMapper.selectPage(new Page<>(pageNo, pageSize), qw);
-        return Result.success("查询成功", (Page<CertVo>) page.convert(CertVo::from));
+        Page<CaCert> page = certMapper.selectPage(new Page<>(query.getPageNo(), query.getPageSize()), qw);
+        return Result.success("查询成功", (Page<CertVO>) page.convert(CertVO::from));
     }
 
     /** 证书详情（机构用户仅本机构证书行，越域 403；全局用户跨机构只读放行） */
     @GetMapping("/certs/{id}")
-    public Result<CertVo> detail(@PathVariable Long id, HttpServletRequest request) {
+    public Result<CertVO> detail(@PathVariable Long id, HttpServletRequest request) {
         CaCert row = certService.findById(id);
         RoleCode.requireRowVisible(request, row.getOrgKey());
-        return Result.success("查询成功", CertVo.from(row));
+        return Result.success("查询成功", CertVO.from(row));
     }
 
     /** 在线签发（内部生成密钥对，私钥落盘；需 CA操作员/系统管理员，SUB_CA 仅系统管理员） */
     @PostMapping("/certs")
-    public Result<CertVo> issue(@RequestBody IssueCertRequest req,
+    public Result<CertVO> issue(@RequestBody IssueCertRequestDTO req,
                                 @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_ISSUE);
@@ -108,7 +101,7 @@ public class CertController {
 
     /** CSR 签发（主体与公钥取自 CSR；需 CA操作员/系统管理员，SUB_CA 仅系统管理员） */
     @PostMapping("/certs/csr")
-    public Result<CertVo> issueFromCsr(@RequestBody CsrIssueRequest req,
+    public Result<CertVO> issueFromCsr(@RequestBody CsrIssueRequestDTO req,
                                        @RequestParam(required = false) String orgKey,
                                        HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_ISSUE);
@@ -122,7 +115,7 @@ public class CertController {
 
     /** 公钥签发（RA 场景）：申请方自持私钥，仅提交 Subject DN + 公钥 PEM（需 CA操作员/系统管理员，SUB_CA 仅系统管理员） */
     @PostMapping("/certs/public-key")
-    public Result<CertVo> issueWithPublicKey(@RequestBody com.csssl.dto.PublicKeyIssueRequest req,
+    public Result<CertVO> issueWithPublicKey(@RequestBody PublicKeyIssueDTO req,
                                              @RequestParam(required = false) String orgKey,
                                              HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_ISSUE);
@@ -134,31 +127,31 @@ public class CertController {
 
     /** 吊销证书（需 CA操作员/系统管理员；写操作必须落在操作者域，跨机构 403） */
     @PostMapping("/certs/{id}/revoke")
-    public Result<CertVo> revoke(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+    public Result<CertVO> revoke(@PathVariable Long id, @Valid @RequestBody(required = false) CertRevokeDTO body,
                                  @RequestParam(required = false) String orgKey,
                                  HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_REVOKE);
         requireWriteScope(id, orgKey, request);
         String username = RoleCode.currentUser(request);
-        String reason = body == null ? null : body.get("reason");
+        String reason = body == null ? null : body.getReason();
         return Result.success("吊销成功", certService.revoke(id, reason, username, clientIp(request)));
     }
 
     /** 挂起证书（GM/T 0034 §12.6：暂停使用，CRL certificateHold / OCSP on-hold；需操作员/管理员；域内写） */
     @PostMapping("/certs/{id}/suspend")
-    public Result<CertVo> suspend(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+    public Result<CertVO> suspend(@PathVariable Long id, @Valid @RequestBody(required = false) CertRevokeDTO body,
                                   @RequestParam(required = false) String orgKey,
                                   HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_SUSPEND);
         requireWriteScope(id, orgKey, request);
         String username = RoleCode.currentUser(request);
-        String reason = body == null ? null : body.get("reason");
+        String reason = body == null ? null : body.getReason();
         return Result.success("已挂起（可解除）", certService.suspend(id, reason, username, clientIp(request)));
     }
 
     /** 解除挂起（GM/T 0034 §12.7：恢复有效；需操作员/管理员；域内写） */
     @PostMapping("/certs/{id}/unsuspend")
-    public Result<CertVo> unsuspend(@PathVariable Long id,
+    public Result<CertVO> unsuspend(@PathVariable Long id,
                                     @RequestParam(required = false) String orgKey,
                                     HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_SUSPEND);
@@ -169,26 +162,24 @@ public class CertController {
 
     /** 证书更新（§12.2：原证吊销 + 同公钥重签延长有效期；需操作员/管理员；机构版签发入口） */
     @PostMapping("/certs/{id}/renew")
-    public Result<CertVo> renew(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+    public Result<CertVO> renew(@PathVariable Long id, @Valid @RequestBody(required = false) CertRenewDTO body,
                                 @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_RENEW);
         String org = requireWriteScope(id, orgKey, request);
-        Integer days = body == null || body.get("validityDays") == null
-                ? null : Integer.valueOf(body.get("validityDays"));
+        Integer days = body == null ? null : body.getValidityDays();
         return Result.success("证书已更新（原证书吊销 SUPERSEDED）",
                 certService.renew(org, id, days, RoleCode.currentUser(request), clientIp(request)));
     }
 
     /** 密钥更新 rekey（§12.2：新密钥对重签，原证吊销；仅限CA侧持有私钥的证书；需操作员/管理员；机构版入口） */
     @PostMapping("/certs/{id}/rekey")
-    public Result<CertVo> rekey(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+    public Result<CertVO> rekey(@PathVariable Long id, @Valid @RequestBody(required = false) CertRenewDTO body,
                                 @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_REKEY);
         String org = requireWriteScope(id, orgKey, request);
-        Integer days = body == null || body.get("validityDays") == null
-                ? null : Integer.valueOf(body.get("validityDays"));
+        Integer days = body == null ? null : body.getValidityDays();
         return Result.success("密钥已更新（新证书签发，原证书吊销）",
                 certService.rekey(org, id, days, RoleCode.currentUser(request), clientIp(request)));
     }
@@ -224,12 +215,12 @@ public class CertController {
      */
     @PostMapping("/certs/{id}/export/p12")
     public ResponseEntity<byte[]> exportP12(@PathVariable Long id,
-                                            @RequestBody(required = false) Map<String, String> body,
+                                            @Valid @RequestBody(required = false) CertExportP12DTO body,
                                             HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CERT_EXPORT);
         CaCert row = certService.findById(id);
         RoleCode.requireRowVisible(request, row.getOrgKey());
-        String password = body == null ? null : body.get("password");
+        String password = body == null ? null : body.getPassword();
         byte[] p12 = certService.exportP12(id, password);
         String username = RoleCode.currentUser(request);
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
@@ -243,8 +234,8 @@ public class CertController {
 
     /** 概览统计（仪表盘；按当前机构域过滤，机构用户锁本机构） */
     @GetMapping("/overview")
-    public Result<Map<String, Object>> overview(@RequestParam(required = false) String orgKey,
-                                                HttpServletRequest request) {
+    public Result<CertOverviewVO> overview(@RequestParam(required = false) String orgKey,
+                                           HttpServletRequest request) {
         return Result.success("查询成功", certService.overview(RoleCode.effectiveOrg(request, orgKey)));
     }
 

@@ -2,8 +2,9 @@ package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.csssl.dto.PublicKeyIssueRequest;
-import com.csssl.dto.CertVo;
+import com.csssl.dto.ApplicationSubmitDTO;
+import com.csssl.dto.PublicKeyIssueDTO;
+import com.csssl.vo.CertVO;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.CertTemplate;
@@ -94,21 +95,21 @@ public class CertApplicationService {
     }
 
     /** 提交申请（录入员代录：医生/机构提供材料，操作员录入系统）；org=控制器按 effectiveOrg 归一后的受理域 */
-    public CertApplication submit(Map<String, String> body, String username, String ip, String org) {
-        String applicantType = body.get("applicantType");
+    public CertApplication submit(ApplicationSubmitDTO body, String username, String ip, String org) {
+        String applicantType = body.getApplicantType();
         if (!"INSTITUTION".equals(applicantType) && !"PERSON".equals(applicantType)) {
             throw new IllegalArgumentException("申请人类别仅支持 INSTITUTION-机构 / PERSON-个人");
         }
-        String subjectDn = required(body, "subjectDn", "主体DN（如 CN=张三,O=麓康医院,OU=门诊部）");
+        String subjectDn = required(body.getSubjectDn(), "subjectDn", "主体DN（如 CN=张三,O=麓康医院,OU=门诊部）");
         // 身份核验材料（身份证/营业执照）由受理机构侧留存，平台只收主体与公钥，不落证件号
-        String applicantName = required(body, "applicantName", "申请人/机构名称");
-        Long templateId = Long.parseLong(required(body, "templateId", "证书模板ID"));
+        String applicantName = required(body.getApplicantName(), "applicantName", "申请人/机构名称");
+        Long templateId = body.getTemplateId();
         // 模板可见集校验：受理域仅能引用全局模板或本机构模板
         CertTemplate tpl = templateService.detailVisible(templateId, org);
         if ("SUB_CA".equals(tpl.getCertType())) {
             throw new IllegalArgumentException("SUB_CA 证书不走 RA 申请流程，请由系统管理员直接签发");
         }
-        String publicKeyPem = body.get("publicKeyPem");
+        String publicKeyPem = body.getPublicKeyPem();
         if (publicKeyPem == null || publicKeyPem.isBlank()) {
             throw new IllegalArgumentException("公钥PEM不能为空（申请方自持私钥，仅提交公钥；私钥不出服务器更合规）");
         }
@@ -122,9 +123,9 @@ public class CertApplicationService {
         app.setApplicantName(applicantName.trim());
         app.setSubjectDn(subjectDn.trim());
         app.setTemplateId(templateId);
-        app.setSan(blankToNull(body.get("san")));
+        app.setSan(blankToNull(body.getSan()));
         app.setPublicKeyPem(publicKeyPem.trim());
-        app.setDescription(blankToNull(body.get("description")));
+        app.setDescription(blankToNull(body.getDescription()));
         app.setStatus(ST_PENDING);
         app.setAppliedBy(username);
         app.setAppliedAt(LocalDateTime.now());
@@ -183,7 +184,7 @@ public class CertApplicationService {
      * 落到申请单受理机构根域。
      */
     @Transactional(rollbackFor = Exception.class)
-    public CertVo issue(Long id, String username, String ip, String effOrg) {
+    public CertVO issue(Long id, String username, String ip, String effOrg) {
         CertApplication app = applicationMapper.selectForUpdate(id);
         if (app == null) {
             throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
@@ -192,7 +193,7 @@ public class CertApplicationService {
         if (!ST_APPROVED.equals(app.getStatus())) {
             throw new IllegalArgumentException("仅「已批准」状态的申请单可签发（当前状态：" + app.getStatus() + "）");
         }
-        PublicKeyIssueRequest req = new PublicKeyIssueRequest();
+        PublicKeyIssueDTO req = new PublicKeyIssueDTO();
         req.setSubjectDn(app.getSubjectDn());
         req.setPublicKeyPem(app.getPublicKeyPem());
         req.setTemplateId(app.getTemplateId());
@@ -201,7 +202,7 @@ public class CertApplicationService {
         // 签发一律按快照执行，不重查可变模板最新值；存量单无快照时回退现查模板（模板须仍存在）
         CertService.IssuePolicy policy = parseSnapshot(app);
         // 机构版正式入口：落到申请单受理机构根域（requireOrgMatch 已保证 effOrg==申请单域）
-        CertVo vo = certService.issueWithPublicKey(effOrg, req, policy, username, ip);
+        CertVO vo = certService.issueWithPublicKey(effOrg, req, policy, username, ip);
 
         app.setStatus(ST_ISSUED);
         app.setIssuedCertId(Long.valueOf(vo.getId()));
@@ -343,8 +344,7 @@ public class CertApplicationService {
         return node.hasNonNull(field) ? node.get(field).asText() : null;
     }
 
-    private String required(Map<String, String> body, String key, String label) {
-        String v = body.get(key);
+    private String required(String v, String key, String label) {
         if (v == null || v.isBlank()) {
             throw new IllegalArgumentException("参数 " + key + " 不能为空（" + label + "）");
         }

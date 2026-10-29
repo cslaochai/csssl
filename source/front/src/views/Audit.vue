@@ -25,7 +25,6 @@
     <!-- 表格卡 -->
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-        <el-table-column prop="id" label="ID" width="70" class-name="cell-mono" />
         <el-table-column prop="username" label="操作人" width="130" />
         <el-table-column label="机构" width="110">
           <template #default="{ row }">
@@ -40,8 +39,9 @@
         <el-table-column prop="detail" label="详情" min-width="220" show-overflow-tooltip />
         <el-table-column prop="ip" label="来源IP" width="140" />
         <el-table-column prop="createdAt" label="时间" width="170" />
-        <el-table-column align="right" label="防篡改" width="150" fixed="right">
+        <el-table-column align="right" label="操作" width="200" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
             <el-button v-perm="'audit:verify'" link type="primary" size="small" @click="onVerify(row)">验签</el-button>
             <el-tag v-if="row.sign" size="small" type="success">已签名</el-tag>
             <el-tag v-else size="small" type="info">无签名</el-tag>
@@ -61,6 +61,32 @@
         />
       </div>
     </el-card>
+
+    <!-- 审计详情（行点击） -->
+    <el-dialog v-model="detailVisible" title="审计记录详情" width="640px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="时间">{{ detail?.createdAt }}</el-descriptions-item>
+        <el-descriptions-item label="操作人">{{ detail?.username }}</el-descriptions-item>
+        <el-descriptions-item label="机构">{{ detail?.orgKey || '全局' }}</el-descriptions-item>
+        <el-descriptions-item label="操作类型">{{ detail ? actionText(detail.action) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="对象">{{ detail?.target || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="来源IP">{{ detail?.ip || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="详情">
+          <div class="mono-wrap">{{ detail?.detail || '-' }}</div>
+        </el-descriptions-item>
+        <el-descriptions-item label="防篡改签名">
+          <el-tag v-if="detail?.sign" size="small" type="success">已签名</el-tag>
+          <el-tag v-else size="small" type="info">无签名</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="哈希链上一条">{{ detail?.prevId || '（首条）' }}</el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button v-perm="'audit:verify'" type="primary" plain @click="onVerifyFromDetail">验签</el-button>
+          <el-button @click="detailVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="verifyVisible" title="审计验签（GM/T 0034 §10.1/§10.5 防篡改校验）" width="640px">
       <el-result v-if="verify?.valid" icon="success" title="签名有效" sub-title="记录未被篡改，由审计签名密钥签发，哈希链指向的记录签名一致" />
@@ -168,6 +194,8 @@ const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE })
 const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 const verifyVisible = ref(false)
 const verify = ref(null)
+const detailVisible = ref(false)
+const detail = ref(null)
 const exporting = ref(false)
 const exportVisible = ref(false)
 const exportSign = ref('')
@@ -220,6 +248,17 @@ const actions = [
 
 function actionText(a) {
   return actions.find(i => i.value === a)?.label || a
+}
+
+function onRowDetail(row) {
+  detail.value = row
+  detailVisible.value = true
+}
+
+function onVerifyFromDetail() {
+  const id = detail.value?.id
+  detailVisible.value = false
+  if (id) onVerify({ id })
 }
 
 async function onVerify(row) {

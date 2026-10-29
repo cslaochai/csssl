@@ -43,7 +43,6 @@
         <!-- 表格卡 -->
         <el-card class="table-card" shadow="never">
           <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-            <el-table-column prop="id" label="ID" width="70" class-name="cell-mono" />
             <el-table-column prop="subjectCn" label="主体CN" min-width="180" show-overflow-tooltip />
             <el-table-column label="类型" width="90">
               <template #default="{ row }">{{ row.certType }}</template>
@@ -58,6 +57,11 @@
               <template #default="{ row }">{{ reasonText(row.revokeReason) }}</template>
             </el-table-column>
             <el-table-column prop="revokedAt" label="吊销时间" width="170" />
+            <el-table-column align="right" label="操作" width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
+              </template>
+            </el-table-column>
           </el-table>
           <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的吊销记录</div>
           <div ref="footerRef" class="list-footer">
@@ -124,6 +128,19 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 吊销记录详情（行点击） -->
+    <el-dialog v-model="detailVisible" title="吊销记录详情" width="560px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="序列号"><span class="mono-wrap">{{ detail?.serialHex }}</span></el-descriptions-item>
+        <el-descriptions-item label="主体CN">{{ detail?.subjectCn }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{ detail?.certType }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ detail?.status === 'REVOKED' ? '已吊销' : '已挂起' }}</el-descriptions-item>
+        <el-descriptions-item label="吊销原因">{{ detail ? reasonText(detail.revokeReason) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="吊销时间">{{ detail?.revokedAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="用途说明">{{ detail?.description || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-dialog>
   </div>
 </template>
 
@@ -148,6 +165,8 @@ const total = ref(0)
 const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, status: '', reason: '', keyword: '' })
 const crlPem = ref('')
 const meta = ref({})
+const detailVisible = ref(false)
+const detail = ref(null)
 
 // 两卡式列表页：表格只设最大高度，超高内部滚动
 const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
@@ -171,6 +190,11 @@ const reasonMap = {
 
 function reasonText(r) {
   return reasonMap[r] || r || '未指定'
+}
+
+function onRowDetail(row) {
+  detail.value = row
+  detailVisible.value = true
 }
 
 async function loadRecords() {
@@ -302,5 +326,10 @@ onMounted(() => {
   font-size: 15px;
   font-weight: 600;
   color: var(--his-title);
+}
+.mono-wrap {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
 }
 </style>

@@ -3,7 +3,8 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
-import com.csssl.dto.CaStatusVo;
+import com.csssl.vo.CaStatusVO;
+import com.csssl.vo.RootSharesVO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaOrg;
 import com.csssl.mapper.CaCertMapper;
@@ -490,19 +491,26 @@ public class CaService implements ApplicationRunner {
     }
 
     /** 份额状态（兼容入口=default 机构） */
-    public Map<String, Object> shareState() {
+    public RootSharesVO shareState() {
         return shareState(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构份额状态（管理端展示：5 份各自存在性 + 阈值） */
-    public Map<String, Object> shareState(String orgKey) {
+    public RootSharesVO shareState(String orgKey) {
         KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
-        List<Map<String, Object>> shares = new ArrayList<>();
+        List<RootSharesVO.ShareItem> shares = new ArrayList<>();
         for (int i = 1; i <= SHARE_TOTAL; i++) {
-            shares.add(Map.of("index", i, "exists", Files.exists(shareFile(orgKey, i))));
+            RootSharesVO.ShareItem item = new RootSharesVO.ShareItem();
+            item.setIndex(i);
+            item.setExists(Files.exists(shareFile(orgKey, i)));
+            shares.add(item);
         }
-        return Map.of("generated", doSharesExist(orgKey), "total", SHARE_TOTAL,
-                "threshold", SHARE_THRESHOLD, "shares", shares);
+        RootSharesVO vo = new RootSharesVO();
+        vo.setGenerated(doSharesExist(orgKey));
+        vo.setTotal(SHARE_TOTAL);
+        vo.setThreshold(SHARE_THRESHOLD);
+        vo.setShares(shares);
+        return vo;
     }
 
     /** 根私钥门限化（兼容入口=default 机构） */
@@ -558,12 +566,12 @@ public class CaService implements ApplicationRunner {
     }
 
     /** 旧环境迁移（兼容入口=default 机构） */
-    public Map<String, Object> migrateRootShares() {
+    public RootSharesVO migrateRootShares() {
         return migrateRootShares(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构迁移：把已存在的 SM4 加密根私钥转为门限份额（显式调用，避免误删生产密钥） */
-    public Map<String, Object> migrateRootShares(String orgKey) {
+    public RootSharesVO migrateRootShares(String orgKey) {
         OrgCaState st = stateOf(orgKey);
         KeyVault ov = vaultFor(orgKey);
         synchronized (st.lock) {
@@ -640,7 +648,7 @@ public class CaService implements ApplicationRunner {
     }
 
     /** 管理端主动初始化（兼容入口=default 机构） */
-    public CaStatusVo initRoot() {
+    public CaStatusVO initRoot() {
         return initRoot(CaOrg.PRIMARY_ORG_KEY);
     }
 
@@ -648,7 +656,7 @@ public class CaService implements ApplicationRunner {
      * 机构根CA初始化：已就绪则原样返回；根私钥丢失则吊销旧根并重建（连带吊销旧SUB_CA）。
      * default 域保持存量 CN/算法配置；新机构按注册表 algorithm/subject_o 生成独立根。
      */
-    public CaStatusVo initRoot(String orgKey) {
+    public CaStatusVO initRoot(String orgKey) {
         OrgCaState st = stateOf(orgKey);
         KeyVault ov = vaultFor(orgKey);
         synchronized (st.lock) {
@@ -672,7 +680,7 @@ public class CaService implements ApplicationRunner {
             doEnsureSubCa(orgKey, ov, st);
             // 新根自动切换为 Shamir(3,5) 门限分持（删单点加密文件）
             doEnsureRootShares(orgKey, ov, st);
-            CaStatusVo vo = doStatus(orgKey, ov);
+            CaStatusVO vo = doStatus(orgKey, ov);
             vo.setMessage("根CA已重建：" + created.getSubjectCn() + "（序列号 " + created.getSerialHex() + "），已签发新SUB_CA，根私钥已切换为 Shamir(3,5) 门限分持（请尽快导存 5 份份额）");
             return vo;
         }
@@ -959,17 +967,17 @@ public class CaService implements ApplicationRunner {
     // ==================== 状态/导出/签发密钥存取 ====================
 
     /** 根CA状态（兼容入口=default 机构） */
-    public CaStatusVo status() {
+    public CaStatusVO status() {
         return status(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构根CA状态（不抛异常，返回未初始化原因供页面展示；含 SUB_CA 与根密钥封存状态） */
-    public CaStatusVo status(String orgKey) {
+    public CaStatusVO status(String orgKey) {
         return doStatus(orgKey, vaultFor(orgKey));
     }
 
-    private CaStatusVo doStatus(String orgKey, KeyVault ov) {
-        CaStatusVo vo = new CaStatusVo();
+    private CaStatusVO doStatus(String orgKey, KeyVault ov) {
+        CaStatusVO vo = new CaStatusVO();
         CaCert root = doFindRoot(orgKey);
         if (root == null) {
             vo.setInitialized(false);
@@ -996,7 +1004,7 @@ public class CaService implements ApplicationRunner {
         }
         CaCert sub = doCurrentSubCa(orgKey);
         if (sub != null) {
-            CaStatusVo.SubCaStatus subVo = new CaStatusVo.SubCaStatus();
+            CaStatusVO.SubCaStatus subVo = new CaStatusVO.SubCaStatus();
             subVo.setCn(sub.getSubjectCn());
             subVo.setSerialHex(sub.getSerialHex());
             subVo.setAlgorithm(sub.getAlgorithm());

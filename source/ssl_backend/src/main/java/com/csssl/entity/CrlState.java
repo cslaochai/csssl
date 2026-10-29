@@ -1,5 +1,10 @@
 package com.csssl.entity;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -20,6 +25,7 @@ public class CrlState {
     public static final long SINGLE_ROW_ID = 1L;
 
     @TableId(type = IdType.INPUT)
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
     /** 所属机构（每机构独立 CRL 发布状态行：编号单调与判重指纹均 per-org） */
@@ -32,14 +38,17 @@ public class CrlState {
     private String fingerprint;
 
     /** 上次发布时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime thisUpdate;
 
     /** 下次强制更新时间（进入续期窗口由定时任务主动续发） */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime nextUpdate;
 
     /** 增量 CRL 指向的基础全量编号 */
     private Long deltaBaseNumber;
 
     /** 行更新时间（DDL ON UPDATE CURRENT_TIMESTAMP 维护，代码侧只读） */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime updatedAt;
 }

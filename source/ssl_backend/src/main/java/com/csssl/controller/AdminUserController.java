@@ -4,6 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
+import com.csssl.dto.UserCreateDTO;
+import com.csssl.dto.UserPageQueryDTO;
+import com.csssl.dto.UserUpdateDTO;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
@@ -17,19 +20,18 @@ import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import cn.hutool.crypto.digest.BCrypt;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 管理用户与角色（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡）。
@@ -61,23 +63,19 @@ public class AdminUserController {
 
     /** 用户列表（分页 + 角色/机构筛选；机构用户强制本机构，全局用户 orgKey 缺省=跨机构总览只读） */
     @GetMapping
-    public Result<Page<SysUser>> page(@RequestParam(defaultValue = "1") long pageNo,
-                                      @RequestParam(defaultValue = "10") long pageSize,
-                                      @RequestParam(required = false) String roleCode,
-                                      @RequestParam(required = false) String orgKey,
-                                      HttpServletRequest request) {
+    public Result<Page<SysUser>> page(@Valid UserPageQueryDTO query, HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.USER_LIST);
         // readOrgScope：机构用户锁本机构（传别机构 403）；全局用户不传=null=全部（唯一跨机构读口）
-        String scope = RoleCode.readOrgScope(request, orgKey);
+        String scope = RoleCode.readOrgScope(request, query.getOrgKey());
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
-        if (roleCode != null && !roleCode.isBlank()) {
-            qw.eq(SysUser::getRoleCode, roleCode);
+        if (query.getRoleCode() != null && !query.getRoleCode().isBlank()) {
+            qw.eq(SysUser::getRoleCode, query.getRoleCode());
         }
         if (scope != null) {
             qw.eq(SysUser::getOrgKey, scope);
         }
         qw.orderByAsc(SysUser::getId);
-        Page<SysUser> page = userMapper.selectPage(new Page<>(pageNo, pageSize), qw);
+        Page<SysUser> page = userMapper.selectPage(new Page<>(query.getPageNo(), query.getPageSize()), qw);
         page.getRecords().forEach(u -> u.setPassword(null));
         return Result.success("查询成功", page);
     }
@@ -88,9 +86,9 @@ public class AdminUserController {
      * 不可建 ADMIN（机构主由全局 ADMIN 任命）、不可建全局用户；越域 403。
      */
     @PostMapping
-    public Result<SysUser> create(@RequestBody Map<String, String> body, HttpServletRequest request) {
+    public Result<SysUser> create(@Valid @RequestBody UserCreateDTO body, HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.USER_CREATE);
-        String username = body.get("username");
+        String username = body.getUsername();
         if (username == null || username.isBlank()) {
             throw new IllegalArgumentException("账号不能为空");
         }
@@ -98,15 +96,15 @@ public class AdminUserController {
                 .eq(SysUser::getUsername, username.trim())) > 0) {
             throw new IllegalArgumentException("账号已存在：" + username);
         }
-        String role = body.get("roleCode") == null || body.get("roleCode").isBlank()
-                ? RoleCode.OPERATOR : body.get("roleCode").trim().toUpperCase();
+        String role = body.getRoleCode() == null || body.getRoleCode().isBlank()
+                ? RoleCode.OPERATOR : body.getRoleCode().trim().toUpperCase();
         if (!isSupportedRole(role)) {
             throw new IllegalArgumentException("不支持的角色：" + role
                     + "（仅支持 ADMIN / OPERATOR / APPROVER / AUDITOR / SECURITY_ADMIN / KEY_ADMIN）");
         }
         requireAssignableRole(role);
         String myOrg = RoleCode.currentOrg(request);
-        String reqOrg = blankToNull(body.get("orgKey"));
+        String reqOrg = blankToNull(body.getOrgKey());
         String targetOrg;
         if (myOrg != null) {
             // 机构 ADMIN：一律落本机构；请求 orgKey 与本人机构不一致=越域 403；不可任命机构主（ADMIN）
@@ -121,13 +119,13 @@ public class AdminUserController {
                 orgService.get(targetOrg);
             }
         }
-        String password = body.get("password");
+        String password = body.getPassword();
         AuthService.checkPasswordComplexity(password);
         SysUser user = new SysUser();
         user.setUsername(username.trim());
         user.setPassword(BCrypt.hashpw(password, BCrypt.gensalt()));
-        user.setRealName(body.get("realName") == null || body.get("realName").isBlank()
-                ? username.trim() : body.get("realName").trim());
+        user.setRealName(body.getRealName() == null || body.getRealName().isBlank()
+                ? username.trim() : body.getRealName().trim());
         user.setRoleCode(role);
         user.setOrgKey(targetOrg);
         user.setStatus(1);
@@ -149,7 +147,7 @@ public class AdminUserController {
      * 机构 ADMIN 不可把角色改为 ADMIN（机构主任命权保留在全局 ADMIN）。
      */
     @PostMapping("/{id}")
-    public Result<SysUser> update(@PathVariable Long id, @RequestBody Map<String, String> body,
+    public Result<SysUser> update(@PathVariable Long id, @Valid @RequestBody UserUpdateDTO body,
                                   HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.USER_UPDATE);
         SysUser user = userMapper.selectById(id);
@@ -165,7 +163,7 @@ public class AdminUserController {
             if (targetOrg == null || !myOrg.equals(targetOrg)) {
                 throw new SecurityException("权限不足：不能操作其他机构或全局账号");
             }
-            String newRole = blankToNull(body.get("roleCode"));
+            String newRole = blankToNull(body.getRoleCode());
             if (newRole != null && RoleCode.ADMIN.equals(newRole.trim().toUpperCase())) {
                 throw new SecurityException("权限不足：机构管理员不可任命/变更为 ADMIN 角色（机构主由全局 ADMIN 任命）");
             }
@@ -176,8 +174,8 @@ public class AdminUserController {
         boolean touched = false;
         // 会话吊销标记：角色/状态/口令任一变化都要 token_version+1
         boolean revoke = false;
-        if (body.containsKey("realName") && body.get("realName") != null && !body.get("realName").isBlank()) {
-            String realName = body.get("realName").trim();
+        if (body.getRealName() != null && !body.getRealName().isBlank()) {
+            String realName = body.getRealName().trim();
             if (!realName.equals(user.getRealName())) {
                 changes.add("姓名：" + user.getRealName() + "→" + realName);
             }
@@ -185,8 +183,8 @@ public class AdminUserController {
             user.setRealName(realName);
             touched = true;
         }
-        if (body.containsKey("roleCode") && !isBlank(body.get("roleCode"))) {
-            String role = body.get("roleCode").trim().toUpperCase();
+        if (body.getRoleCode() != null && !isBlank(body.getRoleCode())) {
+            String role = body.getRoleCode().trim().toUpperCase();
             if (!isSupportedRole(role)) {
                 throw new IllegalArgumentException("不支持的角色：" + role);
             }
@@ -199,8 +197,8 @@ public class AdminUserController {
             user.setRoleCode(role);
             touched = true;
         }
-        if (body.containsKey("status")) {
-            int status = "0".equals(body.get("status")) || "false".equalsIgnoreCase(body.get("status")) ? 0 : 1;
+        if (body.getStatus() != null) {
+            int status = "0".equals(body.getStatus()) || "false".equalsIgnoreCase(body.getStatus()) ? 0 : 1;
             if (user.getStatus() == null || user.getStatus() != status) {
                 changes.add("状态：" + user.getStatus() + "→" + status + "（" + (status == 1 ? "启用" : "停用") + "）");
                 revoke = true;
@@ -209,11 +207,11 @@ public class AdminUserController {
             user.setStatus(status);
             touched = true;
         }
-        boolean resetPassword = body.containsKey("password") && !isBlank(body.get("password"));
+        boolean resetPassword = body.getPassword() != null && !isBlank(body.getPassword());
         if (resetPassword) {
             // 重置口令按同一复杂度校验；顺带解锁，避免管理员重置后仍被锁定挡住
-            AuthService.checkPasswordComplexity(body.get("password"));
-            uw.set(SysUser::getPassword, BCrypt.hashpw(body.get("password"), BCrypt.gensalt()))
+            AuthService.checkPasswordComplexity(body.getPassword());
+            uw.set(SysUser::getPassword, BCrypt.hashpw(body.getPassword(), BCrypt.gensalt()))
                     .set(SysUser::getFailedAttempts, 0)
                     .set(SysUser::getLockedUntil, null);
             revoke = true;

@@ -146,13 +146,16 @@
     <el-dialog v-model="detailVisible" title="申请单详情" width="560px">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="申请单号">{{ detail?.applyNo }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
         <el-descriptions-item label="申请人类别">{{ detail?.applicantType === 'INSTITUTION' ? '机构' : '个人' }}</el-descriptions-item>
         <el-descriptions-item label="申请人/机构">{{ detail?.applicantName }}</el-descriptions-item>
+        <el-descriptions-item label="证书模板">{{ detail ? templateName(detail.templateId) : '' }}</el-descriptions-item>
         <el-descriptions-item label="主体DN">{{ detail?.subjectDn }}</el-descriptions-item>
         <el-descriptions-item label="SAN">{{ detail?.san || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="用途说明">{{ detail?.description || '-' }}</el-descriptions-item>
         <el-descriptions-item label="提交人/时间">{{ detail?.appliedBy }} / {{ detail?.appliedAt }}</el-descriptions-item>
-        <el-descriptions-item label="审核人/意见">{{ detail?.reviewedBy || '-' }} {{ detail?.reviewComment ? '：' + detail.reviewComment : '' }}</el-descriptions-item>
-        <el-descriptions-item label="签发证书ID">{{ detail?.issuedCertId || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="审核人/时间">{{ detail?.reviewedBy || '-' }} / {{ detail?.reviewedAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="审核意见">{{ detail?.reviewComment || '-' }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
   </div>

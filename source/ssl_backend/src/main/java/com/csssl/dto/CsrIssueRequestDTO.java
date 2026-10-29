@@ -6,7 +6,7 @@ import lombok.Data;
  * CSR 签发请求：上传 PKCS#10 证书请求，主体与公钥取自 CSR。
  */
 @Data
-public class CsrIssueRequest {
+public class CsrIssueRequestDTO {
 
     /** PKCS#10 证书请求 PEM（BEGIN CERTIFICATE REQUEST） */
     private String csrPem;

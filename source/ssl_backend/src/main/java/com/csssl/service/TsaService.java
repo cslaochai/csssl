@@ -1,5 +1,6 @@
 package com.csssl.service;
 
+import com.csssl.vo.TsaPublicKeyVO;
 import com.csssl.util.CertUtil;
 import com.csssl.util.KeyVault;
 import com.csssl.util.PemUtil;
@@ -18,7 +19,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
-import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -144,14 +144,15 @@ public class TsaService {
     }
 
     /** 供管理端/探针展示 TSA 状态 */
-    public Map<String, String> status() {
+    public TsaPublicKeyVO status() {
         ensureKey();
-        return Map.of(
-                "algorithm", TSA_ALGORITHM,
-                "signAlgo", TSA_SIGN_ALGO,
-                "publicKeyPem", cachedPublicPem,
-                "fingerprint", publicKeyFingerprint(),
-                "note", "CSSSL 院内可信时间戳：SM3withSM2 令牌，私钥 SM4 加密落盘");
+        TsaPublicKeyVO vo = new TsaPublicKeyVO();
+        vo.setAlgorithm(TSA_ALGORITHM);
+        vo.setSignAlgo(TSA_SIGN_ALGO);
+        vo.setPublicKeyPem(cachedPublicPem);
+        vo.setFingerprint(publicKeyFingerprint());
+        vo.setNote("CSSSL 院内可信时间戳：SM3withSM2 令牌，私钥 SM4 加密落盘");
+        return vo;
     }
 
     /** 审计留痕（盖章动作） */

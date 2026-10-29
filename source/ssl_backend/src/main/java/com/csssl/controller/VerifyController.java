@@ -1,8 +1,8 @@
 package com.csssl.controller;
 
 import com.csssl.common.Result;
-import com.csssl.dto.VerifyRequest;
-import com.csssl.dto.VerifyResult;
+import com.csssl.dto.VerifyQueryDTO;
+import com.csssl.vo.VerifyResultVO;
 import com.csssl.service.CaService;
 import com.csssl.service.CrlService;
 import com.csssl.service.OcspService;
@@ -57,7 +57,7 @@ public class VerifyController {
 
     /** 证书链在线校验（TLS/SIGN 用途可选） */
     @PostMapping("/verify")
-    public Result<VerifyResult> verify(@RequestBody VerifyRequest req) {
+    public Result<VerifyResultVO> verify(@RequestBody VerifyQueryDTO req) {
         return Result.success("校验完成", verifyService.verify(req));
     }
 
@@ -108,7 +108,7 @@ public class VerifyController {
 
     /** 机构域证书链在线校验（沿该机构根链验证） */
     @PostMapping("/{orgKey}/verify")
-    public Result<VerifyResult> orgVerify(@PathVariable String orgKey, @RequestBody VerifyRequest req) {
+    public Result<VerifyResultVO> orgVerify(@PathVariable String orgKey, @RequestBody VerifyQueryDTO req) {
         requireOrgExists(orgKey);
         return Result.success("校验完成", verifyService.verify(req, orgKey));
     }

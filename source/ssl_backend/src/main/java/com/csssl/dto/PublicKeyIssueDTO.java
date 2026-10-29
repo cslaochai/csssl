@@ -6,7 +6,7 @@ import lombok.Data;
  * 公钥签发请求（RA 场景）：申请方自持私钥，仅提交 Subject DN 与公钥 PEM。
  */
 @Data
-public class PublicKeyIssueRequest {
+public class PublicKeyIssueDTO {
 
     /** RFC2253 格式主体 DN，如 "CN=张三,O=长沙市麓康医院,OU=门诊部" */
     private String subjectDn;

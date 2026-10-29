@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
-import com.csssl.dto.CertVo;
+import com.csssl.vo.CertVO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.CrlState;
@@ -99,7 +99,7 @@ public class CrlService {
      * 吊销记录分页查询（管理页）：口径与 {@link #revokedList(String)} 一致
      * （本域 REVOKED/FROZEN、排除 ROOT/SUB_CA），另支持 关键字（CN/序列号）/状态/吊销原因 过滤。
      */
-    public Page<CertVo> recordsPage(String orgKey, String keyword, String status, String reason,
+    public Page<CertVO> recordsPage(String orgKey, String keyword, String status, String reason,
                                     long pageNo, long pageSize) {
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getOrgKey, orgKey)
@@ -116,7 +116,7 @@ public class CrlService {
             qw.and(w -> w.like(CaCert::getSubjectCn, kw).or().like(CaCert::getSerialHex, kw));
         }
         qw.orderByDesc(CaCert::getRevokedAt);
-        return (Page<CertVo>) certMapper.selectPage(new Page<>(pageNo, pageSize), qw).convert(CertVo::from);
+        return (Page<CertVO>) certMapper.selectPage(new Page<>(pageNo, pageSize), qw).convert(CertVO::from);
     }
 
     /**

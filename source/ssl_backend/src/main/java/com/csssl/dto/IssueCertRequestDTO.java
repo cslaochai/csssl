@@ -6,7 +6,7 @@ import lombok.Data;
  * 证书签发请求（管理后台在线签发，内部生成密钥对）。
  */
 @Data
-public class IssueCertRequest {
+public class IssueCertRequestDTO {
 
     /** 主体CN（必填，颁发给哪个子系统/主机/服务） */
     private String subjectCn;

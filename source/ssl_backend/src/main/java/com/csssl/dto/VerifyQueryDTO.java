@@ -6,7 +6,7 @@ import lombok.Data;
  * 证书链在线校验请求（业务系统调 /ca/public/verify 用）。
  */
 @Data
-public class VerifyRequest {
+public class VerifyQueryDTO {
 
     /** 待校验证书 PEM */
     private String certPem;

@@ -1,5 +1,10 @@
 package com.csssl.entity;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -16,6 +21,7 @@ import java.time.LocalDateTime;
 public class CertApplication {
 
     @TableId(type = IdType.AUTO)
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
     /** 受理机构（签发落到该机构根域）；default=院内默认域 */
@@ -34,6 +40,7 @@ public class CertApplication {
     private String subjectDn;
 
     /** 证书模板ID */
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long templateId;
 
     /** 批准时固化的模板策略JSON（算法/有效期/KeyUsage/EKU/策略OID），签发按快照执行 */
@@ -55,20 +62,24 @@ public class CertApplication {
     private String appliedBy;
 
     /** 提交时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime appliedAt;
 
     /** 审核人 */
     private String reviewedBy;
 
     /** 审核时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime reviewedAt;
 
     /** 审核意见 */
     private String reviewComment;
 
     /** 签发证书ID */
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long issuedCertId;
 
     /** 创建时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;
 }

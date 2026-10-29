@@ -30,7 +30,7 @@
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
         <el-table-column prop="templateCode" label="编码" class-name="cell-mono" width="130">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.builtin === 1 ? 'warning' : ''">{{ row.templateCode }}</el-tag>
+            <el-tag size="small" :type="row.builtin === 1 ? 'warning' : 'info'">{{ row.templateCode }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="templateName" label="名称" min-width="140" />
@@ -53,8 +53,9 @@
         <el-table-column label="内置" width="70">
           <template #default="{ row }">{{ row.builtin === 1 ? '是' : '否' }}</template>
         </el-table-column>
-        <el-table-column align="right" label="操作" width="140" fixed="right">
+        <el-table-column align="right" label="操作" width="180" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
             <el-button v-perm="'template:update'" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button v-perm="'template:delete'" link type="danger" size="small" :disabled="row.builtin === 1" @click="onDelete(row)">删除</el-button>
           </template>
@@ -137,6 +138,24 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 模板详情（行点击） -->
+    <el-dialog v-model="detailVisible" :title="`模板详情：${detail?.templateName || ''}`" width="560px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="编码">{{ detail?.templateCode }}</el-descriptions-item>
+        <el-descriptions-item label="名称">{{ detail?.templateName }}</el-descriptions-item>
+        <el-descriptions-item label="归属">{{ detail?.orgKey || '全局模板' }}</el-descriptions-item>
+        <el-descriptions-item label="证书类型">{{ detail ? typeText(detail.certType) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="算法">{{ detail?.algorithm }}</el-descriptions-item>
+        <el-descriptions-item label="有效期(天)">{{ detail?.validityDays }}</el-descriptions-item>
+        <el-descriptions-item label="KeyUsage">{{ detail?.keyUsage || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="EKU">{{ detail?.extKeyUsage || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="策略OID">{{ detail?.policyOid || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="内置模板">{{ detail?.builtin === 1 ? '是' : '否' }}</el-descriptions-item>
+        <el-descriptions-item label="说明">{{ detail?.description || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-dialog>
   </div>
 </template>
 
@@ -162,6 +181,8 @@ const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
+const detailVisible = ref(false)
+const detail = ref(null)
 const form = reactive({
   id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2',
   validityDays: 365, keyUsageList: [], extKeyUsage: '', policyOid: '', description: '', orgScope: 'GLOBAL'
@@ -169,6 +190,11 @@ const form = reactive({
 
 function typeText(t) {
   return { SERVER: '服务端', CLIENT: '客户端', SUB_CA: '二级CA' }[t] || t
+}
+
+function onRowDetail(row) {
+  detail.value = row
+  detailVisible.value = true
 }
 
 function fillForm(row) {

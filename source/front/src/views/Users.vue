@@ -15,7 +15,7 @@
             </el-select>
           </el-form-item>
           <el-form-item v-if="isGlobal" label="机构域">
-            <el-select v-model="query.orgKey" placeholder="全部" clearable style="width: 170px" @change="handleSearch">
+            <el-select v-model="query.orgKey" placeholder="全部" clearable style="width: 170px" @change="handleSearch">
               <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
             </el-select>
           </el-form-item>
@@ -33,7 +33,6 @@
     <!-- 表格卡 -->
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-        <el-table-column prop="id" label="ID" width="60" class-name="cell-mono" />
         <el-table-column prop="username" label="账号" min-width="130" class-name="cell-mono" />
         <el-table-column prop="realName" label="姓名" min-width="130" />
         <el-table-column label="角色" width="110">
@@ -53,8 +52,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="lastLoginTime" label="最近登录" width="170" />
-        <el-table-column align="right" label="操作" width="220" fixed="right">
+        <el-table-column align="right" label="操作" width="260" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
             <el-button v-perm="'user:update'" link type="primary" size="small" :disabled="row.username === 'admin'" @click="openEdit(row)">编辑</el-button>
             <el-button
               v-perm="'user:update'"
@@ -112,7 +112,7 @@
         <el-form-item v-if="!editing" label="归属机构">
           <template v-if="isGlobal">
             <el-select v-model="form.orgKey" style="width: 100%">
-              <el-option label="全局账号（跨机构，不限定域）" value="" />
+              <el-option label="全局账号（跨机构，不限定域）" value="" />
               <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
             </el-select>
             <div class="org-tip">机构账号仅能操作本机构数据；全局账号由后端按角色+机构策略管控。</div>
@@ -129,6 +129,22 @@
           <el-button type="primary" :loading="submitting" @click="onSave">保存</el-button>
         </div>
       </template>
+    </el-dialog>
+
+    <!-- 账号详情（行点击） -->
+    <el-dialog v-model="detailVisible" :title="`账号详情：${detail?.username || ''}`" width="520px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="账号">{{ detail?.username }}</el-descriptions-item>
+        <el-descriptions-item label="姓名">{{ detail?.realName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="角色">{{ detail ? roleText(detail.roleCode) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="归属机构">{{ detail?.orgKey || '全局（跨机构）' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ detail?.status === 1 ? '启用' : '禁用' }}</el-descriptions-item>
+        <el-descriptions-item label="最近登录">{{ detail?.lastLoginTime || '从未登录' }}</el-descriptions-item>
+        <el-descriptions-item label="最近登录IP">{{ detail?.lastLoginIp || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="连续失败次数">{{ detail?.failedAttempts ?? 0 }}</el-descriptions-item>
+        <el-descriptions-item label="锁定至">{{ detail?.lockedUntil || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
+      </el-descriptions>
     </el-dialog>
   </div>
 </template>
@@ -172,13 +188,22 @@ const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
+const detailVisible = ref(false)
+const detail = ref(null)
 const form = reactive({ id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, orgKey: '' })
+
+function onRowDetail(row) {
+  detail.value = row
+  detailVisible.value = true
+}
 
 function roleText(r) {
   return roleMap.value[r]?.roleName || r
 }
+// 角色 → el-tag 颜色；OPERATOR 给一个真实存在的类型（success），未知角色兜底为 info，
+// 绝不能返回空串，否则 el-tag 的 type prop 校验会告警 "got value \"\""
 function roleTag(r) {
-  return { ADMIN: 'danger', OPERATOR: '', APPROVER: 'warning', AUDITOR: 'info', SECURITY_ADMIN: 'primary', KEY_ADMIN: 'warning' }[r] || ''
+  return { ADMIN: 'danger', OPERATOR: 'success', APPROVER: 'warning', AUDITOR: 'info', SECURITY_ADMIN: 'primary', KEY_ADMIN: 'warning' }[r] || 'info'
 }
 
 async function load() {

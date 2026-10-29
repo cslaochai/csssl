@@ -2,6 +2,11 @@ package com.csssl.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
+import com.csssl.dto.OrgUpsertDTO;
+import com.csssl.vo.OrgCreateVO;
+import com.csssl.vo.OrgDetailVO;
+import com.csssl.dto.OrgPageQueryDTODTO;
+import com.csssl.vo.OrgVO;
 import com.csssl.entity.CaOrg;
 import com.csssl.service.AuditService;
 import com.csssl.service.OrgService;
@@ -9,17 +14,16 @@ import com.csssl.service.PermissionService;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 机构域管理接口（需登录）：机构列表/详情、开机构（登记即建独立根CA）、暂停/恢复/关闭。
@@ -36,48 +40,40 @@ public class OrgController {
 
     /** 机构列表（附各机构根状态：有无根/SUB_CA 有效期/密钥形态 ONLINE/SEALED/SHARES） */
     @GetMapping
-    public Result<List<Map<String, Object>>> list() {
+    public Result<List<OrgVO>> list() {
         return Result.success("查询成功", orgService.overview());
     }
 
     /** 机构分页查询（管理页：keyword 命中 标识/名称/主体O；status 精确） */
     @GetMapping("/page")
-    public Result<Page<Map<String, Object>>> page(@RequestParam(defaultValue = "1") long pageNo,
-                                                  @RequestParam(defaultValue = "10") long pageSize,
-                                                  @RequestParam(required = false) String keyword,
-                                                  @RequestParam(required = false) String status) {
-        return Result.success("查询成功", orgService.page(keyword, status, pageNo, pageSize));
+    public Result<Page<OrgVO>> page(@Valid OrgPageQueryDTODTO query) {
+        return Result.success("查询成功", orgService.page(query.getKeyword(), query.getStatus(),
+                query.getPageNo(), query.getPageSize()));
     }
 
     /** 机构详情（含根CA状态与门限份额状态） */
     @GetMapping("/{orgKey}")
-    public Result<Map<String, Object>> detail(@PathVariable String orgKey) {
+    public Result<OrgDetailVO> detail(@PathVariable String orgKey) {
         CaOrg org = orgService.get(orgKey);
-        Map<String, Object> row = new java.util.LinkedHashMap<>();
-        row.put("orgKey", org.getOrgKey());
-        row.put("orgName", org.getOrgName());
-        row.put("subjectO", org.getSubjectO());
-        row.put("algorithm", org.getAlgorithm());
-        row.put("status", org.getStatus());
-        row.put("contact", org.getContact());
-        row.put("description", org.getDescription());
-        row.put("createdAt", org.getCreatedAt());
-        row.put("rootStatus", orgService.overviewOf(org.getOrgKey()));
-        return Result.success("查询成功", row);
+        OrgDetailVO vo = OrgDetailVO.from(org);
+        vo.setRootStatus(orgService.overviewOf(org.getOrgKey()));
+        return Result.success("查询成功", vo);
     }
 
     /** 新建机构（仅 ADMIN）：登记后立即为该机构生成独立根CA+SUB_CA+Shamir(3,5) 门限份额 */
     @PostMapping
-    public Result<Map<String, Object>> create(@RequestBody Map<String, String> body, HttpServletRequest request) {
+    public Result<OrgCreateVO> create(@Valid @RequestBody OrgUpsertDTO body, HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.ORG_CREATE);
         String username = RoleCode.currentUser(request);
-        CaOrg org = orgService.create(body.get("orgKey"), body.get("orgName"), body.get("subjectO"),
-                body.get("algorithm"), body.get("contact"), body.get("description"));
+        CaOrg org = orgService.create(body.getOrgKey(), body.getOrgName(), body.getSubjectO(),
+                body.getAlgorithm(), body.getContact(), body.getDescription());
         auditService.record(username, "ORG_CREATE", org.getOrgKey(),
                 "新建机构 " + org.getOrgName() + "（主体O=" + org.getSubjectO() + "，算法=" + org.getAlgorithm()
                         + "），已初始化独立根CA与SUB_CA", clientIp(request));
-        return Result.success("机构已创建并完成独立根CA初始化（请尽快导存 5 份门限份额）",
-                Map.of("orgKey", org.getOrgKey(), "rootStatus", orgService.overviewOf(org.getOrgKey())));
+        OrgCreateVO vo = new OrgCreateVO();
+        vo.setOrgKey(org.getOrgKey());
+        vo.setRootStatus(orgService.overviewOf(org.getOrgKey()));
+        return Result.success("机构已创建并完成独立根CA初始化（请尽快导存 5 份门限份额）", vo);
     }
 
     /** 暂停机构（仅 ADMIN；停止对外签发由后续波次在签发链路 enforce，本波落状态） */

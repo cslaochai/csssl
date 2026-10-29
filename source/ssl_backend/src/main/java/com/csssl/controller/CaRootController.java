@@ -1,7 +1,10 @@
 package com.csssl.controller;
 
 import com.csssl.common.Result;
-import com.csssl.dto.CaStatusVo;
+import com.csssl.vo.CaStatusVO;
+import com.csssl.vo.RootShareVO;
+import com.csssl.vo.RootSharesVO;
+import com.csssl.dto.ShareUnsealDTO;
 import com.csssl.entity.CaOrg;
 import com.csssl.service.AuditService;
 import com.csssl.service.CaService;
@@ -10,6 +13,7 @@ import com.csssl.service.PermissionService;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,7 +24,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 根CA管理接口（需登录）：状态查询、初始化、根密钥封存/解封、Shamir(3,5) 门限分持、证书导出。
@@ -44,7 +47,7 @@ public class CaRootController {
 
     /** 根CA状态（含 SUB_CA 与根密钥封存/门限状态）；机构用户锁本机构 */
     @GetMapping("/status")
-    public Result<CaStatusVo> status(@RequestParam(required = false) String orgKey,
+    public Result<CaStatusVO> status(@RequestParam(required = false) String orgKey,
                                      HttpServletRequest request) {
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForRead(org);
@@ -53,13 +56,13 @@ public class CaRootController {
 
     /** 初始化根CA（幂等：已存在则原样返回；私钥丢失则吊销旧根并重建；系统管理员/密钥管理员） */
     @PostMapping("/init")
-    public Result<CaStatusVo> init(@RequestParam(required = false) String orgKey,
+    public Result<CaStatusVO> init(@RequestParam(required = false) String orgKey,
                                    HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CA_INIT);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
         String username = RoleCode.currentUser(request);
-        CaStatusVo vo = caService.initRoot(org);
+        CaStatusVO vo = caService.initRoot(org);
         auditService.record(username, "CA_INIT", tag(org, null),
                 "初始化根CA[" + org + "]：" + vo.getCn() + "（序列号 " + vo.getSerialHex() + "）",
                 clientIp(request), org);
@@ -68,7 +71,7 @@ public class CaRootController {
 
     /** 封存根私钥（离线化/清除门限解封缓存）：日常签发由 SUB_CA 承担；系统管理员/密钥管理员 */
     @PostMapping("/seal")
-    public Result<CaStatusVo> seal(@RequestParam(required = false) String orgKey,
+    public Result<CaStatusVO> seal(@RequestParam(required = false) String orgKey,
                                    HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CA_SEAL);
         String org = RoleCode.effectiveOrg(request, orgKey);
@@ -77,13 +80,13 @@ public class CaRootController {
         caService.sealRootKey(org);
         auditService.record(username, "CA_SEAL", tag(org, null),
                 "封存根CA私钥（离线化）[" + org + "]", clientIp(request), org);
-        CaStatusVo vo = caService.status(org);
+        CaStatusVO vo = caService.status(org);
         return Result.success("根CA私钥已封存离线，日常签发由 SUB_CA 承担", vo);
     }
 
     /** 解封根私钥（旧模式恢复在线态；门限分持态请走份额解封接口；系统管理员/密钥管理员） */
     @PostMapping("/unseal")
-    public Result<CaStatusVo> unseal(@RequestParam(required = false) String orgKey,
+    public Result<CaStatusVO> unseal(@RequestParam(required = false) String orgKey,
                                      HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CA_UNSEAL);
         String org = RoleCode.effectiveOrg(request, orgKey);
@@ -99,8 +102,8 @@ public class CaRootController {
 
     /** 门限份额状态（5 份各自存在性 + 阈值）；机构用户锁本机构 */
     @GetMapping("/shares")
-    public Result<Map<String, Object>> shares(@RequestParam(required = false) String orgKey,
-                                              HttpServletRequest request) {
+    public Result<RootSharesVO> shares(@RequestParam(required = false) String orgKey,
+                                       HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CA_SHARE_VIEW);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForRead(org);
@@ -112,13 +115,13 @@ public class CaRootController {
      * 新根已自动门限化；旧环境（已封存/在线）显式调用本接口迁移。
      */
     @PostMapping("/shares/migrate")
-    public Result<Map<String, Object>> migrateShares(@RequestParam(required = false) String orgKey,
-                                                     HttpServletRequest request) {
+    public Result<RootSharesVO> migrateShares(@RequestParam(required = false) String orgKey,
+                                              HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CA_SHARE_MIGRATE);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
         String username = RoleCode.currentUser(request);
-        Map<String, Object> state = caService.migrateRootShares(org);
+        RootSharesVO state = caService.migrateRootShares(org);
         auditService.record(username, "CA_SHARE_GENERATE", tag(org, "ROOT"),
                 "根私钥切换为 Shamir(3,5) 门限分持[" + org + "]（5 份份额落盘，原始加密文件已删除）",
                 clientIp(request), org);
@@ -127,9 +130,9 @@ public class CaRootController {
 
     /** 下载单份门限份额（JSON 文本，供密钥管理员离线保管；建议 5 份分人分管） */
     @GetMapping("/shares/{index}")
-    public Result<Map<String, Object>> downloadShare(@PathVariable int index,
-                                                     @RequestParam(required = false) String orgKey,
-                                                     HttpServletRequest request) {
+    public Result<RootShareVO> downloadShare(@PathVariable int index,
+                                             @RequestParam(required = false) String orgKey,
+                                             HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CA_SHARE_DOWNLOAD);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForRead(org);
@@ -140,25 +143,23 @@ public class CaRootController {
         String username = RoleCode.currentUser(request);
         auditService.record(username, "CA_SHARE_DOWNLOAD", tag(org, "SHARE-" + index),
                 "导出机构[" + org + "]第 " + index + " 份根密钥门限份额（请离线保管）", clientIp(request), org);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> share;
         try {
-            share = new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
+            RootShareVO share = new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, RootShareVO.class);
+            return Result.success("第 " + index + " 份份额", share);
         } catch (java.io.IOException e) {
             throw new IllegalStateException("份额文件解析失败: " + e.getMessage(), e);
         }
-        return Result.success("第 " + index + " 份份额", share);
     }
 
     /** 份额解封：提交任意 3 份门限份额重组根私钥（仅内存，用后请封存清除） */
     @PostMapping("/unseal-shares")
-    public Result<CaStatusVo> unsealShares(@RequestParam(required = false) String orgKey,
-                                           @RequestBody Map<String, List<String>> body,
+    public Result<CaStatusVO> unsealShares(@RequestParam(required = false) String orgKey,
+                                           @Valid @RequestBody ShareUnsealDTO body,
                                            HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.CA_SHARE_UNSEAL);
         String org = RoleCode.effectiveOrg(request, orgKey);
         checkOrgForWrite(org);
-        List<String> shares = body == null ? null : body.get("shares");
+        List<String> shares = body.getShares();
         String username = RoleCode.currentUser(request);
         caService.unsealRootKeyWithShares(org, shares);
         auditService.record(username, "CA_UNSEAL_SHARES", tag(org, "ROOT"),

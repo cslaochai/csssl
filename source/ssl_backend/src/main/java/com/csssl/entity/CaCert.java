@@ -1,5 +1,10 @@
 package com.csssl.entity;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -15,56 +20,96 @@ import java.time.LocalDateTime;
 public class CaCert {
 
     @TableId(type = IdType.AUTO)
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 所属机构（独立根CA域）；default=院内默认域（存量单根） */
+    /**
+     * 所属机构（独立根CA域）；default=院内默认域（存量单根）
+     */
     private String orgKey;
 
-    /** 证书序列号（16进制，唯一） */
+    /**
+     * 证书序列号（16进制，唯一）
+     */
     private String serialHex;
 
-    /** 主体CN（颁发给谁） */
+    /**
+     * 主体CN（颁发给谁）
+     */
     private String subjectCn;
 
-    /** 证书类型：ROOT-根CA SUB_CA-二级CA SERVER-服务端 CLIENT-客户端 */
+    /**
+     * 证书类型：ROOT-根CA SUB_CA-二级CA SERVER-服务端 CLIENT-客户端
+     */
     private String certType;
 
-    /** 算法：RSA2048 / SM2 */
+    /**
+     * 算法：RSA2048 / SM2
+     */
     private String algorithm;
 
-    /** 签发者CN */
+    /**
+     * 签发者CN
+     */
     private String issuerCn;
 
-    /** SAN列表（DNS/IP，逗号分隔） */
+    /**
+     * SAN列表（DNS/IP，逗号分隔）
+     */
     private String san;
 
-    /** 生效时间 */
+    /**
+     * 生效时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime validFrom;
 
-    /** 过期时间 */
+    /**
+     * 过期时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime validTo;
 
-    /** 状态：VALID-有效 REVOKED-已吊销 EXPIRED-已过期 */
+    /**
+     * 状态：VALID-有效 REVOKED-已吊销 EXPIRED-已过期
+     */
     private String status;
 
-    /** 吊销原因 */
+    /**
+     * 吊销原因
+     */
     private String revokeReason;
 
-    /** 吊销时间 */
+    /**
+     * 吊销时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime revokedAt;
 
-    /** 证书PEM（公钥证书，可入库） */
+    /**
+     * 证书PEM（公钥证书，可入库）
+     */
     private String certPem;
 
-    /** 用途说明 */
+    /**
+     * 用途说明
+     */
     private String description;
 
-    /** 签发所用证书模板ID（GM/T 0034 §5.3.4，可空=直签未走模板） */
+    /**
+     * 签发所用证书模板ID（GM/T 0034 §5.3.4，可空=直签未走模板）
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long templateId;
 
-    /** 创建人 */
+    /**
+     * 创建人
+     */
     private String createdBy;
 
-    /** 创建时间 */
+    /**
+     * 创建时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;
 }

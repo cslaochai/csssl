@@ -2,22 +2,23 @@ package com.csssl.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
+import com.csssl.dto.TemplateCreateDTO;
+import com.csssl.dto.TemplatePageQueryDTO;
+import com.csssl.dto.TemplateUpdateDTO;
 import com.csssl.entity.CertTemplate;
 import com.csssl.service.CertTemplateService;
 import com.csssl.service.PermissionService;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 /**
  * 证书模板接口（GM/T 0034 §5.3.4）：查询需登录，增删改仅安全管理员/系统管理员
@@ -38,13 +39,10 @@ public class CertTemplateController {
 
     /** 模板列表（分页 + 关键字；机构用户=全局+本机构可见集，全局用户 orgKey 缺省=全量总览） */
     @GetMapping
-    public Result<Page<CertTemplate>> page(@RequestParam(defaultValue = "1") long pageNo,
-                                           @RequestParam(defaultValue = "10") long pageSize,
-                                           @RequestParam(required = false) String keyword,
-                                           @RequestParam(required = false) String orgKey,
+    public Result<Page<CertTemplate>> page(@Valid TemplatePageQueryDTO query,
                                            HttpServletRequest request) {
-        return Result.success("查询成功", templateService.page(pageNo, pageSize, keyword,
-                RoleCode.readOrgScope(request, orgKey)));
+        return Result.success("查询成功", templateService.page(query.getPageNo(), query.getPageSize(), query.getKeyword(),
+                RoleCode.readOrgScope(request, query.getOrgKey())));
     }
 
     /** 模板详情（按可见集过滤：机构用户访问他机构模板按不存在处理） */
@@ -58,10 +56,10 @@ public class CertTemplateController {
      * 全局操作者：body.orgKey 空=建全局模板，非空=为指定机构建模板；机构操作者：锁本机构，越域 403。
      */
     @PostMapping
-    public Result<CertTemplate> create(@RequestBody Map<String, String> body, HttpServletRequest request) {
+    public Result<CertTemplate> create(@Valid @RequestBody TemplateCreateDTO body, HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.TEMPLATE_CREATE);
         String myOrg = RoleCode.currentOrg(request);
-        String reqOrg = body.get("orgKey");
+        String reqOrg = body.getOrgKey();
         String tplOrg = myOrg != null && !myOrg.isBlank()
                 ? RoleCode.effectiveOrg(request, reqOrg)
                 : (reqOrg == null || reqOrg.isBlank() ? null : reqOrg.trim());
@@ -71,7 +69,7 @@ public class CertTemplateController {
 
     /** 更新模板（仅安全管理员/系统管理员；变更落审计；机构操作者仅限本机构模板） */
     @PostMapping("/{id}")
-    public Result<CertTemplate> update(@PathVariable Long id, @RequestBody Map<String, String> body,
+    public Result<CertTemplate> update(@PathVariable Long id, @Valid @RequestBody TemplateUpdateDTO body,
                                        HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.TEMPLATE_UPDATE);
         return Result.success("模板更新成功",

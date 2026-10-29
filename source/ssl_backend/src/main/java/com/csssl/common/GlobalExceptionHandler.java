@@ -16,6 +16,18 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /** DTO 校验注解不通过（@Valid）：取第一条字段错误回显，与 IllegalArgumentException 同为 400 */
+    @ExceptionHandler(org.springframework.validation.BindException.class)
+    public ResponseEntity<Result<Void>> handleBind(org.springframework.validation.BindException e) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .findFirst()
+                .map(org.springframework.validation.FieldError::getDefaultMessage)
+                .orElse("入参校验不通过");
+        log.warn("[参数错误] {}", message);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(HttpStatus.BAD_REQUEST.value(), message));
+    }
+
     /** 参数校验/业务规则不满足（面向入参，消息本身即校验口径，可回显） */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Result<Void>> handleIllegalArgument(IllegalArgumentException e) {

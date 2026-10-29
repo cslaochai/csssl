@@ -1,8 +1,8 @@
 package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.csssl.dto.VerifyRequest;
-import com.csssl.dto.VerifyResult;
+import com.csssl.dto.VerifyQueryDTO;
+import com.csssl.vo.VerifyResultVO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaOrg;
 import com.csssl.mapper.CaCertMapper;
@@ -38,19 +38,19 @@ public class VerifyService {
     private final CaService caService;
 
     /** 校验（兼容入口=default 机构域） */
-    public VerifyResult verify(VerifyRequest req) {
+    public VerifyResultVO verify(VerifyQueryDTO req) {
         return verify(req, CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 校验（机构域版）：沿该机构 根CA ← SUB_CA ← 叶子 链验证 */
-    public VerifyResult verify(VerifyRequest req, String orgKey) {
+    public VerifyResultVO verify(VerifyQueryDTO req, String orgKey) {
         if (req.getCertPem() == null || req.getCertPem().isBlank()) {
             throw new IllegalArgumentException("待校验证书PEM不能为空");
         }
         X509Certificate cert = PemUtil.parseCert(req.getCertPem());
         X509Certificate root = caService.loadRootCert(orgKey);
 
-        VerifyResult r = new VerifyResult();
+        VerifyResultVO r = new VerifyResultVO();
         r.setSerialHex(cert.getSerialNumber().toString(16));
         r.setSubjectCn(CertUtil.subjectCn(cert));
         r.setIssuerCn(cert.getIssuerX500Principal().getName());
@@ -126,7 +126,7 @@ public class VerifyService {
     }
 
     /** 验签：证书由签发者公钥签名（SM3withSM2 / SHA256withRSA 由 BC provider 处理） */
-    private boolean verifySignedBy(X509Certificate cert, X509Certificate issuer, VerifyResult r, String issuerLabel) {
+    private boolean verifySignedBy(X509Certificate cert, X509Certificate issuer, VerifyResultVO r, String issuerLabel) {
         try {
             cert.verify(issuer.getPublicKey(), "BC");
             return true;
@@ -181,7 +181,7 @@ public class VerifyService {
         return set;
     }
 
-    private static void fail(VerifyResult r, String message) {
+    private static void fail(VerifyResultVO r, String message) {
         r.setValid(false);
         r.setMessage(message);
     }

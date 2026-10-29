@@ -4,7 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
-import com.csssl.dto.CaStatusVo;
+import com.csssl.vo.CaStatusVO;
+import com.csssl.vo.OrgVO;
 import com.csssl.entity.CaOrg;
 import com.csssl.mapper.CaOrgMapper;
 import com.csssl.util.CertUtil;
@@ -14,9 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -42,8 +41,8 @@ public class OrgService {
     private final CssslProperties props;
 
     /** 机构列表（含各机构根CA根状态摘要，管理页一屏看全根池拓扑） */
-    public List<Map<String, Object>> overview() {
-        List<Map<String, Object>> rows = new ArrayList<>();
+    public List<OrgVO> overview() {
+        List<OrgVO> rows = new ArrayList<>();
         for (CaOrg org : list()) {
             rows.add(buildRow(org));
         }
@@ -51,7 +50,7 @@ public class OrgService {
     }
 
     /** 机构分页查询（管理页：关键字命中 标识/名称/主体O，状态精确匹配；根状态仅对当前页计算） */
-    public Page<Map<String, Object>> page(String keyword, String status, long pageNo, long pageSize) {
+    public Page<OrgVO> page(String keyword, String status, long pageNo, long pageSize) {
         LambdaQueryWrapper<CaOrg> qw = new LambdaQueryWrapper<>();
         if (status != null && !status.isBlank()) {
             qw.eq(CaOrg::getStatus, status.trim());
@@ -62,43 +61,37 @@ public class OrgService {
         }
         qw.orderByAsc(CaOrg::getId);
         Page<CaOrg> page = orgMapper.selectPage(new Page<>(pageNo, pageSize), qw);
-        return (Page<Map<String, Object>>) page.convert(this::buildRow);
+        return (Page<OrgVO>) page.convert(this::buildRow);
     }
 
     /** 单机构状态摘要（详情/创建回执用） */
-    public Map<String, Object> overviewOf(String orgKey) {
+    public OrgVO overviewOf(String orgKey) {
         return buildRow(get(orgKey));
     }
 
-    private Map<String, Object> buildRow(CaOrg org) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("orgKey", org.getOrgKey());
-        row.put("orgName", org.getOrgName());
-        row.put("subjectO", org.getSubjectO());
-        row.put("algorithm", org.getAlgorithm());
-        row.put("status", org.getStatus());
-        row.put("contact", org.getContact());
-        row.put("description", org.getDescription());
-        row.put("createdAt", org.getCreatedAt());
+    private OrgVO buildRow(CaOrg org) {
+        OrgVO vo = OrgVO.from(org);
         try {
-            CaStatusVo st = caService.status(org.getOrgKey());
-            row.put("hasRoot", st.isInitialized());
-            row.put("rootSerialHex", st.getSerialHex());
-            row.put("rootCn", st.getCn());
-            row.put("rootStatus", st.getStatus());
-            row.put("rootValidTo", st.getValidTo());
-            row.put("rootKeyState", st.getRootKeyState());
+            CaStatusVO st = caService.status(org.getOrgKey());
+            vo.setHasRoot(st.isInitialized());
+            vo.setRootSerialHex(st.getSerialHex());
+            vo.setRootCn(st.getCn());
+            vo.setRootStatus(st.getStatus());
+            vo.setRootValidFrom(st.getValidFrom());
+            vo.setRootValidTo(st.getValidTo());
+            vo.setRootKeyState(st.getRootKeyState());
             if (st.getSubCa() != null) {
-                row.put("subCaSerialHex", st.getSubCa().getSerialHex());
-                row.put("subCaStatus", st.getSubCa().getStatus());
-                row.put("subCaValidTo", st.getSubCa().getValidTo());
+                vo.setSubCaSerialHex(st.getSubCa().getSerialHex());
+                vo.setSubCaStatus(st.getSubCa().getStatus());
+                vo.setSubCaValidFrom(st.getSubCa().getValidFrom());
+                vo.setSubCaValidTo(st.getSubCa().getValidTo());
             }
         } catch (Exception e) {
             // 单机构状态异常不拖垮整个列表（如密钥文件损坏）
-            row.put("hasRoot", false);
-            row.put("statusError", e.getMessage());
+            vo.setHasRoot(false);
+            vo.setStatusError(e.getMessage());
         }
-        return row;
+        return vo;
     }
 
     /** 机构原始记录列表 */

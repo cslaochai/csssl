@@ -48,7 +48,6 @@
     <!-- 表格卡 -->
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-        <el-table-column prop="id" label="ID" width="70" class-name="cell-mono" />
         <el-table-column prop="subjectCn" label="主体CN" min-width="180" show-overflow-tooltip />
         <el-table-column label="类型" width="90">
           <template #default="{ row }">
@@ -69,8 +68,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" label="用途说明" min-width="140" show-overflow-tooltip />
-        <el-table-column align="right" label="操作" width="490" fixed="right">
+        <el-table-column align="right" label="操作" width="540" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
             <el-button v-if="canDownloadCert" v-perm="'cert:download'" link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
             <el-button v-if="canDownloadKey" v-perm="'cert:key:download'" link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
             <el-button
@@ -357,6 +357,24 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 证书详情（行点击） -->
+    <el-dialog v-model="detailVisible" title="证书详情" width="600px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="序列号"><span class="mono-wrap">{{ detail?.serialHex }}</span></el-descriptions-item>
+        <el-descriptions-item label="主体CN">{{ detail?.subjectCn }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{ detail ? typeText(detail.certType) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="算法">{{ detail?.algorithm }}</el-descriptions-item>
+        <el-descriptions-item label="颁发CA">{{ detail?.issuerCn }}</el-descriptions-item>
+        <el-descriptions-item label="SAN">{{ detail?.san || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="有效期">{{ detail?.validFrom }} ~ {{ detail?.validTo }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
+        <el-descriptions-item v-if="detail?.revokedAt" label="吊销时间/原因">{{ detail?.revokedAt }}（{{ detail?.revokeReason }}）</el-descriptions-item>
+        <el-descriptions-item label="所属机构">{{ detail?.orgKey || '全局' }}</el-descriptions-item>
+        <el-descriptions-item label="签发人">{{ detail?.createdBy || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="用途说明">{{ detail?.description || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-dialog>
   </div>
 </template>
 
@@ -420,6 +438,8 @@ const p12Visible = ref(false)
 const p12Target = ref(null)
 const p12Password = ref('')
 const submitting = ref(false)
+const detailVisible = ref(false)
+const detail = ref(null)
 
 const defaultDays = 365
 
@@ -463,6 +483,11 @@ function statusText(s) {
 }
 function statusTag(s) {
   return { VALID: 'success', REVOKED: 'danger', FROZEN: 'warning', EXPIRED: 'info' }[s] || ''
+}
+
+function onRowDetail(row) {
+  detail.value = row
+  detailVisible.value = true
 }
 
 async function load() {
@@ -730,3 +755,11 @@ async function onDownloadKey(row) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.mono-wrap {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+</style>

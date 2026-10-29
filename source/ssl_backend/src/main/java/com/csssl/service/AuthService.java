@@ -3,7 +3,8 @@ package com.csssl.service;
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.csssl.dto.LoginRequest;
+import com.csssl.dto.LoginDTO;
+import com.csssl.vo.LoginVO;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
@@ -16,8 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * 登录鉴权：SM2 解密口令 → BCrypt 校验 → JWT 会话（对齐 cslk HIS / csmig 方案）。
@@ -47,7 +46,7 @@ public class AuthService {
     /**
      * 账号口令登录：口令已由前端 SM2 加密（C1C3C2），后端解密后 BCrypt 校验。
      */
-    public Map<String, Object> login(LoginRequest req, String ip) {
+    public LoginVO login(LoginDTO req, String ip) {
         if (req.getUsername() == null || req.getUsername().isBlank()) {
             throw new IllegalArgumentException("账号不能为空");
         }
@@ -92,19 +91,19 @@ public class AuthService {
                 .set(SysUser::getLastLoginIp, ip));
         auditService.record(user.getUsername(), "LOGIN", null, "登录成功", ip, orgOfUser(user));
 
-        Map<String, Object> data = new HashMap<>();
-        data.put("token", token);
-        data.put("username", user.getUsername());
-        data.put("realName", user.getRealName());
-        data.put("role", user.getRoleCode());
+        LoginVO data = new LoginVO();
+        data.setToken(token);
+        data.setUsername(user.getUsername());
+        data.setRealName(user.getRealName());
+        data.setRole(user.getRoleCode());
         // 角色名称以库中档案为准（角色配置页可改名，前端顶栏展示不再写死）
-        data.put("roleName", role == null ? user.getRoleCode() : role.getRoleName());
+        data.setRoleName(role == null ? user.getRoleCode() : role.getRoleName());
         // 生效权限点（菜单 + 按钮）：前端据此构建侧栏、守卫与按钮显隐；服务端仍逐接口强校验
-        data.put("perms", permissionService.effectiveList(user.getRoleCode()));
+        data.setPerms(permissionService.effectiveList(user.getRoleCode()));
         // 机构数据域：null=全局账号；前端据此锁定/展示机构切换（服务端各域操作仍强制校验，不信任前端）
-        data.put("orgKey", user.getOrgKey());
+        data.setOrgKey(user.getOrgKey());
         // 平台主机构（各机构标识由管理员在机构管理维护；全局账号默认落在它上面）
-        data.put("primaryOrg", CaOrg.PRIMARY_ORG_KEY);
+        data.setPrimaryOrg(CaOrg.PRIMARY_ORG_KEY);
         return data;
     }
 

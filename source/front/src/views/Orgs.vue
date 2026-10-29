@@ -65,8 +65,9 @@
         <el-table-column prop="contact" label="联系人" width="110">
           <template #default="{ row }">{{ row.contact || '-' }}</template>
         </el-table-column>
-        <el-table-column align="right" label="操作" width="160" fixed="right">
+        <el-table-column align="right" label="操作" width="200" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
             <el-button
               v-if="row.status === 'ACTIVE'"
               v-perm="'org:suspend'"
@@ -142,6 +143,23 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 机构详情（行点击） -->
+    <el-dialog v-model="detailVisible" :title="`机构详情：${detail?.orgName || ''}`" width="560px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="机构标识">{{ detail?.orgKey }}</el-descriptions-item>
+        <el-descriptions-item label="机构名称">{{ detail?.orgName }}</el-descriptions-item>
+        <el-descriptions-item label="主体O">{{ detail?.subjectO || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="算法">{{ detail?.algorithm || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="机构状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="根密钥状态">{{ detail?.rootKeyState ? rootKeyText(detail.rootKeyState) : '-' }}</el-descriptions-item>
+        <el-descriptions-item label="根CA有效期">{{ detail ? validity(detail.rootValidFrom, detail.rootValidTo) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="SUB_CA有效期">{{ detail ? validity(detail.subCaValidFrom, detail.subCaValidTo) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="联系人">{{ detail?.contact || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="说明">{{ detail?.description || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-dialog>
   </div>
 </template>
 
@@ -163,6 +181,8 @@ const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 
 const createVisible = ref(false)
 const creating = ref(false)
+const detailVisible = ref(false)
+const detail = ref(null)
 const formRef = ref()
 const form = reactive({ orgKey: '', orgName: '', subjectO: '', algorithm: 'SM2', contact: '', description: '' })
 const rules = {
@@ -189,6 +209,11 @@ function rootKeyTag(s) {
 function validity(from, to) {
   if (!from && !to) return '-'
   return `${from || '?'} ~ ${to || '?'}`
+}
+
+function onRowDetail(row) {
+  detail.value = row
+  detailVisible.value = true
 }
 
 async function load() {

@@ -4,6 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.entity.AuditLog;
 import com.csssl.entity.CaOrg;
+import com.csssl.vo.AuditExportVO;
+import com.csssl.vo.AuditVerifyVO;
+import com.csssl.vo.ChainBrokenVO;
+import com.csssl.vo.ChainVerifyVO;
 import com.csssl.mapper.AuditLogMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,7 +18,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 操作审计：登录/签发/吊销/导出等管理操作留痕（等保审计用）。
@@ -131,8 +134,8 @@ public class AuditService {
         return false;
     }
 
-    /** 验签：按 id 读取记录并校验签名；返回 {valid, canonical, sign, prevSign}（改过任一字段即失败） */
-    public Map<String, Object> verifyLog(Long id) {
+    /** 验签：按 id 读取记录并校验签名（改过任一字段即失败） */
+    public AuditVerifyVO verifyLog(Long id) {
         AuditLog logRow = auditLogMapper.selectById(id);
         if (logRow == null) {
             throw new IllegalArgumentException("审计记录不存在（id=" + id + "）");
@@ -141,14 +144,15 @@ public class AuditService {
         boolean valid = verifyCompat(logRow);
         String chainNote = valid && logRow.getPrevSign() != null && !logRow.getPrevSign().isBlank()
                 ? "，且哈希链指向的记录签名一致" : "";
-        return Map.of(
-                "id", id,
-                "valid", valid,
-                "message", valid ? "签名有效：记录未被篡改，由审计签名密钥签发" + chainNote
-                        : "签名校验失败：记录内容已被改动或签名缺失",
-                "canonical", canon,
-                "sign", logRow.getSign() == null ? "" : logRow.getSign(),
-                "prevSign", logRow.getPrevSign() == null ? "" : logRow.getPrevSign());
+        AuditVerifyVO vo = new AuditVerifyVO();
+        vo.setId(id);
+        vo.setValid(valid);
+        vo.setMessage(valid ? "签名有效：记录未被篡改，由审计签名密钥签发" + chainNote
+                : "签名校验失败：记录内容已被改动或签名缺失");
+        vo.setCanonical(canon);
+        vo.setSign(logRow.getSign() == null ? "" : logRow.getSign());
+        vo.setPrevSign(logRow.getPrevSign() == null ? "" : logRow.getPrevSign());
+        return vo;
     }
 
     /**
@@ -166,10 +170,9 @@ public class AuditService {
      *
      * @param fromId 起始记录ID（含，可空=从头开始）
      * @param toId   结束记录ID（含，可空=到最新）
-     * @return {checked, broken:[{id, reason}]}
      */
-    public Map<String, Object> verifyChain(Long fromId, Long toId) {
-        List<Map<String, Object>> broken = new ArrayList<>();
+    public ChainVerifyVO verifyChain(Long fromId, Long toId) {
+        List<ChainBrokenVO> broken = new ArrayList<>();
         long checked = 0;
         Long cursor = fromId == null ? null : fromId - 1;
         AuditLog prevRow = null;
@@ -204,11 +207,14 @@ public class AuditService {
             }
         }
         log.info("[审计对账] 扫描完成 checked={} broken={}", checked, broken.size());
-        return Map.of("checked", checked, "broken", broken);
+        ChainVerifyVO vo = new ChainVerifyVO();
+        vo.setChecked(checked);
+        vo.setBroken(broken);
+        return vo;
     }
 
     /** 单条记录的对账判定（前驱信息尽量复用扫描序上一条，避免逐条回查） */
-    private void checkChainRow(AuditLog row, AuditLog prevRow, List<Map<String, Object>> broken) {
+    private void checkChainRow(AuditLog row, AuditLog prevRow, List<ChainBrokenVO> broken) {
         Long id = row.getId();
         if (row.getSign() == null || row.getSign().isBlank()) {
             broken.add(brokenItem(id, "记录无签名，无法自证未被篡改"));
@@ -246,8 +252,11 @@ public class AuditService {
                 .lt(AuditLog::getId, id).orderByDesc(AuditLog::getId).last("LIMIT 1"));
     }
 
-    private static Map<String, Object> brokenItem(Long id, String reason) {
-        return Map.of("id", id, "reason", reason);
+    private static ChainBrokenVO brokenItem(Long id, String reason) {
+        ChainBrokenVO vo = new ChainBrokenVO();
+        vo.setId(id);
+        vo.setReason(reason);
+        return vo;
     }
 
     /** 分页查询审计日志（orgKey 为空=跨机构全量；仅全局用户可达此口径，调用方已按数据域强制收敛） */
@@ -283,7 +292,7 @@ public class AuditService {
     }
 
     /** 归档导出（兼容入口=跨机构全量，调用方按数据域收敛后传入 orgKey） */
-    public Map<String, Object> exportCsv() {
+    public AuditExportVO exportCsv() {
         return exportCsv(null);
     }
 
@@ -291,9 +300,9 @@ public class AuditService {
      * 审计归档导出（留存 ≥5 年材料，等保要求）：按机构过滤（orgKey 空=全量）后导出 CSV（UTF-8 BOM），
      * 并对导出内容做审计 SM2 报告签名（§10.5 审计记录创建人数字签名延伸）——归档文件完整性可在线验签。
      *
-     * @return {csv, sign, count}：sign 是对 CSV 全文的 SM3withSM2 签名（hex），验签=对下载的 CSV 内容重算比对
+     * @return sign 是对 CSV 全文的 SM3withSM2 签名（hex），验签=对下载的 CSV 内容重算比对
      */
-    public Map<String, Object> exportCsv(String orgKey) {
+    public AuditExportVO exportCsv(String orgKey) {
         LambdaQueryWrapper<AuditLog> qw = new LambdaQueryWrapper<AuditLog>().orderByAsc(AuditLog::getId);
         if (orgKey != null && !orgKey.isBlank()) {
             qw.eq(AuditLog::getOrgKey, orgKey);
@@ -323,7 +332,11 @@ public class AuditService {
         }
         log.info("[审计] 归档导出完成，机构={}，记录数={}，报告已签名",
                 orgKey == null || orgKey.isBlank() ? "全部" : orgKey, logs.size());
-        return Map.of("csv", csv, "sign", sign, "count", logs.size());
+        AuditExportVO vo = new AuditExportVO();
+        vo.setCsv(csv);
+        vo.setSign(sign);
+        vo.setCount(logs.size());
+        return vo;
     }
 
     private static String csv(String s) {

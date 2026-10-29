@@ -3,8 +3,10 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
-import com.csssl.dto.CertVo;
-import com.csssl.dto.IssueCertRequest;
+import com.csssl.dto.PublicKeyIssueDTO;
+import com.csssl.vo.CertOverviewVO;
+import com.csssl.vo.CertVO;
+import com.csssl.dto.IssueCertRequestDTO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.CertTemplate;
@@ -27,9 +29,7 @@ import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
@@ -69,7 +69,7 @@ public class CertService {
     private final AuditService auditService;
 
     /** 分页查询证书列表 */
-    public Page<CertVo> page(long pageNo, long pageSize, String certType, String status, String keyword) {
+    public Page<CertVO> page(long pageNo, long pageSize, String certType, String status, String keyword) {
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<>();
         if (certType != null && !certType.isBlank()) {
             qw.eq(CaCert::getCertType, certType);
@@ -82,21 +82,21 @@ public class CertService {
         }
         qw.orderByDesc(CaCert::getCreatedAt);
         Page<CaCert> page = certMapper.selectPage(new Page<>(pageNo, pageSize), qw);
-        return (Page<CertVo>) page.convert(CertVo::from);
+        return (Page<CertVO>) page.convert(CertVO::from);
     }
 
     /** 证书详情 */
-    public CertVo detail(Long id) {
-        return CertVo.from(findById(id));
+    public CertVO detail(Long id) {
+        return CertVO.from(findById(id));
     }
 
     /** 在线签发（兼容入口=平台主机构） */
-    public CertVo issue(IssueCertRequest req, String username, String ip) {
+    public CertVO issue(IssueCertRequestDTO req, String username, String ip) {
         return issue(CaOrg.PRIMARY_ORG_KEY, req, username, ip);
     }
 
     /** 在线签发（机构版）：内部生成密钥对，私钥落该机构域盘 */
-    public CertVo issue(String orgKey, IssueCertRequest req, String username, String ip) {
+    public CertVO issue(String orgKey, IssueCertRequestDTO req, String username, String ip) {
         String cn = req.getSubjectCn() == null ? "" : req.getSubjectCn().trim();
         if (cn.isEmpty()) {
             throw new IllegalArgumentException("主体CN不能为空");
@@ -141,24 +141,24 @@ public class CertService {
         auditService.record(username, "CERT_ISSUE", String.valueOf(row.getId()),
                 "签发 " + type + " 证书：" + cn + "（" + algorithm + (tpl != null ? "，模板 " + tpl.getTemplateCode() : "") + orgSuffix(orgKey) + "）", ip, orgKey);
         log.info("[证书签发][{}] id={}, cn={}, type={}, algorithm={}, serial={}", orgKey, row.getId(), cn, type, algorithm, serial);
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /** CSR 签发（兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
-    public CertVo issueFromCsr(String csrPem, String certType, Integer validityDays,
+    public CertVO issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip) {
         return issueFromCsr(csrPem, certType, validityDays, san, description, username, ip, null);
     }
 
     /** CSR 签发（支持模板，兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
-    public CertVo issueFromCsr(String csrPem, String certType, Integer validityDays,
+    public CertVO issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip, Long templateId) {
         return issueFromCsr(CaOrg.PRIMARY_ORG_KEY, csrPem, certType, validityDays,
                 san, description, username, ip, templateId);
     }
 
     /** CSR 签发（机构版，支持模板）：主体与公钥取自 CSR，落到该机构域 */
-    public CertVo issueFromCsr(String orgKey, String csrPem, String certType, Integer validityDays,
+    public CertVO issueFromCsr(String orgKey, String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip, Long templateId) {
         if (csrPem == null || csrPem.isBlank()) {
             throw new IllegalArgumentException("CSR内容不能为空");
@@ -197,14 +197,14 @@ public class CertService {
         certMapper.insert(row);
         auditService.record(username, "CERT_CSR_ISSUE", String.valueOf(row.getId()),
                 "CSR签发 " + type + " 证书：" + cn + (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : "") + orgSuffix(orgKey), ip, orgKey);
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /**
      * 公钥签发（RA 场景，兼容入口=平台主机构）：申请方本地生成密钥对后只提交 Subject DN 与公钥，私钥自持不落盘。
      * 用于 HIS 等业务系统对接（医生签名证书等）。
      */
-    public CertVo issueWithPublicKey(com.csssl.dto.PublicKeyIssueRequest req, String username, String ip) {
+    public CertVO issueWithPublicKey(PublicKeyIssueDTO req, String username, String ip) {
         return issueWithPublicKey(req, null, username, ip);
     }
 
@@ -213,7 +213,7 @@ public class CertService {
      * policy 非空时签发参数一律按快照执行（批准时固化的模板策略，不重查可变模板最新值，
      * 保证审核人批准的内容与操作员最终签出的内容一致）；policy 为空时按 templateId 现查模板。
      */
-    public CertVo issueWithPublicKey(com.csssl.dto.PublicKeyIssueRequest req, IssuePolicy policy,
+    public CertVO issueWithPublicKey(PublicKeyIssueDTO req, IssuePolicy policy,
                                      String username, String ip) {
         return issueWithPublicKey(CaOrg.PRIMARY_ORG_KEY, req, policy, username, ip);
     }
@@ -222,7 +222,7 @@ public class CertService {
      * 公钥签发（RA 场景，机构版）：落到该机构域；非 default 域校验申请 DN 的 O 与机构受控 O 一致
      * （SUB_CA 证书强制一致，_leaf 证书带 O 即须一致，防跨机构冒名）。
      */
-    public CertVo issueWithPublicKey(String orgKey, com.csssl.dto.PublicKeyIssueRequest req, IssuePolicy policy,
+    public CertVO issueWithPublicKey(String orgKey, PublicKeyIssueDTO req, IssuePolicy policy,
                                      String username, String ip) {
         String dn = req.getSubjectDn() == null ? "" : req.getSubjectDn().trim();
         if (dn.isEmpty()) {
@@ -271,11 +271,11 @@ public class CertService {
                 "公钥签发 " + type + " 证书：" + cn + (policy != null ? "（按批准快照）" : (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : "")) + orgSuffix(orgKey), ip, orgKey);
         log.info("[公钥签发][{}] id={}, cn={}, type={}, algorithm={}, serial={}, snapshot={}",
                 orgKey, row.getId(), cn, type, algorithm, serial, policy != null);
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /** 吊销证书 */
-    public CertVo revoke(Long id, String reason, String username, String ip) {
+    public CertVO revoke(Long id, String reason, String username, String ip) {
         CaCert row = findById(id);
         if (CaService.TYPE_ROOT.equals(row.getCertType())) {
             throw new IllegalArgumentException("根CA证书不允许吊销，如需重建请使用「初始化根CA」");
@@ -287,14 +287,14 @@ public class CertService {
         auditService.record(username, "CERT_REVOKE", String.valueOf(id),
                 "吊销证书：" + row.getSubjectCn() + "，原因：" + row.getRevokeReason(), ip, orgOf(row));
         log.info("[证书吊销] id={}, cn={}, reason={}", id, row.getSubjectCn(), row.getRevokeReason());
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /**
      * 挂起证书（GM/T 0034 §12.6）：有效期内暂停使用，不销毁。
      * 挂起期间证书进入 CRL（reason=certificateHold）、OCSP 返回 revoked/on-hold，解除后恢复。
      */
-    public CertVo suspend(Long id, String reason, String username, String ip) {
+    public CertVO suspend(Long id, String reason, String username, String ip) {
         CaCert row = findById(id);
         if (CaService.TYPE_ROOT.equals(row.getCertType())) {
             throw new IllegalArgumentException("根CA证书不支持挂起");
@@ -309,11 +309,11 @@ public class CertService {
         auditService.record(username, "CERT_SUSPEND", String.valueOf(id),
                 "挂起证书：" + row.getSubjectCn() + "（CRL certificateHold / OCSP on-hold）", ip, orgOf(row));
         log.info("[证书挂起] id={}, cn={}", id, row.getSubjectCn());
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /** 解除挂起（GM/T 0034 §12.7）：恢复有效，从 CRL 移除、OCSP 恢复 good */
-    public CertVo unsuspend(Long id, String username, String ip) {
+    public CertVO unsuspend(Long id, String username, String ip) {
         CaCert row = findById(id);
         if (!"FROZEN".equals(row.getStatus())) {
             throw new IllegalArgumentException("仅挂起状态的证书可以解除挂起（当前状态：" + row.getStatus() + "）");
@@ -325,13 +325,13 @@ public class CertService {
         auditService.record(username, "CERT_UNSUSPEND", String.valueOf(id),
                 "解除挂起证书：" + row.getSubjectCn() + "（恢复有效）", ip, orgOf(row));
         log.info("[解除挂起] id={}, cn={}", id, row.getSubjectCn());
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /**
      * 证书更新（兼容入口）：按证书行自带 org_key 定位机构域（存量行 org_key='default'，行为不变）。
      */
-    public CertVo renew(Long id, Integer validityDays, String username, String ip) {
+    public CertVO renew(Long id, Integer validityDays, String username, String ip) {
         CaCert probe = findById(id);
         return renew(orgOf(probe), id, validityDays, username, ip);
     }
@@ -340,7 +340,7 @@ public class CertService {
      * 证书更新（机构版，GM/T 0034 §12.2 更新）：原证书吊销（SUPERSEDED）+ 以原公钥在该机构域重签延长有效期。
      * orgKey 必须与证书行归属一致（防跨机构更新）。
      */
-    public CertVo renew(String orgKey, Long id, Integer validityDays, String username, String ip) {
+    public CertVO renew(String orgKey, Long id, Integer validityDays, String username, String ip) {
         CaCert old = findById(id);
         requireOrgMatch(orgKey, old);
         if (CaService.TYPE_ROOT.equals(old.getCertType())) {
@@ -382,13 +382,13 @@ public class CertService {
         auditService.record(username, "CERT_RENEW", String.valueOf(row.getId()),
                 "更新证书：" + old.getSubjectCn() + "（原证书 id=" + id + " 已吊销 SUPERSEDED，新证 " + days + " 天）" + orgSuffix(domain), ip, domain);
         log.info("[证书更新][{}] 新证 id={}, serial={}, 原证 id={} 已吊销", domain, row.getId(), serial, id);
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /**
      * 密钥更新 rekey（兼容入口）：按证书行 org_key 定位机构域。
      */
-    public CertVo rekey(Long id, Integer validityDays, String username, String ip) {
+    public CertVO rekey(Long id, Integer validityDays, String username, String ip) {
         CaCert probe = findById(id);
         return rekey(orgOf(probe), id, validityDays, username, ip);
     }
@@ -397,7 +397,7 @@ public class CertService {
      * 密钥更新 rekey（机构版，GM/T 0034 §12.2 密钥更新）：重新生成密钥对并在该机构域签发新证书，原证书吊销。
      * 仅限内部生成密钥对的在线签发证书（私钥在 CA 侧）；CSR/公钥签发证书私钥由申请方自持，须重新走申请流程。
      */
-    public CertVo rekey(String orgKey, Long id, Integer validityDays, String username, String ip) {
+    public CertVO rekey(String orgKey, Long id, Integer validityDays, String username, String ip) {
         CaCert old = findById(id);
         requireOrgMatch(orgKey, old);
         if (CaService.TYPE_ROOT.equals(old.getCertType()) || "SUB_CA".equals(old.getCertType())) {
@@ -440,7 +440,7 @@ public class CertService {
         auditService.record(username, "CERT_REKEY", String.valueOf(row.getId()),
                 "密钥更新：" + old.getSubjectCn() + "（原证书 id=" + id + " 已吊销，新密钥对 " + algorithm + "）" + orgSuffix(domain), ip, domain);
         log.info("[密钥更新][{}] 新证 id={}, serial={}, 原证 id={} 已吊销", domain, row.getId(), serial, id);
-        return CertVo.from(row);
+        return CertVO.from(row);
     }
 
     /** 吊销落库（供吊销/更新/重签共用，只改状态与原因，审计由调用方记录） */
@@ -562,7 +562,7 @@ public class CertService {
     }
 
     /** 概览统计：按机构域过滤（证书总量/状态分布/类型分布/30天内到期），供仪表盘渲染 */
-    public Map<String, Object> overview(String orgKey) {
+    public CertOverviewVO overview(String orgKey) {
         String org = orgKey == null || orgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : orgKey;
         List<CaCert> all = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getOrgKey, org));
@@ -588,16 +588,16 @@ public class CertService {
                 expiring++;
             }
         }
-        Map<String, Object> data = new HashMap<>();
-        data.put("total", all.size());
-        data.put("valid", valid);
-        data.put("revoked", revoked);
-        data.put("expired", expired);
-        data.put("server", server);
-        data.put("client", client);
-        data.put("subCa", subCa);
-        data.put("expiring30d", expiring);
-        data.put("root", caService.status(org));
+        CertOverviewVO data = new CertOverviewVO();
+        data.setTotal(all.size());
+        data.setValid(valid);
+        data.setRevoked(revoked);
+        data.setExpired(expired);
+        data.setServer(server);
+        data.setClient(client);
+        data.setSubCa(subCa);
+        data.setExpiring30d(expiring);
+        data.setRoot(caService.status(org));
         return data;
     }
 

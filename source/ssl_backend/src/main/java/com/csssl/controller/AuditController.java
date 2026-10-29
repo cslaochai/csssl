@@ -2,12 +2,19 @@ package com.csssl.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
+import com.csssl.vo.AuditExportVO;
+import com.csssl.dto.AuditPageQueryDTODTO;
+import com.csssl.dto.AuditVerifyDTO;
+import com.csssl.vo.AuditVerifyVO;
+import com.csssl.dto.ChainVerifyQueryDTO;
+import com.csssl.vo.ChainVerifyVO;
 import com.csssl.entity.AuditLog;
 import com.csssl.service.AuditService;
 import com.csssl.service.PermissionService;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.util.RoleCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,8 +22,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 /**
  * 审计日志接口：管理操作留痕查询 + 防篡改验签（GM/T 0034 §10.1/§10.5）。
@@ -38,14 +43,10 @@ public class AuditController {
 
     /** 审计日志分页查询（仅审计员；机构用户强制本机构，全局用户 orgKey 缺省=全量只读） */
     @GetMapping
-    public Result<Page<AuditLog>> page(@RequestParam(defaultValue = "1") long pageNo,
-                                      @RequestParam(defaultValue = "10") long pageSize,
-                                      @RequestParam(required = false) String action,
-                                      @RequestParam(required = false) String orgKey,
-                                      HttpServletRequest request) {
+    public Result<Page<AuditLog>> page(@Valid AuditPageQueryDTODTO query, HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.AUDIT_VIEW);
-        return Result.success("查询成功", auditService.page(pageNo, pageSize, action,
-                RoleCode.readOrgScope(request, orgKey)));
+        return Result.success("查询成功", auditService.page(query.getPageNo(), query.getPageSize(), query.getAction(),
+                RoleCode.readOrgScope(request, query.getOrgKey())));
     }
 
     /**
@@ -53,9 +54,9 @@ public class AuditController {
      * 机构用户仅可验本机构记录（行级数据域校验，越域 403）；全局用户跨机构放行（只读监督职能）。
      */
     @PostMapping("/verify")
-    public Result<Map<String, Object>> verify(@RequestBody Map<String, Long> body, HttpServletRequest request) {
+    public Result<AuditVerifyVO> verify(@Valid @RequestBody AuditVerifyDTO body, HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.AUDIT_VERIFY);
-        Long id = body.get("id");
+        Long id = body.getId();
         if (id == null) {
             throw new IllegalArgumentException("参数 id 不能为空");
         }
@@ -69,8 +70,8 @@ public class AuditController {
      * 机构用户强制导出本机构；全局用户 orgKey 缺省=跨机构全量导出（只读放行，合规设计）。
      */
     @GetMapping("/export")
-    public Result<Map<String, Object>> export(@RequestParam(required = false) String orgKey,
-                                              HttpServletRequest request) {
+    public Result<AuditExportVO> export(@RequestParam(required = false) String orgKey,
+                                        HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.AUDIT_EXPORT);
         return Result.success("导出完成", auditService.exportCsv(RoleCode.readOrgScope(request, orgKey)));
     }
@@ -84,10 +85,9 @@ public class AuditController {
      * 机构数据域过滤只作用于"查"（分页/验签/导出），对账结果仅暴露断链 id 与原因，不含记录内容。</p>
      */
     @GetMapping("/chain-verify")
-    public Result<Map<String, Object>> chainVerify(@RequestParam(required = false) Long fromId,
-                                                  @RequestParam(required = false) Long toId,
-                                                  HttpServletRequest request) {
+    public Result<ChainVerifyVO> chainVerify(@Valid ChainVerifyQueryDTO query,
+                                             HttpServletRequest request) {
         permissionService.require(request, PermissionCatalog.AUDIT_CHAIN);
-        return Result.success("链对账完成", auditService.verifyChain(fromId, toId));
+        return Result.success("链对账完成", auditService.verifyChain(query.getFromId(), query.getToId()));
     }
 }

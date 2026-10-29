@@ -20,28 +20,44 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public final class RoleCode {
 
-    /** 系统管理员 */
+    /**
+     * 系统管理员
+     */
     public static final String ADMIN = "ADMIN";
-    /** CA操作员（录入/签发） */
+    /**
+     * CA操作员（录入/签发）
+     */
     public static final String OPERATOR = "OPERATOR";
-    /** 审核员（审批申请） */
+    /**
+     * 审核员（审批申请）
+     */
     public static final String APPROVER = "APPROVER";
-    /** 审计员（只读） */
+    /**
+     * 审计员（只读）
+     */
     public static final String AUDITOR = "AUDITOR";
-    /** 安全管理员（证书模板/策略管理） */
+    /**
+     * 安全管理员（证书模板/策略管理）
+     */
     public static final String SECURITY_ADMIN = "SECURITY_ADMIN";
-    /** 密钥管理员（根密钥门限分持/封存/解封） */
+    /**
+     * 密钥管理员（根密钥门限分持/封存/解封）
+     */
     public static final String KEY_ADMIN = "KEY_ADMIN";
 
     private RoleCode() {
     }
 
-    /** 取当前请求登录人角色（登录拦截器写入；未登录返回 null） */
+    /**
+     * 取当前请求登录人角色（登录拦截器写入；未登录返回 null）
+     */
     public static String currentRole(HttpServletRequest request) {
         return (String) request.getAttribute("ssl.role");
     }
 
-    /** 当前登录人用户名（登录拦截器写入） */
+    /**
+     * 当前登录人用户名（登录拦截器写入）
+     */
     public static String currentUser(HttpServletRequest request) {
         return (String) request.getAttribute("ssl.username");
     }
@@ -67,7 +83,9 @@ public final class RoleCode {
         return effectiveOrg(currentOrg(request), reqOrgKey);
     }
 
-    /** effectiveOrg 的无请求对象版本（供服务层单测/复用） */
+    /**
+     * effectiveOrg 的无请求对象版本（供服务层单测/复用）
+     */
     public static String effectiveOrg(String operatorOrg, String reqOrgKey) {
         String req = reqOrgKey == null || reqOrgKey.isBlank() ? null : reqOrgKey.trim();
         if (operatorOrg != null && !operatorOrg.isBlank()) {
@@ -101,7 +119,9 @@ public final class RoleCode {
         requireRowVisible(currentOrg(request), rowOrgKey);
     }
 
-    /** requireRowVisible 的无请求对象版本（服务层复用同一口径） */
+    /**
+     * requireRowVisible 的无请求对象版本（服务层复用同一口径）
+     */
     public static void requireRowVisible(String operatorOrg, String rowOrgKey) {
         if (operatorOrg == null || operatorOrg.isBlank()) {
             return;
@@ -127,7 +147,9 @@ public final class RoleCode {
         return eff;
     }
 
-    /** 数据行归属机构兜底：org_key 列 NOT NULL DEFAULT 'default'，历史语义空=默认域 */
+    /**
+     * 数据行归属机构兜底：org_key 列 NOT NULL DEFAULT 'default'，历史语义空=默认域
+     */
     public static String orgOfRow(String rowOrgKey) {
         return rowOrgKey == null || rowOrgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : rowOrgKey;
     }

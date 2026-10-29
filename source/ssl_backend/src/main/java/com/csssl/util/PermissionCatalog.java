@@ -1,12 +1,6 @@
 package com.csssl.util;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * 权限点目录与六类法定角色的授权上限（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡）。
@@ -21,9 +15,13 @@ import java.util.Set;
  */
 public final class PermissionCatalog {
 
-    /** 权限点类型：页面菜单 */
+    /**
+     * 权限点类型：页面菜单
+     */
     public static final String TYPE_MENU = "MENU";
-    /** 权限点类型：操作按钮/接口 */
+    /**
+     * 权限点类型：操作按钮/接口
+     */
     public static final String TYPE_ACTION = "ACTION";
 
     // ===== 菜单权限点（与前端路由 meta.perm 一一对应） =====
@@ -90,7 +88,9 @@ public final class PermissionCatalog {
     public static final String AUDIT_CHAIN = "audit:chain";
     public static final String AUDIT_EXPORT = "audit:export";
 
-    /** 权限点定义（顺序即前端权限树展示顺序） */
+    /**
+     * 权限点定义（顺序即前端权限树展示顺序）
+     */
     public record PermDef(String code, String name, String type, String group, String note) {
     }
 
@@ -228,17 +228,23 @@ public final class PermissionCatalog {
         return Collections.unmodifiableSet(set);
     }
 
-    /** 全部权限点（前端权限树顺序） */
+    /**
+     * 全部权限点（前端权限树顺序）
+     */
     public static List<PermDef> all() {
         return Collections.unmodifiableList(ALL);
     }
 
-    /** 按编码取权限点定义（未知返回 null） */
+    /**
+     * 按编码取权限点定义（未知返回 null）
+     */
     public static PermDef get(String code) {
         return code == null ? null : BY_CODE.get(code.trim());
     }
 
-    /** 某角色可授权的法定上限（未知角色返回空集合=fail-closed） */
+    /**
+     * 某角色可授权的法定上限（未知角色返回空集合=fail-closed）
+     */
     public static Set<String> statutoryMax(String roleCode) {
         if (roleCode == null || roleCode.isBlank()) {
             return Collections.emptySet();
@@ -247,12 +253,16 @@ public final class PermissionCatalog {
         return max == null ? Collections.emptySet() : max;
     }
 
-    /** 权限点是否属于该角色法定职责范围 */
+    /**
+     * 权限点是否属于该角色法定职责范围
+     */
     public static boolean allowedFor(String roleCode, String code) {
         return code != null && statutoryMax(roleCode).contains(code.trim());
     }
 
-    /** 是否菜单类权限点 */
+    /**
+     * 是否菜单类权限点
+     */
     public static boolean isMenu(String code) {
         PermDef def = get(code);
         return def != null && TYPE_MENU.equals(def.type());

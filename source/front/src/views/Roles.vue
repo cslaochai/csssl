@@ -61,8 +61,9 @@
             <el-tag size="small" :type="row.status === 1 ? 'success' : 'info'">{{ row.status === 1 ? '启用' : '停用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" align="right" fixed="right">
+        <el-table-column label="操作" width="240" align="right" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
             <el-button v-perm="'role:update'" link type="primary" size="small" :icon="Edit" @click="openEdit(row)">
               编辑
             </el-button>
@@ -184,6 +185,22 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 角色详情（行点击） -->
+    <el-dialog v-model="detailVisible" :title="`角色详情：${detail?.roleName || ''}`" width="520px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="角色编码">{{ detail?.roleCode }}</el-descriptions-item>
+        <el-descriptions-item label="角色名称">{{ detail?.roleName }}</el-descriptions-item>
+        <el-descriptions-item label="职责说明">{{ detail?.roleDesc || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="账号数">{{ detail?.userCount ?? 0 }}</el-descriptions-item>
+        <el-descriptions-item label="权限授权">{{ detail ? `${detail.permCount} / ${detail.maxPermCount}` : '' }}</el-descriptions-item>
+        <el-descriptions-item label="排序">{{ detail?.sortOrder }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ detail?.status === 1 ? '启用' : '停用' }}</el-descriptions-item>
+        <el-descriptions-item label="内置角色">{{ detail?.builtin === 1 ? '是' : '否' }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="更新时间">{{ detail?.updatedAt || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-dialog>
   </div>
 </template>
 
@@ -219,6 +236,8 @@ const pageRows = computed(() => {
 // ===== 编辑角色档案 =====
 const editVisible = ref(false)
 const editSubmitting = ref(false)
+const detailVisible = ref(false)
+const detail = ref(null)
 const editForm = reactive({ roleCode: '', roleName: '', roleDesc: '', sortOrder: 0, status: 1 })
 
 // ===== 权限配置 =====
@@ -273,6 +292,11 @@ function openEdit(row) {
     status: row.status
   })
   editVisible.value = true
+}
+
+function onRowDetail(row) {
+  detail.value = row
+  detailVisible.value = true
 }
 
 async function onSaveEdit() {
