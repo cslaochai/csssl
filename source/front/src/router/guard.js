@@ -19,11 +19,12 @@ function firstAllowedPath() {
   const role = localStorage.getItem('role')
   const ready = permReady()
   const allowed = (root?.children || []).filter(c => {
+    if (c.meta.globalOnly && !isGlobalUser()) return false
     if (ready) return !c.meta.perm || hasPerm(c.meta.perm)
     return !c.meta.roles || c.meta.roles.includes(role)
   })
   if (!allowed.length) return null
-  const groupOrder = ['top', 'business', 'trust', 'system', 'bottom']
+  const groupOrder = ['top', 'business', 'platform', 'bottom']
   allowed.sort((a, b) => groupOrder.indexOf(a.meta.group) - groupOrder.indexOf(b.meta.group))
   return '/' + allowed[0].path
 }

@@ -19,36 +19,42 @@
         </nav>
       </div>
       <div class="header-right">
-        <!-- 机构域：全局用户可选域（默认 default）；机构用户只读徽标 -->
-        <template v-if="isGlobal">
-          <span class="domain-label">机构域</span>
-          <el-select v-model="domain" size="small" style="width: 200px" @change="onDomainChange">
-            <el-option label="default（默认域）" value="default" />
-            <el-option
-              v-for="o in orgOptions"
-              :key="o.orgKey"
-              :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey"
-              :value="o.orgKey"
-            />
-          </el-select>
-        </template>
-        <el-tag v-else type="warning" effect="dark" size="small">机构：{{ userOrg }}</el-tag>
-
-        <el-badge :value="0" :hidden="true">
-          <button class="header-icon-btn" title="消息通知">
-            <el-icon><Bell /></el-icon>
+        <!-- 全局管理员可切换当前机构；机构账号只读显示本机构 -->
+        <el-dropdown v-if="isGlobal" trigger="click" @command="onDomainChange">
+          <button class="org-chip" title="切换机构">
+            <el-icon><OfficeBuilding /></el-icon>
+            <span class="org-chip-label">当前机构</span>
+            <span class="org-chip-name">{{ orgDisplay }}</span>
+            <el-icon class="org-chip-arrow"><ArrowDown /></el-icon>
           </button>
-        </el-badge>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="o in orgOptions"
+                :key="o.orgKey"
+                :command="o.orgKey"
+                :disabled="o.orgKey === domain"
+              >
+                {{ o.orgName || o.orgKey }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <div v-else class="org-chip org-chip-readonly">
+          <el-icon><OfficeBuilding /></el-icon>
+          <span class="org-chip-label">本机构</span>
+          <span class="org-chip-name">{{ orgDisplay }}</span>
+        </div>
+
+        <div class="header-divider"></div>
+        <div class="header-clock">
+          <span class="clock-time">{{ currentTime }}</span>
+          <span class="clock-week">{{ currentWeekday }}</span>
+        </div>
         <div class="header-divider"></div>
         <div class="header-user">
           <span class="header-user-name">{{ username }}</span>
           <span class="header-user-role">{{ roleText }}</span>
-        </div>
-        <div class="header-divider"></div>
-        <div class="header-clock">
-          <el-icon><Calendar /></el-icon>
-          <span class="clock-time">{{ currentTime }}</span>
-          <span class="clock-week">{{ currentWeekday }}</span>
         </div>
         <div class="header-divider"></div>
         <el-dropdown trigger="click" @command="onCommand">
@@ -146,7 +152,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { logout, changePassword, listOrgsCached, getMyPerms } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
-import { isGlobalUser, userOrgKey, getDomain, setDomain, currentOrg, clearOrgState } from '@/lib/org'
+import { isGlobalUser, getDomain, setDomain, currentOrg, clearOrgState } from '@/lib/org'
 import { hasPerm, permReady, loadRoleName, savePerms, saveRoleName, clearPerms } from '@/lib/perm'
 import logo from '@/assets/logo.svg'
 
@@ -197,13 +203,26 @@ const updateClock = () => {
   currentWeekday.value = dayNames[now.getDay()]
 }
 
-// ===== 机构域状态（全局用户=顶栏选择器；机构用户=只读徽标） =====
+// ===== 当前机构（全局用户可切换；机构用户只读） =====
 const isGlobal = ref(isGlobalUser())
-const userOrg = ref(userOrgKey())
 const domain = ref(getDomain())
 const orgOptions = ref([])
-// 参与 router-view key：切换域后当前页组件重建、数据重载
+// 参与 router-view key：切换机构后当前页组件重建、数据重载
 const domainFlag = ref(currentOrg())
+const orgDisplay = computed(() => {
+  const hit = orgOptions.value.find(o => o.orgKey === domain.value)
+  if (hit?.orgName) return hit.orgName
+  return domain.value === 'default' ? '院内默认机构' : domain.value
+})
+
+function onDomainChange(v) {
+  if (v === domain.value) return
+  setDomain(v)
+  domain.value = v
+  domainFlag.value = v
+  const name = orgOptions.value.find(o => o.orgKey === v)?.orgName || v
+  ElMessage.success(`已切换到 ${name}`)
+}
 
 onMounted(async () => {
   updateClock()
@@ -239,17 +258,10 @@ onUnmounted(() => {
   window.removeEventListener('perms-updated', onPermsUpdated)
 })
 
-function onDomainChange(v) {
-  setDomain(v)
-  domainFlag.value = v
-  ElMessage.success(`已切换到机构域 ${v}`)
-}
-
 // ===== 菜单树：页面属性（标题/图标/角色）单一来源=路由 meta，此处只定义分组 =====
 const GROUP_DEFS = [
   { key: 'business', title: '证书业务', icon: 'Tickets' },
-  { key: 'trust', title: '信任域管理', icon: 'Connection' },
-  { key: 'system', title: '系统管理', icon: 'Setting' }
+  { key: 'platform', title: '平台管理', icon: 'Setting' }
 ]
 // 默认收起全部二级分组；仅当直达/刷新在组内页面时展开该组，保证激活项可见
 const openedGroups = computed(() => {
@@ -506,6 +518,54 @@ async function onCommand(command) {
   color: rgba(255, 255, 255, 0.75);
 }
 
+/* ---------- 当前机构徽标（全局用户可点击返回总览，机构用户只读） ---------- */
+.org-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  max-width: 320px;
+}
+
+button.org-chip {
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+button.org-chip:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.org-chip-label {
+  color: rgba(255, 255, 255, 0.72);
+  flex-shrink: 0;
+}
+
+.org-chip-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.org-chip-arrow {
+  color: rgba(255, 255, 255, 0.8);
+  flex-shrink: 0;
+}
+
+.org-chip-readonly {
+  background: rgba(255, 255, 255, 0.08);
+  border-style: dashed;
+}
+
 .header-clock {
   display: flex;
   align-items: center;
@@ -520,11 +580,6 @@ async function onCommand(command) {
 }
 
 .clock-week {
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.domain-label {
-  font-size: 13px;
   color: rgba(255, 255, 255, 0.85);
 }
 

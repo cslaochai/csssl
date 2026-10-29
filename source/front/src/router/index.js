@@ -72,7 +72,7 @@ const routes = [
           perm: 'menu:orgs',
           roles: ['ADMIN'],
           globalOnly: true,
-          group: 'trust',
+          group: 'platform',
           icon: 'OfficeBuilding'
         }
       },
@@ -80,19 +80,19 @@ const routes = [
         path: 'root-ca',
         name: 'root-ca',
         component: () => import('@/views/RootCa.vue'),
-        meta: { title: '根CA管理', perm: 'menu:root-ca', roles: ['ADMIN', 'KEY_ADMIN'], group: 'trust', icon: 'Key' }
+        meta: { title: '根CA管理', perm: 'menu:root-ca', roles: ['ADMIN', 'KEY_ADMIN'], group: 'platform', icon: 'Key' }
       },
       {
         path: 'templates',
         name: 'templates',
         component: () => import('@/views/Templates.vue'),
-        meta: { title: '证书模板', perm: 'menu:templates', roles: ['ADMIN', 'SECURITY_ADMIN'], group: 'trust', icon: 'Collection' }
+        meta: { title: '证书模板', perm: 'menu:templates', roles: ['ADMIN', 'SECURITY_ADMIN'], group: 'platform', icon: 'Collection' }
       },
       {
         path: 'users',
         name: 'users',
         component: () => import('@/views/Users.vue'),
-        meta: { title: '用户管理', perm: 'menu:users', roles: ['ADMIN'], group: 'system', icon: 'User' }
+        meta: { title: '用户管理', perm: 'menu:users', roles: ['ADMIN'], group: 'platform', icon: 'User' }
       },
       {
         path: 'roles',
@@ -104,7 +104,7 @@ const routes = [
           perm: 'menu:roles',
           roles: ['ADMIN'],
           globalOnly: true,
-          group: 'system',
+          group: 'platform',
           icon: 'Avatar'
         }
       },
@@ -116,7 +116,7 @@ const routes = [
       }
     ]
   },
-  { path: '/:pathMatch(.*)*', redirect: '/dashboard' }
+  { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 
 const router = createRouter({

@@ -73,7 +73,8 @@ async function onSubmit() {
     // 机构域：orgKey=null 全局用户（可选域），非空机构用户（固定本域）
     saveSessionOrg(res.data.orgKey || '')
     ElMessage.success('登录成功')
-    const redirect = route.query.redirect || '/dashboard'
+    // 落到根路由：全局管理员进全部机构总览，机构用户直接进本机构概览
+    const redirect = route.query.redirect || '/'
     router.push(redirect)
   } catch (e) {
     // 错误提示已由拦截器统一处理

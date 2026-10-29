@@ -561,9 +561,11 @@ public class CertService {
         }
     }
 
-    /** 概览统计：证书总量/状态分布/类型分布/30天内到期，供仪表盘渲染 */
-    public Map<String, Object> overview() {
-        List<CaCert> all = certMapper.selectList(null);
+    /** 概览统计：按机构域过滤（证书总量/状态分布/类型分布/30天内到期），供仪表盘渲染 */
+    public Map<String, Object> overview(String orgKey) {
+        String org = orgKey == null || orgKey.isBlank() ? CaOrg.DEFAULT_ORG_KEY : orgKey;
+        List<CaCert> all = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
+                .eq(CaCert::getOrgKey, org));
         long valid = 0, revoked = 0, expired = 0;
         long server = 0, client = 0, subCa = 0;
         long expiring = 0;
@@ -595,7 +597,7 @@ public class CertService {
         data.put("client", client);
         data.put("subCa", subCa);
         data.put("expiring30d", expiring);
-        data.put("root", caService.status());
+        data.put("root", caService.status(org));
         return data;
     }
 

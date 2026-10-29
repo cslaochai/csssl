@@ -241,10 +241,11 @@ public class CertController {
                 .body(p12);
     }
 
-    /** 概览统计（仪表盘；跨机构汇总只读） */
+    /** 概览统计（仪表盘；按当前机构域过滤，机构用户锁本机构） */
     @GetMapping("/overview")
-    public Result<Map<String, Object>> overview() {
-        return Result.success("查询成功", certService.overview());
+    public Result<Map<String, Object>> overview(@RequestParam(required = false) String orgKey,
+                                                HttpServletRequest request) {
+        return Result.success("查询成功", certService.overview(RoleCode.effectiveOrg(request, orgKey)));
     }
 
     /**

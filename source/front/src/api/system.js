@@ -121,8 +121,9 @@ export function downloadCertPem(id) {
 export function downloadKeyPem(id) {
   return request.get(`/admin/certs/${id}/key.pem`)
 }
-export function getOverview() {
-  return request.get('/admin/overview')
+/** 证书概览（按机构域）；全局用户可传指定域，机构用户由后端锁本域 */
+export function getOverview(orgKey = currentOrg()) {
+  return request.get('/admin/overview', { params: { orgKey } })
 }
 
 // ===== CRL 吊销列表（按机构域） =====
