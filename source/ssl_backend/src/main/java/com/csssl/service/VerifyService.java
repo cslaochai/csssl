@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.dto.VerifyRequest;
 import com.csssl.dto.VerifyResult;
 import com.csssl.entity.CaCert;
+import com.csssl.entity.CaOrg;
 import com.csssl.mapper.CaCertMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
@@ -38,7 +39,7 @@ public class VerifyService {
 
     /** 校验（兼容入口=default 机构域） */
     public VerifyResult verify(VerifyRequest req) {
-        return verify(req, CaService.DEFAULT_ORG_KEY);
+        return verify(req, CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 校验（机构域版）：沿该机构 根CA ← SUB_CA ← 叶子 链验证 */

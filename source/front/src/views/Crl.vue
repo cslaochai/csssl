@@ -34,7 +34,7 @@
               </el-form-item>
             </el-form>
             <div class="query-actions">
-              <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
+              <el-tag size="small" type="info" effect="plain">当前域：{{ orgDomain }}</el-tag>
               <el-button v-perm="'crl:download'" type="primary" :icon="Download" :loading="crlLoading" @click="onDownloadCrl">下载 CRL</el-button>
             </div>
           </div>

@@ -25,8 +25,27 @@
           登 录
         </el-button>
       </el-form>
-      <div class="login-tip">如忘记口令，请联系系统管理员重置</div>
+      <div class="login-tip">
+        <span>如忘记口令，请联系系统管理员重置</span>
+        <el-link type="primary" :underline="false" class="cred-link" @click="credVisible = true">登录凭证</el-link>
+      </div>
     </div>
+
+    <!-- 登录凭证（演示环境测试账号一览，一键填入） -->
+    <el-dialog v-model="credVisible" title="登录凭证（演示账号）" width="560px">
+      <el-table :data="CREDENTIALS" size="small" stripe>
+        <el-table-column prop="roleName" label="角色" width="110" />
+        <el-table-column prop="username" label="账号" width="120" class-name="cell-mono" />
+        <el-table-column prop="password" label="口令" width="130" class-name="cell-mono" />
+        <el-table-column prop="desc" label="职责说明" min-width="160" />
+        <el-table-column label="操作" width="90" align="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="fillCredential(row)">填入</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="cred-tip">演示环境专用：审核人与提交人必须不同人，签发流程请用 admin 提交、approver01 审批。</div>
+    </el-dialog>
   </div>
 </template>
 
@@ -51,6 +70,21 @@ const form = reactive({
   password: ''
 })
 
+// 演示环境测试账号（与库中 ssl_sys_user 一一对应；新增演示账号后在此同步）
+const CREDENTIALS = [
+  { username: 'admin', password: '123456', roleName: '系统管理员', desc: '全局账号：申请录入、签发、机构与根CA维护' },
+  { username: 'approver01', password: 'Ap2026qaz', roleName: '审核员', desc: '审核证书申请（不得与提交人同一人）' },
+]
+
+const credVisible = ref(false)
+
+function fillCredential(row) {
+  form.username = row.username
+  form.password = row.password
+  credVisible.value = false
+  ElMessage.success(`已填入 ${row.roleName}（${row.username}），点「登录」进入`)
+}
+
 const rules = {
   username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
   password: [{ required: true, message: '请输入口令', trigger: 'blur' }]
@@ -70,10 +104,10 @@ async function onSubmit() {
     // 角色名称与生效权限点：侧栏/守卫/按钮均按权限点收敛（服务端仍逐接口强校验）
     saveRoleName(res.data.roleName || '')
     savePerms(res.data.perms || [])
-    // 机构域：orgKey=null 全局用户（可选域），非空机构用户（固定本域）
-    saveSessionOrg(res.data.orgKey || '')
+    // 机构域：orgKey=null 全局用户（落平台主机构），非空机构用户（固定本域）
+    saveSessionOrg(res.data.orgKey || '', res.data.primaryOrg || '')
     ElMessage.success('登录成功')
-    // 落到根路由：全局管理员进全部机构总览，机构用户直接进本机构概览
+    // 落到根路由（首页=概览；redirect 优先）
     const redirect = route.query.redirect || '/'
     router.push(redirect)
   } catch (e) {

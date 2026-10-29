@@ -78,9 +78,9 @@ public class CrlService {
     /** 全量 CRL 续期窗口（天）：nextUpdate 距当前不足此值时主动重签，避免依赖方拉到临界过期 CRL */
     private static final int REPUBLISH_AHEAD_DAYS = 7;
 
-    /** 应纳入 default 域 CRL 的证书（兼容入口） */
+    /** 应纳入主机构 CRL 的证书（兼容入口） */
     public List<CaCert> revokedList() {
-        return revokedList(CaService.DEFAULT_ORG_KEY);
+        return revokedList(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /**
@@ -128,7 +128,7 @@ public class CrlService {
      * </ol>
      */
     public CrlInfo publishIfNeeded() {
-        return publishIfNeeded(CaService.DEFAULT_ORG_KEY);
+        return publishIfNeeded(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 判重发布入口（机构版）：以该机构 SUB_CA（signingCert(orgKey)）签名，落到该机构 CRL 域 */
@@ -161,11 +161,11 @@ public class CrlService {
     /** 定时发布目标：default 恒含 + 机构表全部 ACTIVE 机构（存量单根环境仅有 default，行为与旧版一致） */
     private List<String> refreshTargets() {
         List<String> keys = new ArrayList<>();
-        keys.add(CaService.DEFAULT_ORG_KEY);
+        keys.add(CaOrg.PRIMARY_ORG_KEY);
         try {
             for (CaOrg org : orgService.list()) {
                 if (OrgService.STATUS_ACTIVE.equals(org.getStatus())
-                        && !CaService.DEFAULT_ORG_KEY.equals(org.getOrgKey())) {
+                        && !CaOrg.PRIMARY_ORG_KEY.equals(org.getOrgKey())) {
                     keys.add(org.getOrgKey());
                 }
             }
@@ -177,7 +177,7 @@ public class CrlService {
 
     /** 生成增量 CRL（dCRL，兼容入口=default 机构） */
     public DeltaCrlInfo buildDeltaCrl() {
-        return buildDeltaCrl(CaService.DEFAULT_ORG_KEY);
+        return buildDeltaCrl(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 生成该机构域增量 CRL：自该域最近全量发布以来新增的吊销/挂起条目；无全量基础时返回空增量 */
@@ -253,7 +253,7 @@ public class CrlService {
             state = new CrlState();
             state.setId(nextRowId());
             state.setOrgKey(orgKey);
-            if (CaService.DEFAULT_ORG_KEY.equals(orgKey)) {
+            if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
                 LegacyState legacy = readLegacyState();
                 state.setCrlNumber(legacy.crlNumber());
                 state.setThisUpdate(legacy.lastFullCrlTime());

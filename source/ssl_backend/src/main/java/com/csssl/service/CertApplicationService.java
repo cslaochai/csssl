@@ -238,7 +238,7 @@ public class CertApplicationService {
     /** 数据域强制：申请单归属机构必须等于操作者有效域（机构用户越域 403；全局用户须显式传对 orgKey） */
     private static void requireOrgMatch(CertApplication app, String effOrg) {
         String appOrg = app.getOrgKey() == null || app.getOrgKey().isBlank()
-                ? CaOrg.DEFAULT_ORG_KEY : app.getOrgKey();
+                ? CaOrg.PRIMARY_ORG_KEY : app.getOrgKey();
         if (!appOrg.equals(effOrg)) {
             throw new SecurityException("权限不足：申请单归属机构 " + appOrg + "，与当前操作域 " + effOrg + " 不一致");
         }
@@ -249,7 +249,7 @@ public class CertApplicationService {
      * 避免签发出才被拒）；default 域保持 O=CSSSL 老口径不校验。
      */
     private void checkSubjectDnOrg(String subjectDn, String org) {
-        if (CaOrg.DEFAULT_ORG_KEY.equals(org)) {
+        if (CaOrg.LEGACY_ORG_KEY.equals(org)) {
             return;
         }
         CaOrg orgRow = orgService.get(org);

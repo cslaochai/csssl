@@ -16,7 +16,6 @@
       <el-form label-width="110px" style="max-width: 720px">
         <el-form-item label="机构域">
           <el-select v-model="orgKey" style="width: 240px" placeholder="选择机构域">
-            <el-option label="default（默认域）" value="default" />
             <el-option
               v-for="o in orgOptions"
               :key="o.orgKey"

@@ -2,6 +2,7 @@ package com.csssl.controller;
 
 import com.csssl.common.Result;
 import com.csssl.dto.CaStatusVo;
+import com.csssl.entity.CaOrg;
 import com.csssl.service.AuditService;
 import com.csssl.service.CaService;
 import com.csssl.service.OrgService;
@@ -23,11 +24,11 @@ import java.util.Map;
 
 /**
  * 根CA管理接口（需登录）：状态查询、初始化、根密钥封存/解封、Shamir(3,5) 门限分持、证书导出。
- * 路线A多机构：全部接受 orgKey 参数（缺省 default=院内默认域，存量调用零破坏）；
- * 读操作要求机构存在（default 不依赖机构表记录，保证首启顺序无关），写操作额外要求机构 ACTIVE。
+ * 路线A多机构：全部接受 orgKey 参数（缺省=平台主机构，存量调用零破坏）；
+ * 读操作要求机构存在（存量单根标识 default 不依赖机构表记录，保证首启顺序无关），写操作额外要求机构 ACTIVE。
  *
  * <p>数据域强制（effectiveOrg 口径）：机构 ADMIN/机构 KEY_ADMIN 一律锁本机构（显式请求别机构 403）；
- * 全局 ADMIN/KEY_ADMIN 须显式传 orgKey，缺省只落 default 域——跨机构密钥域操作必须逐机构显式传参，
+ * 全局 ADMIN/KEY_ADMIN 须显式传 orgKey，缺省只落平台主机构——跨机构密钥域操作必须逐机构显式传参，
  * 不存在"全部机构"写旁路。fail-closed：SUSPENDED/CLOSED 机构只读放行（status/download/shares 查看），
  * init/seal/unseal/migrate/unseal-shares 等密钥形态写操作经 checkOrgForWrite 拒绝。</p>
  */
@@ -192,14 +193,14 @@ public class CaRootController {
 
     /** 读操作：非 default 机构必须已登记（default 不查表，保证启动首序与存量行为不变） */
     private void checkOrgForRead(String orgKey) {
-        if (!CaService.DEFAULT_ORG_KEY.equals(orgKey)) {
+        if (!CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
             orgService.get(orgKey);
         }
     }
 
     /** 写操作：非 default 机构还须 ACTIVE（SUSPENDED/CLOSED 拒绝密钥形态变更与重建） */
     private void checkOrgForWrite(String orgKey) {
-        if (!CaService.DEFAULT_ORG_KEY.equals(orgKey)) {
+        if (!CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
             orgService.requireActive(orgKey);
         }
     }
@@ -207,7 +208,7 @@ public class CaRootController {
     /** 审计 target：默认域沿用原 target 文案（兼容存量检索），新机构加 orgKey 前缀 */
     private String tag(String orgKey, String legacyTarget) {
         String base = legacyTarget == null ? "" : legacyTarget;
-        return CaService.DEFAULT_ORG_KEY.equals(orgKey) ? base : orgKey + ":" + base;
+        return CaOrg.LEGACY_ORG_KEY.equals(orgKey) ? base : orgKey + ":" + base;
     }
 
     private String clientIp(HttpServletRequest request) {

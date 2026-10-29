@@ -19,7 +19,7 @@
         </nav>
       </div>
       <div class="header-right">
-        <!-- 全局管理员可切换当前机构；机构账号只读显示本机构 -->
+        <!-- 当前机构：全局管理员可下拉切换；机构账号只读显示本机构 -->
         <el-dropdown v-if="isGlobal" trigger="click" @command="onDomainChange">
           <button class="org-chip" title="切换机构">
             <el-icon><OfficeBuilding /></el-icon>
@@ -33,9 +33,10 @@
                 v-for="o in orgOptions"
                 :key="o.orgKey"
                 :command="o.orgKey"
-                :disabled="o.orgKey === domain"
               >
-                {{ o.orgName || o.orgKey }}
+                <span :style="o.orgKey === domain ? 'font-weight:600' : ''">
+                  {{ o.orgKey === domain ? '✓ ' : '' }}{{ o.orgName || o.orgKey }}
+                </span>
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -152,7 +153,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { logout, changePassword, listOrgsCached, getMyPerms } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
-import { isGlobalUser, getDomain, setDomain, currentOrg, clearOrgState } from '@/lib/org'
+import { isGlobalUser, currentOrg, setDomain, syncPrimaryOrg, clearOrgState } from '@/lib/org'
 import { hasPerm, permReady, loadRoleName, savePerms, saveRoleName, clearPerms } from '@/lib/perm'
 import logo from '@/assets/logo.svg'
 
@@ -203,32 +204,42 @@ const updateClock = () => {
   currentWeekday.value = dayNames[now.getDay()]
 }
 
-// ===== 当前机构（全局用户可切换；机构用户只读） =====
+// ===== 当前机构（机构用户锁定本机构；全局用户经下拉切换工作机构，缺省=平台主机构） =====
 const isGlobal = ref(isGlobalUser())
-const domain = ref(getDomain())
-const orgOptions = ref([])
+const domain = ref(currentOrg())
 // 参与 router-view key：切换机构后当前页组件重建、数据重载
 const domainFlag = ref(currentOrg())
-const orgDisplay = computed(() => {
-  const hit = orgOptions.value.find(o => o.orgKey === domain.value)
-  if (hit?.orgName) return hit.orgName
-  return domain.value === 'default' ? '院内默认机构' : domain.value
-})
+const orgOptions = ref([])
+const orgName = ref('')
+const orgDisplay = computed(() => orgName.value || domain.value || '未配置机构')
+const orgTitle = computed(() => domain.value ? `${orgDisplay.value}（${domain.value}）` : '尚未登记机构')
 
+/** 下拉切换工作机构：各页数据域请求按 currentOrg() 自动附带，router-view 以 path 重建不感知域 */
 function onDomainChange(v) {
   if (v === domain.value) return
   setDomain(v)
   domain.value = v
   domainFlag.value = v
-  const name = orgOptions.value.find(o => o.orgKey === v)?.orgName || v
-  ElMessage.success(`已切换到 ${name}`)
+  orgName.value = orgOptions.value.find(o => o.orgKey === v)?.orgName || ''
+  ElMessage.success(`已切换到 ${orgName.value || v}`)
 }
 
 onMounted(async () => {
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
   if (isGlobal.value) {
-    orgOptions.value = await listOrgsCached()
+    const orgs = await listOrgsCached()
+    orgOptions.value = orgs
+    // 旧会话自愈：补齐 primaryOrg 并清掉机构表里已不存在的非法域（如已删除的 default）
+    const healed = syncPrimaryOrg(orgs)
+    if (healed && healed !== domain.value) {
+      domain.value = healed
+      domainFlag.value = healed
+      orgName.value = orgs.find(o => o.orgKey === healed)?.orgName || ''
+    }
+  }
+  if (domain.value && !orgName.value) {
+    orgName.value = orgOptions.value.find(o => o.orgKey === domain.value)?.orgName || ''
   }
   window.addEventListener('perms-updated', onPermsUpdated)
   await refreshMyPerms()
@@ -255,6 +266,7 @@ async function refreshMyPerms() {
 
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
+  window.removeEventListener('orgs-updated', refreshOrgOptions)
   window.removeEventListener('perms-updated', onPermsUpdated)
 })
 
@@ -518,7 +530,7 @@ async function onCommand(command) {
   color: rgba(255, 255, 255, 0.75);
 }
 
-/* ---------- 当前机构徽标（全局用户可点击返回总览，机构用户只读） ---------- */
+/* ---------- 当前机构徽标（全局用户点击下拉切换，机构用户只读） ---------- */
 .org-chip {
   display: inline-flex;
   align-items: center;

@@ -55,6 +55,8 @@ export async function listOrgsCached(force = false) {
     const res = await listOrgs()
     const d = res.data
     orgsCache = Array.isArray(d) ? d : d?.records || []
+    // 顶栏机构下拉常驻 Layout，缓存刷新后广播，避免新增/停用机构后要整页刷新才可见
+    window.dispatchEvent(new Event('orgs-updated'))
   } catch (e) {
     orgsCache = orgsCache || []
   }

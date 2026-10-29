@@ -181,7 +181,7 @@ public class RoleController {
         if (!changes.isEmpty()) {
             auditService.record(RoleCode.currentUser(request), "ROLE_UPDATE", role.getRoleCode(),
                     "更新角色 " + role.getRoleCode() + "：" + String.join("；", changes),
-                    clientIp(request), CaOrg.DEFAULT_ORG_KEY);
+                    clientIp(request), CaOrg.PRIMARY_ORG_KEY);
         }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("roleCode", role.getRoleCode());
@@ -202,7 +202,7 @@ public class RoleController {
         permissionService.require(request, PermissionCatalog.ROLE_PERM);
         SysRole role = requireRole(roleCode);
         permissionService.save(role.getRoleCode(), body == null ? null : body.get("perms"),
-                RoleCode.currentUser(request), clientIp(request), CaOrg.DEFAULT_ORG_KEY);
+                RoleCode.currentUser(request), clientIp(request), CaOrg.PRIMARY_ORG_KEY);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("roleCode", role.getRoleCode());
         data.put("perms", permissionService.effectiveList(role.getRoleCode()));

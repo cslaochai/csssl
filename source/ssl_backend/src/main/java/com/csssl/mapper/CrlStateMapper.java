@@ -14,9 +14,9 @@ import org.apache.ibatis.annotations.Mapper;
 @Mapper
 public interface CrlStateMapper extends BaseMapper<CrlState> {
 
-    /** 行锁读取 default 机构发布状态（兼容入口=院内默认域） */
+    /** 行锁读取主机构发布状态（兼容入口） */
     default CrlState selectForUpdate() {
-        return selectForUpdate(CaOrg.DEFAULT_ORG_KEY);
+        return selectForUpdate(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 行锁读取指定机构发布状态行：并发/多实例发布串行化（须在事务内调用才有意义） */

@@ -56,7 +56,7 @@ public class AuthService {
 
         SysUser user = loadByUsername(username);
         if (user == null) {
-            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, CaOrg.DEFAULT_ORG_KEY);
+            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, CaOrg.PRIMARY_ORG_KEY);
             throw new IllegalArgumentException("账号或口令错误");
         }
         LocalDateTime now = LocalDateTime.now();
@@ -103,6 +103,8 @@ public class AuthService {
         data.put("perms", permissionService.effectiveList(user.getRoleCode()));
         // 机构数据域：null=全局账号；前端据此锁定/展示机构切换（服务端各域操作仍强制校验，不信任前端）
         data.put("orgKey", user.getOrgKey());
+        // 平台主机构（各机构标识由管理员在机构管理维护；全局账号默认落在它上面）
+        data.put("primaryOrg", CaOrg.PRIMARY_ORG_KEY);
         return data;
     }
 
@@ -148,10 +150,10 @@ public class AuthService {
         auditService.record(username, "LOGOUT", null, "退出登录", ip, orgOfUser(user));
     }
 
-    /** 审计机构归位：账号归属机构（全局账号/无账号=默认域 default） */
+    /** 审计机构归位：账号归属机构（全局账号/无账号=平台主机构） */
     private static String orgOfUser(SysUser user) {
         return user == null || user.getOrgKey() == null || user.getOrgKey().isBlank()
-                ? CaOrg.DEFAULT_ORG_KEY : user.getOrgKey();
+                ? CaOrg.PRIMARY_ORG_KEY : user.getOrgKey();
     }
 
     /**

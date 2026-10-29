@@ -61,9 +61,6 @@ public class CaService implements ApplicationRunner {
     public static final String TYPE_ROOT = "ROOT";
     public static final String TYPE_SUB_CA = "SUB_CA";
 
-    /** 院内默认域机构（存量单根兼容位）：所有无 orgKey 参数的公开方法均作用于它 */
-    public static final String DEFAULT_ORG_KEY = CaOrg.DEFAULT_ORG_KEY;
-
     /** 根私钥状态 */
     public static final String ROOT_KEY_ONLINE = "ONLINE";
     public static final String ROOT_KEY_SEALED = "SEALED";
@@ -136,7 +133,7 @@ public class CaService implements ApplicationRunner {
 
     /** 签发证书落盘目录（issued/{serial}，兼容入口=default 机构） */
     public Path issuedDir(String serialHex) {
-        return issuedDir(DEFAULT_ORG_KEY, serialHex);
+        return issuedDir(CaOrg.PRIMARY_ORG_KEY, serialHex);
     }
 
     /** 签发证书落盘目录：default → store-dir/issued/{serial}；其他 → store-dir/orgs/{orgKey}/issued/{serial} */
@@ -146,7 +143,7 @@ public class CaService implements ApplicationRunner {
 
     /** 门限份额目录：default 沿用 root/shares（存量路径不动）；新机构按约定平铺在机构目录 shares/ */
     private Path sharesDir(String orgKey) {
-        return DEFAULT_ORG_KEY.equals(orgKey)
+        return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
                 ? rootDir(orgKey).resolve("shares")
                 : orgBaseDir(orgKey).resolve("shares");
     }
@@ -166,17 +163,23 @@ public class CaService implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        // 启动仅自动确保 default 机构（存量行为）：新机构由 OrgService 开机构流程初始化
+        // 启动仅确保主机构（OrgScope 已校准）；未登记时不代建，交由机构管理页开机构
+        String primary = CaOrg.PRIMARY_ORG_KEY;
+        if (orgMapper.selectOne(new LambdaQueryWrapper<CaOrg>()
+                .eq(CaOrg::getOrgKey, primary)) == null) {
+            log.info("[CA] 主机构 {} 尚未登记，跳过启动初始化（请在机构管理创建机构）", primary);
+            return;
+        }
         try {
-            CaCert root = ensureRoot(DEFAULT_ORG_KEY);
-            ensureSubCa(DEFAULT_ORG_KEY);
+            CaCert root = ensureRoot(primary);
+            ensureSubCa(primary);
             // 门限化以「份额目录是否已有完整 5 份份额文件」为唯一判据（ensureRootShares 幂等）：
             // 新根生成或中断后重启都会安全重试，不依赖任何内存标志；已封存/已门限态自动跳过
-            if (ROOT_KEY_ONLINE.equals(rootKeyState(DEFAULT_ORG_KEY))) {
-                ensureRootShares(DEFAULT_ORG_KEY);
+            if (ROOT_KEY_ONLINE.equals(rootKeyState(primary))) {
+                ensureRootShares(primary);
             }
-            log.info("[CA] 启动完成（default 域）：root={}({}), subCa 签发就绪，rootKeyState={}",
-                    root.getSubjectCn(), root.getAlgorithm(), rootKeyState(DEFAULT_ORG_KEY));
+            log.info("[CA] 启动完成（主机构 {}）：root={}({}), subCa 签发就绪，rootKeyState={}",
+                    primary, root.getSubjectCn(), root.getAlgorithm(), rootKeyState(primary));
         } catch (Exception e) {
             log.error("[CA] 启动初始化失败，请检查 store-dir 权限、主密钥与数据库连接: {}", e.getMessage());
         }
@@ -184,9 +187,9 @@ public class CaService implements ApplicationRunner {
 
     // ==================== 根CA ====================
 
-    /** 确保根CA存在（幂等，兼容入口=default 机构） */
+    /** 确保根CA存在（幂等，兼容入口=主机构） */
     public CaCert ensureRoot() {
-        return ensureRoot(DEFAULT_ORG_KEY);
+        return ensureRoot(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /**
@@ -220,7 +223,7 @@ public class CaService implements ApplicationRunner {
         String algorithm;
         X509Certificate cert;
         KeyPair keyPair;
-        if (DEFAULT_ORG_KEY.equals(orgKey)) {
+        if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
             // default 域：CN/算法/有效期全部沿用全局配置与旧4参自签（DN 含 O=CSSSL），存量行为零变化
             CssslProperties.RootCa rootProps = props.getRootCa();
             algorithm = rootProps.getAlgorithm() == null || rootProps.getAlgorithm().isBlank()
@@ -259,7 +262,7 @@ public class CaService implements ApplicationRunner {
                 .atZone(java.time.ZoneId.systemDefault()).toLocalDateTime());
         row.setStatus("VALID");
         row.setCertPem(PemUtil.certToPem(cert));
-        row.setDescription(DEFAULT_ORG_KEY.equals(orgKey)
+        row.setDescription(CaOrg.LEGACY_ORG_KEY.equals(orgKey)
                 ? "系统根CA（首次启动自动初始化）" : "机构根CA（开机构时初始化）");
         row.setCreatedBy("SYSTEM");
         row.setCreatedAt(LocalDateTime.now());
@@ -275,7 +278,7 @@ public class CaService implements ApplicationRunner {
             String certPem = Files.readString(rootCertFile(orgKey), StandardCharsets.UTF_8);
             X509Certificate cert = PemUtil.parseCert(certPem);
             // 算法探测沿用存量口径（按配置判断 SM2/RSA）；机构域以注册表 algorithm 为准
-            String hint = DEFAULT_ORG_KEY.equals(orgKey)
+            String hint = CaOrg.LEGACY_ORG_KEY.equals(orgKey)
                     ? props.getRootCa().getAlgorithm() : requireOrg(orgKey).getAlgorithm();
             CaCert row = new CaCert();
             row.setOrgKey(orgKey);
@@ -301,7 +304,7 @@ public class CaService implements ApplicationRunner {
 
     /** 查询根CA记录（兼容入口=default 机构） */
     public CaCert findRoot() {
-        return findRoot(DEFAULT_ORG_KEY);
+        return findRoot(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 查询指定机构根CA记录（serial 全局唯一，机构维度过滤取最新） */
@@ -320,7 +323,7 @@ public class CaService implements ApplicationRunner {
 
     /** 加载根证书（兼容入口=default 机构） */
     public X509Certificate loadRootCert() {
-        return loadRootCert(DEFAULT_ORG_KEY);
+        return loadRootCert(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 加载指定机构根证书 */
@@ -334,7 +337,7 @@ public class CaService implements ApplicationRunner {
 
     /** 加载根CA私钥（兼容入口=default 机构） */
     public PrivateKey loadRootKey() {
-        return loadRootKey(DEFAULT_ORG_KEY);
+        return loadRootKey(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 加载机构根证书（内部版，假定调用方已持有机构锁或仅需只读一致性） */
@@ -378,7 +381,7 @@ public class CaService implements ApplicationRunner {
 
     /** 根私钥状态（兼容入口=default 机构） */
     public String rootKeyState() {
-        return rootKeyState(DEFAULT_ORG_KEY);
+        return rootKeyState(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构根私钥状态：SHARES（门限分持）/ ONLINE / SEALED / MISSING */
@@ -398,7 +401,7 @@ public class CaService implements ApplicationRunner {
 
     /** 封存根私钥（兼容入口=default 机构） */
     public void sealRootKey() {
-        sealRootKey(DEFAULT_ORG_KEY);
+        sealRootKey(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 封存机构根私钥：门限分持态清除内存缓存；旧模式将加密文件移存 .sealed（幂等） */
@@ -422,7 +425,7 @@ public class CaService implements ApplicationRunner {
 
     /** 解封根私钥（兼容入口=default 机构） */
     public void unsealRootKey() {
-        unsealRootKey(DEFAULT_ORG_KEY);
+        unsealRootKey(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 解封机构根私钥（旧模式移名恢复在线态；门限分持态须走份额解封接口） */
@@ -448,7 +451,7 @@ public class CaService implements ApplicationRunner {
 
     /** 读取单份门限份额 JSON 文本（兼容入口=default 机构） */
     public String readShareJson(int index) {
-        return readShareJson(DEFAULT_ORG_KEY, index);
+        return readShareJson(CaOrg.PRIMARY_ORG_KEY, index);
     }
 
     /** 读取机构单份门限份额 JSON 文本（管理端导出用；不存在抛 IllegalStateException） */
@@ -466,7 +469,7 @@ public class CaService implements ApplicationRunner {
 
     /** 5 份份额是否全部生成（兼容入口=default 机构） */
     public boolean sharesExist() {
-        return sharesExist(DEFAULT_ORG_KEY);
+        return sharesExist(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构 5 份份额是否全部生成（任一缺失视为未完成，避免以不完整份额误判） */
@@ -488,7 +491,7 @@ public class CaService implements ApplicationRunner {
 
     /** 份额状态（兼容入口=default 机构） */
     public Map<String, Object> shareState() {
-        return shareState(DEFAULT_ORG_KEY);
+        return shareState(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构份额状态（管理端展示：5 份各自存在性 + 阈值） */
@@ -504,7 +507,7 @@ public class CaService implements ApplicationRunner {
 
     /** 根私钥门限化（兼容入口=default 机构） */
     public void ensureRootShares() {
-        ensureRootShares(DEFAULT_ORG_KEY);
+        ensureRootShares(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /**
@@ -556,7 +559,7 @@ public class CaService implements ApplicationRunner {
 
     /** 旧环境迁移（兼容入口=default 机构） */
     public Map<String, Object> migrateRootShares() {
-        return migrateRootShares(DEFAULT_ORG_KEY);
+        return migrateRootShares(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构迁移：把已存在的 SM4 加密根私钥转为门限份额（显式调用，避免误删生产密钥） */
@@ -574,7 +577,7 @@ public class CaService implements ApplicationRunner {
 
     /** 份额解封（兼容入口=default 机构） */
     public void unsealRootKeyWithShares(List<String> shareJsons) {
-        unsealRootKeyWithShares(DEFAULT_ORG_KEY, shareJsons);
+        unsealRootKeyWithShares(CaOrg.PRIMARY_ORG_KEY, shareJsons);
     }
 
     /**
@@ -638,7 +641,7 @@ public class CaService implements ApplicationRunner {
 
     /** 管理端主动初始化（兼容入口=default 机构） */
     public CaStatusVo initRoot() {
-        return initRoot(DEFAULT_ORG_KEY);
+        return initRoot(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /**
@@ -727,7 +730,7 @@ public class CaService implements ApplicationRunner {
 
     /** 确保 SUB_CA 存在（兼容入口=default 机构） */
     public CaCert ensureSubCa() {
-        return ensureSubCa(DEFAULT_ORG_KEY);
+        return ensureSubCa(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /**
@@ -761,7 +764,7 @@ public class CaService implements ApplicationRunner {
         String algorithm = doFindRoot(orgKey).getAlgorithm();
         KeyPair subKey = CertUtil.generateKeyPair(algorithm);
         X509Certificate subCert;
-        if (DEFAULT_ORG_KEY.equals(orgKey)) {
+        if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
             // default 域走旧 CN 入口（DN 含 O=CSSSL），存量证书逐字节兼容
             subCert = CertUtil.issue(subKey, rootCert, rootKey,
                     subProps.getCn(), TYPE_SUB_CA, subProps.getValidityDays(), null, null, null);
@@ -816,7 +819,7 @@ public class CaService implements ApplicationRunner {
 
     /** 查询当前有效 SUB_CA（兼容入口=default 机构） */
     public CaCert findValidSubCa() {
-        return findValidSubCa(DEFAULT_ORG_KEY);
+        return findValidSubCa(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 查询机构当前有效 SUB_CA（未过期且距到期 > renewBeforeDays） */
@@ -851,11 +854,11 @@ public class CaService implements ApplicationRunner {
     @Scheduled(cron = "${csssl.subca-precheck-cron:0 30 3 * * ?}")
     public void dailyPrecheck() {
         List<String> keys = new ArrayList<>();
-        keys.add(DEFAULT_ORG_KEY);
+        keys.add(CaOrg.PRIMARY_ORG_KEY);
         try {
             List<CaOrg> orgs = orgMapper.selectList(new LambdaQueryWrapper<CaOrg>()
                     .eq(CaOrg::getStatus, "ACTIVE")
-                    .ne(CaOrg::getOrgKey, DEFAULT_ORG_KEY));
+                    .ne(CaOrg::getOrgKey, CaOrg.PRIMARY_ORG_KEY));
             for (CaOrg org : orgs) {
                 keys.add(org.getOrgKey());
             }
@@ -900,7 +903,7 @@ public class CaService implements ApplicationRunner {
 
     /** 当前签发CA（兼容入口=default 机构） */
     public X509Certificate signingCert() {
-        return signingCert(DEFAULT_ORG_KEY);
+        return signingCert(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构当前签发CA（SUB_CA）证书：只取现有有效 SUB_CA，不触发轮换（轮换见 {@link #dailyPrecheck(String)}） */
@@ -909,7 +912,7 @@ public class CaService implements ApplicationRunner {
     }
 
     public PrivateKey signingKey() {
-        return signingKey(DEFAULT_ORG_KEY);
+        return signingKey(CaOrg.PRIMARY_ORG_KEY);
     }
 
     public PrivateKey signingKey(String orgKey) {
@@ -935,7 +938,7 @@ public class CaService implements ApplicationRunner {
 
     /** 当前有效 SUB_CA 记录（兼容入口=default 机构） */
     public CaCert currentSubCa() {
-        return currentSubCa(DEFAULT_ORG_KEY);
+        return currentSubCa(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构当前有效 SUB_CA 记录（供链组装/OCSP 使用；无则返回该机构最近一张；均无则 null） */
@@ -957,7 +960,7 @@ public class CaService implements ApplicationRunner {
 
     /** 根CA状态（兼容入口=default 机构） */
     public CaStatusVo status() {
-        return status(DEFAULT_ORG_KEY);
+        return status(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构根CA状态（不抛异常，返回未初始化原因供页面展示；含 SUB_CA 与根密钥封存状态） */
@@ -1008,7 +1011,7 @@ public class CaService implements ApplicationRunner {
 
     /** 根证书 PEM（兼容入口=default 机构） */
     public String exportRootPem() {
-        return exportRootPem(DEFAULT_ORG_KEY);
+        return exportRootPem(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构根证书 PEM（业务系统信任链配置用） */
@@ -1022,7 +1025,7 @@ public class CaService implements ApplicationRunner {
 
     /** 当前 SUB_CA 证书 PEM（兼容入口=default 机构） */
     public String exportSubCaPem() {
-        return exportSubCaPem(DEFAULT_ORG_KEY);
+        return exportSubCaPem(CaOrg.PRIMARY_ORG_KEY);
     }
 
     /** 机构当前 SUB_CA 证书 PEM（中间CA链配置用） */
@@ -1036,7 +1039,7 @@ public class CaService implements ApplicationRunner {
 
     /** 签发证书私钥加密落盘（兼容入口=default 机构） */
     public void storeIssuedKey(String serialHex, String keyPem) {
-        storeIssuedKey(DEFAULT_ORG_KEY, serialHex, keyPem);
+        storeIssuedKey(CaOrg.PRIMARY_ORG_KEY, serialHex, keyPem);
     }
 
     /** 机构签发证书私钥加密落盘 */
@@ -1046,7 +1049,7 @@ public class CaService implements ApplicationRunner {
 
     /** 读取签发证书私钥（兼容入口=default 机构） */
     public String loadIssuedKey(String serialHex) {
-        return loadIssuedKey(DEFAULT_ORG_KEY, serialHex);
+        return loadIssuedKey(CaOrg.PRIMARY_ORG_KEY, serialHex);
     }
 
     /** 读取机构签发证书私钥（无则返回 null；已封存/主密钥错误时抛异常） */
@@ -1055,7 +1058,7 @@ public class CaService implements ApplicationRunner {
     }
 
     public boolean issuedKeyExists(String serialHex) {
-        return issuedKeyExists(DEFAULT_ORG_KEY, serialHex);
+        return issuedKeyExists(CaOrg.PRIMARY_ORG_KEY, serialHex);
     }
 
     public boolean issuedKeyExists(String orgKey, String serialHex) {

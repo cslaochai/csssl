@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.dto.CertVo;
 import com.csssl.entity.CaCert;
+import com.csssl.entity.CaOrg;
 import com.csssl.service.AuditService;
 import com.csssl.service.CaService;
 import com.csssl.service.CrlService;
@@ -41,7 +42,7 @@ public class CrlController {
         CrlService.CrlInfo info = crlService.publishIfNeeded(org);
         Map<String, Object> data = new LinkedHashMap<>();
         // default 域响应体不加 orgKey 字段（存量 URL 逐字节兼容）；非 default 标注归属域
-        if (!CaService.DEFAULT_ORG_KEY.equals(org)) {
+        if (!CaOrg.LEGACY_ORG_KEY.equals(org)) {
             data.put("orgKey", org);
         }
         data.put("revoked", revoked.stream().map(CertVo::from).toList());
@@ -71,7 +72,7 @@ public class CrlController {
         String username = (String) request.getAttribute("ssl.username");
         String crlPem = crlService.publishIfNeeded(org).pem();
         auditService.record(username, "CRL_DOWNLOAD", null,
-                "下载CRL吊销列表" + (CaService.DEFAULT_ORG_KEY.equals(org) ? "" : "（机构 " + org + "）"), clientIp(request));
+                "下载CRL吊销列表" + (CaOrg.LEGACY_ORG_KEY.equals(org) ? "" : "（机构 " + org + "）"), clientIp(request));
         return crlPem;
     }
 
@@ -81,7 +82,7 @@ public class CrlController {
         String org = resolveOrg(orgKey);
         CrlService.DeltaCrlInfo info = crlService.buildDeltaCrl(org);
         Map<String, Object> data = new LinkedHashMap<>();
-        if (!CaService.DEFAULT_ORG_KEY.equals(org)) {
+        if (!CaOrg.LEGACY_ORG_KEY.equals(org)) {
             data.put("orgKey", org);
         }
         data.put("deltaPem", info.pem());
@@ -96,7 +97,7 @@ public class CrlController {
     /** orgKey 缺省=default（存量行为）；显式传入时机构必须存在（非法标识/不存在按现有 IAE 口径回 4xx） */
     private String resolveOrg(String orgKey) {
         if (orgKey == null || orgKey.isBlank()) {
-            return CaService.DEFAULT_ORG_KEY;
+            return CaOrg.PRIMARY_ORG_KEY;
         }
         if (orgService.findByKey(orgKey) == null) {
             throw new IllegalArgumentException("机构不存在: " + orgKey);

@@ -2,14 +2,10 @@ package com.csssl.config;
 
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.csssl.entity.CaCert;
-import com.csssl.entity.CaOrg;
 import com.csssl.entity.CertTemplate;
 import com.csssl.entity.RolePerm;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
-import com.csssl.mapper.CaCertMapper;
-import com.csssl.mapper.CaOrgMapper;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.mapper.RolePermMapper;
 import com.csssl.mapper.SysRoleMapper;
@@ -26,9 +22,9 @@ import java.time.LocalDateTime;
 import java.util.Set;
 
 /**
- * 启动初始化：确保院内默认域机构存在（路线A兼容位）、默认管理员账号存在
- * （首次启动创建 admin / 123456，密码 BCrypt 存储）、初始化内置证书模板（GM/T 0034 §5.3.4）、
- * 执行过期证书归档扫描（§12 生命周期）。
+ * 启动初始化：确保默认管理员账号存在（首次启动创建 admin / 123456，密码 BCrypt 存储）、
+ * 初始化内置证书模板（GM/T 0034 §5.3.4）、执行过期证书归档扫描（§12 生命周期）。
+ * 机构不在此处创建：空库由管理员在机构管理页开首个机构（开机构即初始化该机构独立根CA）。
  */
 @Slf4j
 @Component
@@ -37,11 +33,8 @@ public class DataInitializer implements ApplicationRunner {
 
     private final SysUserMapper userMapper;
     private final CertTemplateMapper templateMapper;
-    private final CaOrgMapper orgMapper;
-    private final CaCertMapper certMapper;
     private final SysRoleMapper roleMapper;
     private final RolePermMapper rolePermMapper;
-    private final CssslProperties props;
     private final CertService certService;
 
     /** 六类法定角色初始档案（编码, 名称, 职责说明, 排序号）——编码与职责由 GM/T 0034 固化，不可增删 */
@@ -56,7 +49,6 @@ public class DataInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        initDefaultOrg();
         initRoles();
         Long count = userMapper.selectCount(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getUsername, "admin"));
@@ -81,35 +73,6 @@ public class DataInitializer implements ApplicationRunner {
         } catch (Exception e) {
             log.warn("[初始化] 过期归档扫描异常（不影响启动）: {}", e.getMessage());
         }
-    }
-
-    /**
-     * 院内默认域机构（路线A兼容铁律：存量单根原样归位 default，subject_o='CSSSL'）。
-     * 算法优先取存量根CA记录的算法（与磁盘密钥材料一致），无存量根时取配置默认。
-     */
-    private void initDefaultOrg() {
-        if (orgMapper.selectCount(new LambdaQueryWrapper<CaOrg>()
-                .eq(CaOrg::getOrgKey, CaOrg.DEFAULT_ORG_KEY)) > 0) {
-            return;
-        }
-        String algorithm = props.getRootCa().getAlgorithm();
-        CaCert root = certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getCertType, "ROOT")
-                .orderByDesc(CaCert::getCreatedAt)
-                .last("limit 1"));
-        if (root != null && root.getAlgorithm() != null && !root.getAlgorithm().isBlank()) {
-            algorithm = root.getAlgorithm();
-        }
-        CaOrg org = new CaOrg();
-        org.setOrgKey(CaOrg.DEFAULT_ORG_KEY);
-        org.setOrgName("院内默认域");
-        org.setSubjectO("CSSSL");
-        org.setAlgorithm(algorithm);
-        org.setStatus("ACTIVE");
-        org.setDescription("存量单根兼容域：路径/DN/主密钥沿用旧根，老对接（cslk/csmig）零破坏");
-        org.setCreatedAt(LocalDateTime.now());
-        orgMapper.insert(org);
-        log.info("[初始化] 已创建院内默认域机构 default（算法={}）", algorithm);
     }
 
     /**

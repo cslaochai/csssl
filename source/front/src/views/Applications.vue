@@ -29,7 +29,7 @@
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
+          <el-tag size="small" type="info" effect="plain">当前域：{{ orgDomain }}</el-tag>
           <el-button v-perm="'app:submit'" type="primary" @click="openSubmit">提交申请</el-button>
         </div>
       </div>
@@ -167,6 +167,7 @@ import {
   issueApplication, cancelApplication, pageTemplates
 } from '@/api/system'
 import { currentOrg } from '@/lib/org'
+import { listOrgsCached } from '@/api/system'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
@@ -181,7 +182,9 @@ const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 
 // 机构域：列表/审批/签发请求由 request 封装自动附带 orgKey=currentOrg()
 const orgDomain = ref(currentOrg())
-const isOrgDomain = computed(() => orgDomain.value !== 'default')
+// 主体 DN 的 O 由受理机构受控（前端拼 DN；subjectO 从机构注册表取，禁手填防冒名）
+const orgSubjectO = ref('')
+const isOrgDomain = computed(() => !!orgDomain.value)
 const submitCn = ref('')
 
 const submitVisible = ref(false)
@@ -267,7 +270,11 @@ async function onSubmit() {
       ElMessage.warning('请填写主体CN（O 取机构主体，无需手填）')
       return
     }
-    submitForm.subjectDn = `CN=${submitCn.value.trim()}`
+    if (!orgSubjectO.value) {
+      ElMessage.warning('未取到受理机构的受控主体O，请先在机构管理确认机构档案')
+      return
+    }
+    submitForm.subjectDn = `CN=${submitCn.value.trim()},O=${orgSubjectO.value}`
   }
   if (!submitForm.applicantName.trim() || !submitForm.subjectDn.trim() || !submitForm.publicKeyPem.trim() || !submitForm.templateId) {
     ElMessage.warning('请完整填写申请信息（含公钥PEM）')
@@ -338,9 +345,13 @@ function onDetail(row) {
   detailVisible.value = true
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadTemplates()
   load()
+  if (orgDomain.value) {
+    const hit = (await listOrgsCached()).find(o => o.orgKey === orgDomain.value)
+    orgSubjectO.value = hit?.subjectO || ''
+  }
 })
 </script>
 

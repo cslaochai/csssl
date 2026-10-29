@@ -90,7 +90,7 @@ public class CertTemplateService {
 
     /** 模板行归属机构兜底（NULL=全局模板，审计归位用） */
     private static String rowOrg(CertTemplate tpl) {
-        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() ? CaOrg.DEFAULT_ORG_KEY : tpl.getOrgKey();
+        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() ? CaOrg.PRIMARY_ORG_KEY : tpl.getOrgKey();
     }
 
     /**

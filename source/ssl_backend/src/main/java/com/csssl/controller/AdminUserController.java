@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
+import com.csssl.entity.CaOrg;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
 import com.csssl.mapper.SysRoleMapper;
@@ -224,7 +225,7 @@ public class AdminUserController {
         if (touched) {
             userMapper.update(null, uw);
         }
-        // 审计归位：按目标用户机构（全局用户=default 域留痕）
+        // 审计归位：按目标用户机构（全局用户=平台主机构留痕）
         String auditOrg = auditOrg(targetOrg, myOrg);
         if (!changes.isEmpty()) {
             auditService.record(operator, "USER_UPDATE", String.valueOf(id),
@@ -243,7 +244,7 @@ public class AdminUserController {
         if (targetUserOrg != null && !targetUserOrg.isBlank()) {
             return targetUserOrg;
         }
-        return operatorOrg == null || operatorOrg.isBlank() ? RoleCode.DEFAULT_ORG : operatorOrg;
+        return operatorOrg == null || operatorOrg.isBlank() ? CaOrg.PRIMARY_ORG_KEY : operatorOrg;
     }
 
     private boolean isSupportedRole(String role) {

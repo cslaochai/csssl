@@ -9,19 +9,26 @@ import java.time.LocalDateTime;
 
 /**
  * CA 机构注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额），机构间互不信任。
- * default 机构=存量单根（subject_o='CSSSL'），落盘路径沿用旧根路径保证老对接零破坏。
+ * 平台只有一家在营机构时，它即主机构（{@link #PRIMARY_ORG_KEY}）；存量单根的落盘路径命名空间
+ * 仍是 {@link #LEGACY_ORG_KEY}，两者刻意分开，避免主机构切换后找不到旧密钥目录。
  */
 @Data
 @TableName("ssl_ca_org")
 public class CaOrg {
 
-    /** 院内默认域机构标识（存量单根兼容位） */
-    public static final String DEFAULT_ORG_KEY = "default";
+    /**
+     * 平台主机构标识：所有不带机构参数的兼容入口都落到它。
+     * 缺省 default（存量单根部署）；启动时由 OrgScope 校准为唯一在营机构。
+     */
+    public static volatile String PRIMARY_ORG_KEY = "default";
+
+    /** 存量单根的密钥目录/DN 命名空间（路径兼容判断专用，不随主机构变化） */
+    public static final String LEGACY_ORG_KEY = "default";
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 机构标识（小写字母数字，如 his1；default=院内默认域） */
+    /** 机构标识（小写字母数字，如 his1） */
     private String orgKey;
 
     /** 机构名称（展示与新根CA CN用） */

@@ -3,6 +3,7 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.config.CssslProperties;
 import com.csssl.entity.CaCert;
+import com.csssl.entity.CaOrg;
 import com.csssl.mapper.CaCertMapper;
 import com.csssl.util.CertUtil;
 import lombok.RequiredArgsConstructor;
@@ -54,7 +55,7 @@ public class OcspService {
 
     /** 响应 OCSP 请求（DER 输入 → DER 输出，兼容入口=default 机构域） */
     public byte[] respond(byte[] requestDer) {
-        return respond(CaService.DEFAULT_ORG_KEY, requestDer);
+        return respond(CaOrg.PRIMARY_ORG_KEY, requestDer);
     }
 
     /** 机构域 responder：按 orgKey 定位机构域查询吊销状态，用该机构 SUB_CA 密钥签响应 */

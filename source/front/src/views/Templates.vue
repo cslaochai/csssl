@@ -222,8 +222,8 @@ function handleCurrentChange(val) {
 function openCreate() {
   editing.value = false
   fillForm({ id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2', validityDays: 365, keyUsage: '', extKeyUsage: '', policyOid: '', description: '' })
-  // 全局用户在 default 域默认建全局模板；已切到机构域则默认归该域
-  form.orgScope = isGlobal.value && orgDomain.value === 'default' ? 'GLOBAL' : 'ORG'
+  // 全局账号默认建全局模板（org_key=NULL，各机构可见）；机构账号恒归本机构
+  form.orgScope = isGlobal.value ? 'GLOBAL' : 'ORG'
   dialogVisible.value = true
 }
 

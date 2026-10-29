@@ -35,7 +35,7 @@
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
+          <el-tag size="small" type="info" effect="plain">当前域：{{ orgDomain }}</el-tag>
           <template v-if="canIssue">
             <el-button v-perm="'cert:issue'" type="primary" @click="openIssue">签发证书</el-button>
             <el-button v-perm="'cert:issue'" @click="openCsr">CSR签发</el-button>
@@ -394,7 +394,7 @@ const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : ['ADMIN', 'KE
 
 // 当前机构域：列表/签发/吊销等请求由 request 封装自动附带 orgKey=currentOrg()
 const orgDomain = ref(currentOrg())
-const isOrgDomain = computed(() => orgDomain.value !== 'default')
+const isOrgDomain = computed(() => !!orgDomain.value)
 
 const loading = ref(false)
 const rows = ref([])

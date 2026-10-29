@@ -136,8 +136,8 @@ public class OrgService {
     public CaOrg create(String orgKey, String orgName, String subjectO, String algorithm,
                         String contact, String description) {
         KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
-        if (CaOrg.DEFAULT_ORG_KEY.equals(orgKey)) {
-            throw new IllegalArgumentException("default 为院内默认域保留标识，不可新建");
+        if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
+            throw new IllegalArgumentException("default 为存量单根兼容标识，不可新建");
         }
         if (orgName == null || orgName.isBlank() || orgName.trim().length() > 64) {
             throw new IllegalArgumentException("机构名称必填且不超过64字符");
@@ -170,6 +170,13 @@ public class OrgService {
 
         // 开机构即建根：独立根CA → SUB_CA → 门限份额（复用带 orgKey 的初始化路径，幂等）
         caService.initRoot(orgKey);
+
+        // 平台唯一在营机构即主机构：无机构参数入口（审计/兼容调用）归位到它，无需重启
+        Long actives = orgMapper.selectCount(new LambdaQueryWrapper<CaOrg>()
+                .eq(CaOrg::getStatus, STATUS_ACTIVE));
+        if (actives != null && actives == 1) {
+            CaOrg.PRIMARY_ORG_KEY = orgKey;
+        }
         return org;
     }
 

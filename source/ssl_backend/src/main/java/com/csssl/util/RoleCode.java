@@ -33,9 +33,6 @@ public final class RoleCode {
     /** 密钥管理员（根密钥门限分持/封存/解封） */
     public static final String KEY_ADMIN = "KEY_ADMIN";
 
-    /** 院内默认机构域兜底标识（与 CaOrg/CaService 的 DEFAULT_ORG_KEY 同源） */
-    public static final String DEFAULT_ORG = CaOrg.DEFAULT_ORG_KEY;
-
     private RoleCode() {
     }
 
@@ -80,7 +77,7 @@ public final class RoleCode {
             }
             return operatorOrg;
         }
-        return req == null ? DEFAULT_ORG : req;
+        return req == null ? CaOrg.PRIMARY_ORG_KEY : req;
     }
 
     /**
@@ -109,7 +106,7 @@ public final class RoleCode {
         if (operatorOrg == null || operatorOrg.isBlank()) {
             return;
         }
-        String row = rowOrgKey == null || rowOrgKey.isBlank() ? DEFAULT_ORG : rowOrgKey;
+        String row = rowOrgKey == null || rowOrgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : rowOrgKey;
         if (!operatorOrg.equals(row)) {
             log.warn("[数据域] 机构用户越域读取数据行（机构 {}），拒绝", row);
             throw new SecurityException("权限不足：不能访问其他机构数据");
@@ -122,7 +119,7 @@ public final class RoleCode {
      */
     public static String requireWriteOrg(HttpServletRequest request, String reqOrgKey, String rowOrgKey) {
         String eff = effectiveOrg(request, reqOrgKey);
-        String row = rowOrgKey == null || rowOrgKey.isBlank() ? DEFAULT_ORG : rowOrgKey;
+        String row = rowOrgKey == null || rowOrgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : rowOrgKey;
         if (!eff.equals(row)) {
             log.warn("[数据域] 操作域 {} 与数据行归属机构 {} 不一致，拒绝", eff, row);
             throw new SecurityException("权限不足：不能操作其他机构数据");
@@ -132,7 +129,7 @@ public final class RoleCode {
 
     /** 数据行归属机构兜底：org_key 列 NOT NULL DEFAULT 'default'，历史语义空=默认域 */
     public static String orgOfRow(String rowOrgKey) {
-        return rowOrgKey == null || rowOrgKey.isBlank() ? DEFAULT_ORG : rowOrgKey;
+        return rowOrgKey == null || rowOrgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : rowOrgKey;
     }
 
     /**

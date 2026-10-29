@@ -24,7 +24,7 @@
             type="primary"
             :loading="initLoading"
             :disabled="!canInitHere"
-            :title="canInitHere ? '' : '该机构已有独立根CA，非 default 域仅在机构尚无根时可初始化'"
+            :title="canInitHere ? '' : '该机构已有独立根CA，仅可在尚无根时初始化'"
             @click="onInit"
         >初始化 / 重建根CA
         </el-button>
@@ -171,9 +171,10 @@ import {
   unsealRootKey
 } from '@/api/system'
 import {downloadText} from '@/lib/download'
-import {currentOrg, isGlobalUser} from '@/lib/org'
+import {currentOrg, isGlobalUser, syncPrimaryOrg} from '@/lib/org'
+import {listOrgsCached} from '@/api/system'
 
-// 当前机构域：全局用户=顶栏选择域；机构用户=本机构（页面随域切换重建重载）
+// 当前操作域：机构用户=本机构；全局用户=平台主机构（登录下发，旧会话经 syncPrimaryOrg 自愈）
 const org = ref(currentOrg())
 const isGlobal = ref(isGlobalUser())
 
@@ -186,8 +187,8 @@ const shareInputs = ref(['', '', ''])
 
 const shareList = computed(() => shares.value.shares || [])
 
-// 非 default 域仅在机构尚无独立根时允许初始化（机构创建即自动生成根，防误重建）
-const canInitHere = computed(() => org.value === 'default' || !root.value.initialized)
+// 仅在机构尚无独立根时允许初始化（机构创建即自动生成根，防误重建）
+const canInitHere = computed(() => !root.value.initialized)
 
 const rootKeyTagType = computed(() => {
   const state = root.value.rootKeyState
@@ -221,7 +222,7 @@ async function loadShares() {
 
 async function onInit() {
   const confirmed = await ElMessageBox.confirm(
-      `将在机构域「${org.value}」上初始化独立根CA。${org.value === 'default' ? '若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。' : '非 default 域仅在机构尚无根时允许初始化。'}新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？`,
+      `将在机构域「${org.value}」上初始化独立根CA。若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？`,
       `初始化根CA（${org.value}）`,
       {type: 'warning', confirmButtonText: '确定初始化', cancelButtonText: '取消'}
   ).catch(() => false)
@@ -312,7 +313,14 @@ async function onDownloadSubCa() {
   ElMessage.success('SUB_CA证书已导出')
 }
 
-onMounted(load)
+onMounted(async () => {
+  // 旧会话自愈：操作域为空（primaryOrg 未下发）时按在营机构补齐再加载
+  if (!org.value) {
+    const healed = syncPrimaryOrg(await listOrgsCached())
+    if (healed) org.value = healed
+  }
+  await load()
+})
 </script>
 
 <style scoped>

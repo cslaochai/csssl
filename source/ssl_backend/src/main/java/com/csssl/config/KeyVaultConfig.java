@@ -56,7 +56,7 @@ public class KeyVaultConfig {
     }
 
     /**
-     * 机构保险库解析器：default → 现单例（store-dir + SSL_MASTER_KEY/master.key，兼容铁律）；
+     * 机构保险库解析器：存量单根（LEGACY_ORG_KEY）→ 现单例（store-dir + SSL_MASTER_KEY/master.key，兼容铁律）；
      * 其他机构 → store-dir/orgs/{orgKey} 为根的独立保险库，主密钥首启自动生成落盘
      * orgs/{orgKey}/master.key——刻意不复用环境变量主密钥，保证机构域间密钥材料完全隔离。
      */
@@ -73,17 +73,17 @@ public class KeyVaultConfig {
             this.defaultVault = defaultVault;
         }
 
-        /** 机构落盘根目录：default → store-dir；其他 → store-dir/orgs/{orgKey} */
+        /** 机构落盘根目录：存量单根 → store-dir；其他 → store-dir/orgs/{orgKey} */
         public Path orgStoreDir(String orgKey) {
             checkOrgKey(orgKey);
-            return CaOrg.DEFAULT_ORG_KEY.equals(orgKey)
+            return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
                     ? Path.of(props.getStoreDir())
                     : Path.of(props.getStoreDir(), "orgs", orgKey);
         }
 
-        /** 取机构保险库（机构不存在时按需构建并缓存；default 恒返回共享单例） */
+        /** 取机构保险库（机构不存在时按需构建并缓存；存量单根恒返回共享单例） */
         public KeyVault forOrg(String orgKey) {
-            if (CaOrg.DEFAULT_ORG_KEY.equals(orgKey)) {
+            if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
                 return defaultVault;
             }
             checkOrgKey(orgKey);

@@ -38,10 +38,10 @@ public class AuditService {
     private final AuditLogMapper auditLogMapper;
     private final AuditSigner auditSigner;
 
-    /** 记录一条审计日志（自动签名防篡改 + 哈希链；机构归属缺省 default=院内默认域/全局操作） */
+    /** 记录一条审计日志（自动签名防篡改 + 哈希链；机构归属缺省=平台主机构/全局操作） */
     @Transactional(rollbackFor = Exception.class)
     public void record(String username, String action, String target, String detail, String ip) {
-        record(username, action, target, detail, ip, CaOrg.DEFAULT_ORG_KEY);
+        record(username, action, target, detail, ip, CaOrg.PRIMARY_ORG_KEY);
     }
 
     /**
@@ -55,7 +55,7 @@ public class AuditService {
     public void record(String username, String action, String target, String detail, String ip, String orgKey) {
         AuditLog logRow = new AuditLog();
         logRow.setUsername(username == null || username.isBlank() ? "SYSTEM" : username);
-        logRow.setOrgKey(orgKey == null || orgKey.isBlank() ? CaOrg.DEFAULT_ORG_KEY : orgKey);
+        logRow.setOrgKey(orgKey == null || orgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : orgKey);
         logRow.setAction(action);
         logRow.setTarget(target);
         logRow.setDetail(truncate(detail));
@@ -279,7 +279,7 @@ public class AuditService {
 
     /** 审计行归属机构（历史行为空按 default 归位，与列默认值语义一致） */
     public static String orgOf(AuditLog row) {
-        return row.getOrgKey() == null || row.getOrgKey().isBlank() ? CaOrg.DEFAULT_ORG_KEY : row.getOrgKey();
+        return row.getOrgKey() == null || row.getOrgKey().isBlank() ? CaOrg.PRIMARY_ORG_KEY : row.getOrgKey();
     }
 
     /** 归档导出（兼容入口=跨机构全量，调用方按数据域收敛后传入 orgKey） */

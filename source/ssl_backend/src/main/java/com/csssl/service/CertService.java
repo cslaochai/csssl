@@ -90,9 +90,9 @@ public class CertService {
         return CertVo.from(findById(id));
     }
 
-    /** 在线签发（兼容入口=院内默认域，行为逐字节不变） */
+    /** 在线签发（兼容入口=平台主机构） */
     public CertVo issue(IssueCertRequest req, String username, String ip) {
-        return issue(CaService.DEFAULT_ORG_KEY, req, username, ip);
+        return issue(CaOrg.PRIMARY_ORG_KEY, req, username, ip);
     }
 
     /** 在线签发（机构版）：内部生成密钥对，私钥落该机构域盘 */
@@ -144,16 +144,16 @@ public class CertService {
         return CertVo.from(row);
     }
 
-    /** CSR 签发（兼容入口=院内默认域）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
+    /** CSR 签发（兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
     public CertVo issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip) {
         return issueFromCsr(csrPem, certType, validityDays, san, description, username, ip, null);
     }
 
-    /** CSR 签发（支持模板，兼容入口=院内默认域）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
+    /** CSR 签发（支持模板，兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
     public CertVo issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip, Long templateId) {
-        return issueFromCsr(CaService.DEFAULT_ORG_KEY, csrPem, certType, validityDays,
+        return issueFromCsr(CaOrg.PRIMARY_ORG_KEY, csrPem, certType, validityDays,
                 san, description, username, ip, templateId);
     }
 
@@ -201,7 +201,7 @@ public class CertService {
     }
 
     /**
-     * 公钥签发（RA 场景，兼容入口=院内默认域）：申请方本地生成密钥对后只提交 Subject DN 与公钥，私钥自持不落盘。
+     * 公钥签发（RA 场景，兼容入口=平台主机构）：申请方本地生成密钥对后只提交 Subject DN 与公钥，私钥自持不落盘。
      * 用于 HIS 等业务系统对接（医生签名证书等）。
      */
     public CertVo issueWithPublicKey(com.csssl.dto.PublicKeyIssueRequest req, String username, String ip) {
@@ -209,13 +209,13 @@ public class CertService {
     }
 
     /**
-     * 公钥签发（RA 场景，支持批准快照，兼容入口=院内默认域）：
+     * 公钥签发（RA 场景，支持批准快照，兼容入口=平台主机构）：
      * policy 非空时签发参数一律按快照执行（批准时固化的模板策略，不重查可变模板最新值，
      * 保证审核人批准的内容与操作员最终签出的内容一致）；policy 为空时按 templateId 现查模板。
      */
     public CertVo issueWithPublicKey(com.csssl.dto.PublicKeyIssueRequest req, IssuePolicy policy,
                                      String username, String ip) {
-        return issueWithPublicKey(CaService.DEFAULT_ORG_KEY, req, policy, username, ip);
+        return issueWithPublicKey(CaOrg.PRIMARY_ORG_KEY, req, policy, username, ip);
     }
 
     /**
@@ -563,7 +563,7 @@ public class CertService {
 
     /** 概览统计：按机构域过滤（证书总量/状态分布/类型分布/30天内到期），供仪表盘渲染 */
     public Map<String, Object> overview(String orgKey) {
-        String org = orgKey == null || orgKey.isBlank() ? CaOrg.DEFAULT_ORG_KEY : orgKey;
+        String org = orgKey == null || orgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : orgKey;
         List<CaCert> all = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getOrgKey, org));
         long valid = 0, revoked = 0, expired = 0;
@@ -621,7 +621,7 @@ public class CertService {
     /** 证书行归属机构（A1 加列前的语义兜底：空=default，存量行由 DDL 默认值归位 default） */
     private static String orgOf(CaCert row) {
         String k = row.getOrgKey();
-        return k == null || k.isBlank() ? CaService.DEFAULT_ORG_KEY : k;
+        return k == null || k.isBlank() ? CaOrg.PRIMARY_ORG_KEY : k;
     }
 
     /**
@@ -630,7 +630,7 @@ public class CertService {
      * @return default 域返回 null（老口径组装证书），其他机构返回注册表行（subject_o 受控来源）
      */
     private CaOrg checkIssueOrg(String orgKey) {
-        if (CaService.DEFAULT_ORG_KEY.equals(orgKey)) {
+        if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
             return null;
         }
         orgService.requireActive(orgKey);
@@ -646,7 +646,7 @@ public class CertService {
 
     /** 主体 DN：default 域保持老口径 CN=xxx,O=CSSSL（逐字节兼容，不转义）；非 default 用 CN=xxx,O={机构subject_o} */
     private static X500Name leafSubject(String orgKey, CaOrg org, String cn) {
-        if (org == null || CaService.DEFAULT_ORG_KEY.equals(orgKey)) {
+        if (org == null || CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
             return new X500Name("CN=" + cn + ",O=CSSSL");
         }
         return CertUtil.subjectDn(cn, org.getSubjectO());
@@ -689,7 +689,7 @@ public class CertService {
 
     /** 审计文案机构后缀：default 返回空串（存量审计文本逐字节不变），其他机构标注归属域 */
     private static String orgSuffix(String orgKey) {
-        return CaService.DEFAULT_ORG_KEY.equals(orgKey) ? "" : "，机构 " + orgKey;
+        return CaOrg.LEGACY_ORG_KEY.equals(orgKey) ? "" : "，机构 " + orgKey;
     }
 
     private void persistFiles(String orgKey, String serial, String keyPem, String certPem) {
@@ -711,14 +711,14 @@ public class CertService {
      * 非 default 指向机构域端点 /ssl/ca/public/{orgKey}/crl。
      */
     private String crlUrl(String orgKey) {
-        return CaService.DEFAULT_ORG_KEY.equals(orgKey)
+        return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
                 ? props.getPublicBaseUrl() + "/ca/public/crl"
                 : props.getPublicBaseUrl() + "/ca/public/" + orgKey + "/crl";
     }
 
     /** OCSP 访问点 URL（写入证书 AIA 扩展）：default 现有端点不变，非 default 为 /ssl/ca/public/{orgKey}/ocsp */
     private String ocspUrl(String orgKey) {
-        return CaService.DEFAULT_ORG_KEY.equals(orgKey)
+        return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
                 ? props.getPublicBaseUrl() + "/ca/public/ocsp"
                 : props.getPublicBaseUrl() + "/ca/public/" + orgKey + "/ocsp";
     }

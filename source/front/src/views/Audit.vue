@@ -15,7 +15,7 @@
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-tag size="small" :type="orgDomain === 'default' ? 'info' : 'warning'" effect="plain">当前域：{{ orgDomain }}</el-tag>
+          <el-tag size="small" type="info" effect="plain">当前域：{{ orgDomain }}</el-tag>
           <el-button v-perm="'audit:chain'" type="warning" plain @click="openChain">链对账</el-button>
           <el-button v-perm="'audit:export'" type="primary" plain :loading="exporting" @click="onExport">导出归档CSV</el-button>
         </div>

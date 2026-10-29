@@ -15,8 +15,7 @@
             </el-select>
           </el-form-item>
           <el-form-item v-if="isGlobal" label="机构域">
-            <el-select v-model="query.orgKey" placeholder="全部" clearable style="width: 170px" @change="handleSearch">
-              <el-option label="default（全局/默认域）" value="default" />
+            <el-select v-model="query.orgKey" placeholder="全部" clearable style="width: 170px" @change="handleSearch">
               <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
             </el-select>
           </el-form-item>
@@ -113,8 +112,7 @@
         <el-form-item v-if="!editing" label="归属机构">
           <template v-if="isGlobal">
             <el-select v-model="form.orgKey" style="width: 100%">
-              <el-option label="全局账号（跨机构，不限定域）" value="" />
-              <el-option label="default（默认域）" value="default" />
+              <el-option label="全局账号（跨机构，不限定域）" value="" />
               <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
             </el-select>
             <div class="org-tip">机构账号仅能操作本机构数据；全局账号由后端按角色+机构策略管控。</div>
