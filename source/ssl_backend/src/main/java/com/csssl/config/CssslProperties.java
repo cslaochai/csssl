@@ -14,7 +14,8 @@ import org.springframework.stereotype.Component;
 public class CssslProperties {
 
     /**
-     * 证书与私钥落盘目录（私钥加密后落盘，不进数据库）
+     * 证书/CRL/根密钥份额落盘目录；私钥密文已改落库 ssl_key_vault（SM4），store-dir 只承载
+     * master.key、公开材料与门限份额
      */
     private String storeDir = "./data/certs";
 

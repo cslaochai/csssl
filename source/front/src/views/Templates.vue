@@ -36,8 +36,8 @@
         <el-table-column prop="templateName" label="名称" min-width="140" />
         <el-table-column label="归属" width="110">
           <template #default="{ row }">
-            <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
-            <el-tag v-else size="small" type="warning">{{ row.orgKey }}</el-tag>
+            <el-tag v-if="!row.tenantKey" size="small" type="info">全局</el-tag>
+            <el-tag v-else size="small" type="warning">{{ tenantNames[row.tenantKey] || row.tenantKey }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="类型" width="100">
@@ -45,8 +45,8 @@
         </el-table-column>
         <el-table-column prop="algorithm" label="算法" width="90" />
         <el-table-column prop="validityDays" label="有效期(天)" width="110" />
-        <el-table-column prop="keyUsage" label="KeyUsage" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="extKeyUsage" label="EKU" width="100">
+        <el-table-column prop="keyUsage" label="密钥用途（KeyUsage）" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="extKeyUsage" label="扩展用途（EKU）" width="130">
           <template #default="{ row }">{{ row.extKeyUsage || '-' }}</template>
         </el-table-column>
         <el-table-column prop="policyOid" label="策略OID" min-width="170" show-overflow-tooltip />
@@ -81,17 +81,17 @@
           <el-input v-model="form.templateCode" :disabled="editing" placeholder="如 SERVER_COMM / DOCTOR_SIGN / 自定义编码" />
         </el-form-item>
         <el-form-item label="模板名称" required>
-          <el-input v-model="form.templateName" placeholder="如 机构通信证书" />
+          <el-input v-model="form.templateName" placeholder="如 租户通信证书" />
         </el-form-item>
         <el-form-item v-if="!editing" label="归属">
           <template v-if="isGlobal">
-            <el-radio-group v-model="form.orgScope">
+            <el-radio-group v-model="form.tenantScope">
               <el-radio-button value="GLOBAL">全局模板</el-radio-button>
-              <el-radio-button value="ORG">当前机构域（{{ orgDomain }}）</el-radio-button>
+              <el-radio-button value="ORG">当前租户域（{{ tenantDomain }}）</el-radio-button>
             </el-radio-group>
-            <div class="org-tip">全局模板归属传空（全域可用）；选择机构域则仅 {{ orgDomain }} 域可见。</div>
+            <div class="tenant-tip">全局模板归属传空（全域可用）；选择租户域则仅 {{ tenantDomain }} 域可见。</div>
           </template>
-          <el-tag v-else size="small" type="warning">机构 SECURITY_ADMIN 建模板自动归本域：{{ orgDomain }}</el-tag>
+          <el-tag v-else size="small" type="warning">租户 SECURITY_ADMIN 建模板自动归本域：{{ tenantDomain }}</el-tag>
         </el-form-item>
         <el-form-item label="证书类型" required>
           <el-radio-group v-model="form.certType">
@@ -109,19 +109,19 @@
         <el-form-item label="有效期(天)" required>
           <el-input-number v-model="form.validityDays" :min="1" :max="36500" />
         </el-form-item>
-        <el-form-item label="KeyUsage" required>
+        <el-form-item label="密钥用途（KeyUsage）" required>
           <el-select v-model="form.keyUsageList" multiple style="width: 100%" placeholder="选择密钥用途">
-            <el-option label="digitalSignature 数字签名" value="digitalSignature" />
-            <el-option label="nonRepudiation 不可否认" value="nonRepudiation" />
-            <el-option label="keyEncipherment 密钥加密" value="keyEncipherment" />
-            <el-option label="keyCertSign 证书签名(CA)" value="keyCertSign" />
-            <el-option label="cRLSign CRL签名(CA)" value="cRLSign" />
+            <el-option label="数字签名（digitalSignature）" value="digitalSignature" />
+            <el-option label="不可否认（nonRepudiation）" value="nonRepudiation" />
+            <el-option label="密钥加密（keyEncipherment）" value="keyEncipherment" />
+            <el-option label="证书签名-CA（keyCertSign）" value="keyCertSign" />
+            <el-option label="吊销列表签名-CA（cRLSign）" value="cRLSign" />
           </el-select>
         </el-form-item>
-        <el-form-item label="EKU（SUB_CA留空）">
+        <el-form-item label="扩展用途（EKU，二级CA留空）">
           <el-select v-model="form.extKeyUsage" clearable style="width: 100%" placeholder="扩展密钥用途">
-            <el-option label="serverAuth 服务端认证" value="serverAuth" />
-            <el-option label="clientAuth 客户端认证" value="clientAuth" />
+            <el-option label="服务端认证（serverAuth）" value="serverAuth" />
+            <el-option label="客户端认证（clientAuth）" value="clientAuth" />
           </el-select>
         </el-form-item>
         <el-form-item label="策略OID">
@@ -144,12 +144,12 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item label="编码">{{ detail?.templateCode }}</el-descriptions-item>
         <el-descriptions-item label="名称">{{ detail?.templateName }}</el-descriptions-item>
-        <el-descriptions-item label="归属">{{ detail?.orgKey || '全局模板' }}</el-descriptions-item>
+        <el-descriptions-item label="归属">{{ tenantNames[detail?.tenantKey] || detail?.tenantKey || '全局模板' }}</el-descriptions-item>
         <el-descriptions-item label="证书类型">{{ detail ? typeText(detail.certType) : '' }}</el-descriptions-item>
         <el-descriptions-item label="算法">{{ detail?.algorithm }}</el-descriptions-item>
         <el-descriptions-item label="有效期(天)">{{ detail?.validityDays }}</el-descriptions-item>
-        <el-descriptions-item label="KeyUsage">{{ detail?.keyUsage || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="EKU">{{ detail?.extKeyUsage || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="密钥用途（KeyUsage）">{{ detail?.keyUsage || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="扩展用途（EKU）">{{ detail?.extKeyUsage || '-' }}</el-descriptions-item>
         <el-descriptions-item label="策略OID">{{ detail?.policyOid || '-' }}</el-descriptions-item>
         <el-descriptions-item label="内置模板">{{ detail?.builtin === 1 ? '是' : '否' }}</el-descriptions-item>
         <el-descriptions-item label="说明">{{ detail?.description || '-' }}</el-descriptions-item>
@@ -163,13 +163,14 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { pageTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/api/system'
-import { currentOrg, isGlobalUser } from '@/lib/org'
+import { pageTemplates, createTemplate, updateTemplate, deleteTemplate, tenantNameMap } from '@/api/system'
+import { currentTenant, isGlobalUser } from '@/lib/tenant'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
 const isGlobal = ref(isGlobalUser())
-const orgDomain = ref(currentOrg())
+const tenantDomain = ref(currentTenant())
+const tenantNames = ref({})
 
 const loading = ref(false)
 const rows = ref([])
@@ -185,7 +186,7 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const form = reactive({
   id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2',
-  validityDays: 365, keyUsageList: [], extKeyUsage: '', policyOid: '', description: '', orgScope: 'GLOBAL'
+  validityDays: 365, keyUsageList: [], extKeyUsage: '', policyOid: '', description: '', tenantScope: 'GLOBAL'
 })
 
 function typeText(t) {
@@ -203,7 +204,7 @@ function fillForm(row) {
     algorithm: row.algorithm, validityDays: row.validityDays,
     keyUsageList: row.keyUsage ? row.keyUsage.split(',').map(s => s.trim()) : [],
     extKeyUsage: row.extKeyUsage || '', policyOid: row.policyOid || '', description: row.description || '',
-    orgScope: 'GLOBAL'
+    tenantScope: 'GLOBAL'
   })
 }
 
@@ -248,8 +249,8 @@ function handleCurrentChange(val) {
 function openCreate() {
   editing.value = false
   fillForm({ id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2', validityDays: 365, keyUsage: '', extKeyUsage: '', policyOid: '', description: '' })
-  // 全局账号默认建全局模板（org_key=NULL，各机构可见）；机构账号恒归本机构
-  form.orgScope = isGlobal.value ? 'GLOBAL' : 'ORG'
+  // 全局账号默认建全局模板（tenant_key=NULL，各租户可见）；租户账号恒归本租户
+  form.tenantScope = isGlobal.value ? 'GLOBAL' : 'ORG'
   dialogVisible.value = true
 }
 
@@ -279,9 +280,9 @@ async function onSave() {
     policyOid: form.policyOid || '',
     description: form.description || ''
   }
-  // 建模板归属口径显式传：全局模板 orgKey=''；机构域=当前域（机构用户由后端强制本域）
+  // 建模板归属口径显式传：全局模板 tenantKey=''；租户域=当前域（租户用户由后端强制本域）
   if (!editing.value) {
-    payload.orgKey = !isGlobal.value || form.orgScope === 'ORG' ? orgDomain.value : ''
+    payload.tenantKey = !isGlobal.value || form.tenantScope === 'ORG' ? tenantDomain.value : ''
   }
   submitting.value = true
   try {
@@ -306,11 +307,14 @@ async function onDelete(row) {
   load()
 }
 
-onMounted(load)
+onMounted(async () => {
+  load()
+  tenantNames.value = await tenantNameMap()
+})
 </script>
 
 <style scoped>
-.org-tip {
+.tenant-tip {
   font-size: 12px;
   color: #909399;
   line-height: 1.6;

@@ -16,7 +16,9 @@ public class CertVO {
 
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
-    private String orgKey;
+    private String tenantKey;
+    /** 租户中文名（展示用，后端填充；存量 default 域无归属时为 null） */
+    private String tenantName;
     private String serialHex;
     private String subjectCn;
     private String certType;
@@ -33,13 +35,17 @@ public class CertVO {
     private LocalDateTime revokedAt;
     private String description;
     private String createdBy;
+    /** 签发人中文姓名（展示用，后端按 username 回填；查不到时为 null 前端回落账号） */
+    private String createdByName;
+    /** 私钥是否在 CA 侧保险库（在线签发=true 可下载/导P12；CSR/公钥直签=false 私钥由申请方自持） */
+    private Boolean keyHeld;
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;
 
     public static CertVO from(CaCert c) {
         CertVO vo = new CertVO();
         vo.setId(c.getId());
-        vo.setOrgKey(c.getOrgKey());
+        vo.setTenantKey(c.getTenantKey());
         vo.setSerialHex(c.getSerialHex());
         vo.setSubjectCn(c.getSubjectCn());
         vo.setCertType(c.getCertType());

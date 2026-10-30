@@ -7,10 +7,10 @@ import com.csssl.dto.CrlRecordQueryDTODTO;
 import com.csssl.vo.CrlViewVO;
 import com.csssl.vo.DeltaCrlVO;
 import com.csssl.entity.CaCert;
-import com.csssl.entity.CaOrg;
+import com.csssl.entity.CaTenant;
 import com.csssl.service.AuditService;
 import com.csssl.service.CrlService;
-import com.csssl.service.OrgService;
+import com.csssl.service.TenantService;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -24,8 +24,8 @@ import java.util.List;
 
 /**
  * 吊销列表（CRL）接口：管理端查看吊销记录与下载 CRL。
- * 路线A多机构：管理端支持 ?orgKey= 切域查看（缺省 default，行为与单根时代一致）。
- * 只读视图不因机构 SUSPENDED/CLOSED 关闭——历史证书的吊销信息必须持续可得（合规点）。
+ * 路线A多租户：管理端支持 ?tenantKey= 切域查看（缺省 default，行为与单根时代一致）。
+ * 只读视图不因租户 SUSPENDED/CLOSED 关闭——历史证书的吊销信息必须持续可得（合规点）。
  */
 @RestController
 @RequestMapping("/admin/crl")
@@ -34,18 +34,18 @@ public class CrlController {
 
     private final CrlService crlService;
     private final AuditService auditService;
-    private final OrgService orgService;
+    private final TenantService tenantService;
 
-    /** 吊销记录 + 当前 CRL PEM + thisUpdate/nextUpdate（管理页；?orgKey= 切机构域，缺省 default） */
+    /** 吊销记录 + 当前 CRL PEM + thisUpdate/nextUpdate（管理页；?tenantKey= 切租户域，缺省 default） */
     @GetMapping
-    public Result<CrlViewVO> view(@RequestParam(required = false) String orgKey) {
-        String org = resolveOrg(orgKey);
-        List<CaCert> revoked = crlService.revokedList(org);
-        CrlService.CrlInfo info = crlService.publishIfNeeded(org);
+    public Result<CrlViewVO> view(@RequestParam(required = false) String tenantKey) {
+        String tenant = resolveTenant(tenantKey);
+        List<CaCert> revoked = crlService.revokedList(tenant);
+        CrlService.CrlInfo info = crlService.publishIfNeeded(tenant);
         CrlViewVO vo = new CrlViewVO();
-        // default 域响应体不加 orgKey 字段（存量 URL 逐字节兼容）；非 default 标注归属域
-        if (!CaOrg.LEGACY_ORG_KEY.equals(org)) {
-            vo.setOrgKey(org);
+        // default 域响应体不加 tenantKey 字段（存量 URL 逐字节兼容）；非 default 标注归属域
+        if (!CaTenant.LEGACY_TENANT_KEY.equals(tenant)) {
+            vo.setTenantKey(tenant);
         }
         vo.setRevoked(revoked.stream().map(CertVO::from).toList());
         vo.setCrlPem(revoked.isEmpty() ? "" : info.pem());
@@ -59,29 +59,29 @@ public class CrlController {
     /** 吊销记录分页查询（管理页表格；keyword=CN/序列号，status=REVOKED/FROZEN，reason=吊销原因） */
     @GetMapping("/records")
     public Result<Page<CertVO>> records(@Valid CrlRecordQueryDTODTO query) {
-        return Result.success("查询成功", crlService.recordsPage(resolveOrg(query.getOrgKey()), query.getKeyword(),
+        return Result.success("查询成功", crlService.recordsPage(resolveTenant(query.getTenantKey()), query.getKeyword(),
                 query.getStatus(), query.getReason(), query.getPageNo(), query.getPageSize()));
     }
 
-    /** 下载 CRL PEM（判重发布：内容未变直接复用已发布 CRL，不自增编号；?orgKey= 切机构域） */
+    /** 下载 CRL PEM（判重发布：内容未变直接复用已发布 CRL，不自增编号；?tenantKey= 切租户域） */
     @GetMapping("/download")
-    public String download(@RequestParam(required = false) String orgKey, HttpServletRequest request) {
-        String org = resolveOrg(orgKey);
+    public String download(@RequestParam(required = false) String tenantKey, HttpServletRequest request) {
+        String tenant = resolveTenant(tenantKey);
         String username = UserUtils.requireLoginUser().getUsername();
-        String crlPem = crlService.publishIfNeeded(org).pem();
+        String crlPem = crlService.publishIfNeeded(tenant).pem();
         auditService.record(username, "CRL_DOWNLOAD", null,
-                "下载CRL吊销列表" + (CaOrg.LEGACY_ORG_KEY.equals(org) ? "" : "（机构 " + org + "）"), clientIp(request));
+                "下载CRL吊销列表" + (CaTenant.LEGACY_TENANT_KEY.equals(tenant) ? "" : "（租户 " + tenant + "）"), clientIp(request));
         return crlPem;
     }
 
-    /** 增量 CRL（dCRL）：指定机构域自最近全量发布以来新增的吊销/挂起条目，供依赖方增量同步 */
+    /** 增量 CRL（dCRL）：指定租户域自最近全量发布以来新增的吊销/挂起条目，供依赖方增量同步 */
     @GetMapping("/delta")
-    public Result<DeltaCrlVO> delta(@RequestParam(required = false) String orgKey) {
-        String org = resolveOrg(orgKey);
-        CrlService.DeltaCrlInfo info = crlService.buildDeltaCrl(org);
+    public Result<DeltaCrlVO> delta(@RequestParam(required = false) String tenantKey) {
+        String tenant = resolveTenant(tenantKey);
+        CrlService.DeltaCrlInfo info = crlService.buildDeltaCrl(tenant);
         DeltaCrlVO vo = new DeltaCrlVO();
-        if (!CaOrg.LEGACY_ORG_KEY.equals(org)) {
-            vo.setOrgKey(org);
+        if (!CaTenant.LEGACY_TENANT_KEY.equals(tenant)) {
+            vo.setTenantKey(tenant);
         }
         vo.setDeltaPem(info.pem());
         vo.setThisUpdate(info.thisUpdate());
@@ -92,15 +92,15 @@ public class CrlController {
         return Result.success("查询成功", vo);
     }
 
-    /** orgKey 缺省=default（存量行为）；显式传入时机构必须存在（非法标识/不存在按现有 IAE 口径回 4xx） */
-    private String resolveOrg(String orgKey) {
-        if (orgKey == null || orgKey.isBlank()) {
-            return CaOrg.PRIMARY_ORG_KEY;
+    /** tenantKey 缺省=default（存量行为）；显式传入时租户必须存在（非法标识/不存在按现有 IAE 口径回 4xx） */
+    private String resolveTenant(String tenantKey) {
+        if (tenantKey == null || tenantKey.isBlank()) {
+            return CaTenant.PRIMARY_TENANT_KEY;
         }
-        if (orgService.findByKey(orgKey) == null) {
-            throw new IllegalArgumentException("机构不存在: " + orgKey);
+        if (tenantService.findByKey(tenantKey) == null) {
+            throw new IllegalArgumentException("租户不存在: " + tenantKey);
         }
-        return orgKey;
+        return tenantKey;
     }
 
     private String clientIp(HttpServletRequest request) {

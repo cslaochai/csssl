@@ -4,15 +4,15 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
- * 创建证书模板请求（orgKey 空=全局模板；内置字段由服务端固化）。
+ * 创建证书模板请求（tenantKey 空=全局模板；内置字段由服务端固化）。
  */
 @Data
 public class TemplateCreateDTO {
 
     /**
-     * 模板归属机构（空=全局模板；机构操作者由服务端锁本机构）
+     * 模板归属租户（空=全局模板；租户操作者由服务端锁本租户）
      */
-    private String orgKey;
+    private String tenantKey;
 
     /**
      * 模板编码

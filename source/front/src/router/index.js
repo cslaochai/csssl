@@ -63,13 +63,13 @@ const routes = [
         meta: { title: '时间戳TSA', perm: 'menu:tsa', roles: ALL_ROLES, group: 'business', icon: 'Clock' }
       },
       {
-        path: 'orgs',
-        name: 'orgs',
-        component: () => import('@/views/Orgs.vue'),
-        // 机构管理仅全局 ADMIN：机构用户（orgKey 非空）由 globalOnly 拦截
+        path: 'tenants',
+        name: 'tenants',
+        component: () => import('@/views/Tenants.vue'),
+        // 租户管理仅全局 ADMIN：租户用户（tenantKey 非空）由 globalOnly 拦截
         meta: {
-          title: '机构管理',
-          perm: 'menu:orgs',
+          title: '租户管理',
+          perm: 'menu:tenants',
           roles: ['ADMIN'],
           globalOnly: true,
           group: 'platform',
@@ -98,7 +98,7 @@ const routes = [
         path: 'roles',
         name: 'roles',
         component: () => import('@/views/Roles.vue'),
-        // 角色配置属全局管理动作：机构管理员由 globalOnly 拦截，服务端另做数据域校验
+        // 角色配置属全局管理动作：租户管理员由 globalOnly 拦截，服务端另做数据域校验
         meta: {
           title: '角色配置',
           perm: 'menu:roles',

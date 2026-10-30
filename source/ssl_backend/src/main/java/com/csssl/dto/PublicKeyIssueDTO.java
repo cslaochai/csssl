@@ -9,7 +9,7 @@ import lombok.Data;
 public class PublicKeyIssueDTO {
 
     /**
-     * RFC2253 格式主体 DN，如 "CN=张三,O=长沙市麓康医院,OU=门诊部"
+     * RFC2253 格式主体 DN，如 "CN=张三,O=长沙市麓康医院"；只放姓名/租户等稳定身份，科室等易变属性不进 DN
      */
     private String subjectDn;
 

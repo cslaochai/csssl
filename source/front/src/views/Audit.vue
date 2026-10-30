@@ -15,7 +15,7 @@
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-tag size="small" type="info" effect="plain">当前域：{{ orgDomain }}</el-tag>
+          <el-tag size="small" type="info" effect="plain">当前域：{{ tenantDomain }}</el-tag>
           <el-button v-perm="'audit:chain'" type="warning" plain @click="openChain">链对账</el-button>
           <el-button v-perm="'audit:export'" type="primary" plain :loading="exporting" @click="onExport">导出归档CSV</el-button>
         </div>
@@ -26,10 +26,10 @@
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
         <el-table-column prop="username" label="操作人" width="130" />
-        <el-table-column label="机构" width="110">
+        <el-table-column label="租户" width="110">
           <template #default="{ row }">
-            <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
-            <span v-else class="mono-cell">{{ row.orgKey }}</span>
+            <el-tag v-if="!row.tenantKey" size="small" type="info">全局</el-tag>
+            <span v-else class="mono-cell">{{ tenantNames[row.tenantKey] || row.tenantKey }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="130">
@@ -67,7 +67,7 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item label="时间">{{ detail?.createdAt }}</el-descriptions-item>
         <el-descriptions-item label="操作人">{{ detail?.username }}</el-descriptions-item>
-        <el-descriptions-item label="机构">{{ detail?.orgKey || '全局' }}</el-descriptions-item>
+        <el-descriptions-item label="租户">{{ tenantNames[detail?.tenantKey] || detail?.tenantKey || '全局' }}</el-descriptions-item>
         <el-descriptions-item label="操作类型">{{ detail ? actionText(detail.action) : '' }}</el-descriptions-item>
         <el-descriptions-item label="对象">{{ detail?.target || '-' }}</el-descriptions-item>
         <el-descriptions-item label="来源IP">{{ detail?.ip || '-' }}</el-descriptions-item>
@@ -114,7 +114,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="链为全局构造（跨机构连续），对账为跨机构视角——属合规设计：审计链完整性覆盖所有机构域记录，不随机构域切换分段。"
+        title="链为全局构造（跨租户连续），对账为跨租户视角——属合规设计：审计链完整性覆盖所有租户域记录，不随租户域切换分段。"
         style="margin-bottom: 12px"
       />
       <el-form inline>
@@ -175,14 +175,15 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { Refresh, Search } from '@element-plus/icons-vue'
-import { pageAudit, verifyAuditLog, exportAuditCsv, chainVerify } from '@/api/system'
+import { pageAudit, verifyAuditLog, exportAuditCsv, chainVerify, tenantNameMap } from '@/api/system'
 import { downloadText } from '@/lib/download'
-import { currentOrg } from '@/lib/org'
+import { currentTenant } from '@/lib/tenant'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
-// 列表/导出/对账请求由 request 封装自动附带 orgKey=currentOrg()（机构域过滤）
-const orgDomain = ref(currentOrg())
+// 列表/导出/对账请求由 request 封装自动附带 tenantKey=currentTenant()（租户域过滤）
+const tenantDomain = ref(currentTenant())
+const tenantNames = ref({})
 
 const loading = ref(false)
 const rows = ref([])
@@ -240,10 +241,10 @@ const actions = [
   { value: 'TEMPLATE_CREATE', label: '创建模板' },
   { value: 'TEMPLATE_UPDATE', label: '更新模板' },
   { value: 'TEMPLATE_DELETE', label: '删除模板' },
-  { value: 'ORG_CREATE', label: '创建机构' },
-  { value: 'ORG_SUSPEND', label: '暂停机构' },
-  { value: 'ORG_RESUME', label: '恢复机构' },
-  { value: 'ORG_CLOSE', label: '关闭机构' }
+  { value: 'TENANT_CREATE', label: '创建租户' },
+  { value: 'TENANT_SUSPEND', label: '暂停租户' },
+  { value: 'TENANT_RESUME', label: '恢复租户' },
+  { value: 'TENANT_CLOSE', label: '关闭租户' }
 ]
 
 function actionText(a) {
@@ -340,7 +341,10 @@ function handleCurrentChange(val) {
   load()
 }
 
-onMounted(load)
+onMounted(async () => {
+  load()
+  tenantNames.value = await tenantNameMap()
+})
 </script>
 
 <style scoped>

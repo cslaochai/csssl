@@ -9,7 +9,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
  *
  * <p>所有「当前登录人」信息统一从 {@link SecurityContextHolder} 取（TokenAuthFilter 写入），
  * 非Web上下文（定时任务、异步线程）只要正确绑定了 SecurityContext 即可取到。
- * 调用方拿到 {@link LoginUser} 后自行取字段（username/realName/roleCode/orgKey），
+ * 调用方拿到 {@link LoginUser} 后自行取字段（username/realName/roleCode/tenantKey），
  * 本类不再提供逐字段便捷方法。</p>
  */
 public class UserUtils {

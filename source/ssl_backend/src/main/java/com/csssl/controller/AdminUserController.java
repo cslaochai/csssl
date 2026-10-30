@@ -7,7 +7,7 @@ import com.csssl.common.Result;
 import com.csssl.dto.UserCreateDTO;
 import com.csssl.dto.UserPageQueryDTO;
 import com.csssl.dto.UserUpdateDTO;
-import com.csssl.entity.CaOrg;
+import com.csssl.entity.CaTenant;
 import com.csssl.entity.LoginUser;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
@@ -15,9 +15,9 @@ import com.csssl.mapper.SysRoleMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.AuditService;
 import com.csssl.service.AuthService;
-import com.csssl.service.OrgService;
+import com.csssl.service.TenantService;
 import com.csssl.enums.RoleCodeEnum;
-import com.csssl.util.OrgScope;
+import com.csssl.util.TenantScope;
 import cn.hutool.crypto.digest.BCrypt;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
@@ -42,14 +42,14 @@ import java.util.List;
  * <p>账号治理：口令由调用方必传并按复杂度校验（不再下发默认弱口令、不回显明文）；
  * 建号/改角色/启停用/重置口令均落审计，安全相关变更递增 token_version 吊销既有会话。</p>
  *
- * <p>路线A数据域口径（effectiveOrg，服务端强制）：
+ * <p>路线A数据域口径（effectiveTenant，服务端强制）：
  * <ul>
- *   <li>建号：全局 ADMIN 可传 orgKey 建机构用户（含机构 ADMIN，机构主由全局任命）或不传=全局用户；
- *       机构 ADMIN 只能建本机构用户，且不可建/改 ADMIN 角色，不可建全局用户；越域请求 403。</li>
- *   <li>列表：机构用户只见本机构；全局用户可按 ?orgKey= 过滤，不传=全部
- *       ——这是唯一允许的跨机构"读"口（全局 ADMIN 总览），不构成写旁路。</li>
- *   <li>改角色/停用/重置口令：目标用户必须落在操作者数据域（机构 ADMIN 改别机构/全局用户→403）；
- *       审计记录带目标用户机构。</li>
+ *   <li>建号：全局 ADMIN 可传 tenantKey 建租户用户（含租户 ADMIN，租户主由全局任命）或不传=全局用户；
+ *       租户 ADMIN 只能建本租户用户，且不可建/改 ADMIN 角色，不可建全局用户；越域请求 403。</li>
+ *   <li>列表：租户用户只见本租户；全局用户可按 ?tenantKey= 过滤，不传=全部
+ *       ——这是唯一允许的跨租户"读"口（全局 ADMIN 总览），不构成写旁路。</li>
+ *   <li>改角色/停用/重置口令：目标用户必须落在操作者数据域（租户 ADMIN 改别租户/全局用户→403）；
+ *       审计记录带目标用户租户。</li>
  * </ul></p>
  */
 @RestController
@@ -60,20 +60,20 @@ public class AdminUserController {
     private final SysUserMapper userMapper;
     private final SysRoleMapper roleMapper;
     private final AuditService auditService;
-    private final OrgService orgService;
+    private final TenantService tenantService;
 
-    /** 用户列表（分页 + 角色/机构筛选；机构用户强制本机构，全局用户 orgKey 缺省=跨机构总览只读） */
+    /** 用户列表（分页 + 角色/租户筛选；租户用户强制本租户，全局用户 tenantKey 缺省=跨租户总览只读） */
     @PreAuthorize("hasAuthority('user:list')")
     @GetMapping
     public Result<Page<SysUser>> page(@Valid UserPageQueryDTO query, HttpServletRequest request) {
-        // readOrgScope：机构用户锁本机构（传别机构 403）；全局用户不传=null=全部（唯一跨机构读口）
-        String scope = OrgScope.readOrgScope(UserUtils.requireLoginUser().getOrgKey(), query.getOrgKey());
+        // readTenantScope：租户用户锁本租户（传别租户 403）；全局用户不传=null=全部（唯一跨租户读口）
+        String scope = TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantKey(), query.getTenantKey());
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         if (query.getRoleCode() != null && !query.getRoleCode().isBlank()) {
             qw.eq(SysUser::getRoleCode, query.getRoleCode());
         }
         if (scope != null) {
-            qw.eq(SysUser::getOrgKey, scope);
+            qw.eq(SysUser::getTenantKey, scope);
         }
         qw.orderByAsc(SysUser::getId);
         Page<SysUser> page = userMapper.selectPage(new Page<>(query.getPageNo(), query.getPageSize()), qw);
@@ -82,9 +82,9 @@ public class AdminUserController {
     }
 
     /**
-     * 创建管理账号：全局 ADMIN 可建全局/各机构账号（orgKey 显式指定，缺省=全局）；
-     * 机构 ADMIN 仅可建本机构 OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN，
-     * 不可建 ADMIN（机构主由全局 ADMIN 任命）、不可建全局用户；越域 403。
+     * 创建管理账号：全局 ADMIN 可建全局/各租户账号（tenantKey 显式指定，缺省=全局）；
+     * 租户 ADMIN 仅可建本租户 OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN，
+     * 不可建 ADMIN（租户主由全局 ADMIN 任命）、不可建全局用户；越域 403。
      */
     @PreAuthorize("hasAuthority('user:create')")
     @PostMapping
@@ -105,20 +105,20 @@ public class AdminUserController {
         }
         requireAssignableRole(role);
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String myOrg = loginUser.getOrgKey();
-        String reqOrg = blankToNull(body.getOrgKey());
-        String targetOrg;
-        if (myOrg != null) {
-            // 机构 ADMIN：一律落本机构；请求 orgKey 与本人机构不一致=越域 403；不可任命机构主（ADMIN）
-            targetOrg = OrgScope.effectiveOrg(myOrg, reqOrg);
+        String myTenant = loginUser.getTenantKey();
+        String reqTenant = blankToNull(body.getTenantKey());
+        String targetTenant;
+        if (myTenant != null) {
+            // 租户 ADMIN：一律落本租户；请求 tenantKey 与本人租户不一致=越域 403；不可任命租户主（ADMIN）
+            targetTenant = TenantScope.effectiveTenant(myTenant, reqTenant);
             if (RoleCodeEnum.ADMIN.name().equals(role)) {
-                throw new SecurityException("权限不足：机构管理员不可创建 ADMIN 角色账号（机构主由全局 ADMIN 任命）");
+                throw new SecurityException("权限不足：租户管理员不可创建 ADMIN 角色账号（租户主由全局 ADMIN 任命）");
             }
         } else {
-            // 全局 ADMIN：显式 orgKey=建该机构用户（机构须存在）；缺省=全局用户（org_key NULL）
-            targetOrg = reqOrg;
-            if (targetOrg != null) {
-                orgService.get(targetOrg);
+            // 全局 ADMIN：显式 tenantKey=建该租户用户（租户须存在）；缺省=全局用户（tenant_key NULL）
+            targetTenant = reqTenant;
+            if (targetTenant != null) {
+                tenantService.get(targetTenant);
             }
         }
         String password = body.getPassword();
@@ -129,7 +129,7 @@ public class AdminUserController {
         user.setRealName(body.getRealName() == null || body.getRealName().isBlank()
                 ? username.trim() : body.getRealName().trim());
         user.setRoleCode(role);
-        user.setOrgKey(targetOrg);
+        user.setTenantKey(targetTenant);
         user.setStatus(1);
         user.setFailedAttempts(0);
         user.setTokenVersion(0);
@@ -137,16 +137,16 @@ public class AdminUserController {
         userMapper.insert(user);
         auditService.record(loginUser.getUsername(), "USER_CREATE", String.valueOf(user.getId()),
                 "创建账号：" + user.getUsername() + "，角色=" + role + "，姓名=" + user.getRealName()
-                        + "，机构=" + (targetOrg == null ? "全局" : targetOrg),
-                clientIp(request), auditOrg(targetOrg, myOrg));
+                        + "，租户=" + (targetTenant == null ? "全局" : targetTenant),
+                clientIp(request), auditTenant(targetTenant, myTenant));
         user.setPassword(null);
         return Result.success("创建成功", user);
     }
 
     /**
      * 更新角色/姓名/启停用（password 可选重置）；口令/角色/状态变更后旧会话即刻失效。
-     * 目标用户必须落在操作者数据域（机构 ADMIN 改别机构/全局用户→403）；
-     * 机构 ADMIN 不可把角色改为 ADMIN（机构主任命权保留在全局 ADMIN）。
+     * 目标用户必须落在操作者数据域（租户 ADMIN 改别租户/全局用户→403）；
+     * 租户 ADMIN 不可把角色改为 ADMIN（租户主任命权保留在全局 ADMIN）。
      */
     @PreAuthorize("hasAuthority('user:update')")
     @PostMapping("/{id}")
@@ -158,19 +158,19 @@ public class AdminUserController {
         }
         LoginUser loginUser = UserUtils.requireLoginUser();
         String operator = loginUser.getUsername();
-        String myOrg = loginUser.getOrgKey();
+        String myTenant = loginUser.getTenantKey();
 
 
         String ip = clientIp(request);
-        String targetOrg = user.getOrgKey();
-        if (myOrg != null) {
-            // 机构 ADMIN：目标必须为本机构用户（全局用户 org_key=NULL 亦不可触碰）
-            if (targetOrg == null || !myOrg.equals(targetOrg)) {
-                throw new SecurityException("权限不足：不能操作其他机构或全局账号");
+        String targetTenant = user.getTenantKey();
+        if (myTenant != null) {
+            // 租户 ADMIN：目标必须为本租户用户（全局用户 tenant_key=NULL 亦不可触碰）
+            if (targetTenant == null || !myTenant.equals(targetTenant)) {
+                throw new SecurityException("权限不足：不能操作其他租户或全局账号");
             }
             String newRole = blankToNull(body.getRoleCode());
             if (newRole != null && RoleCodeEnum.ADMIN.name().equals(newRole.trim().toUpperCase())) {
-                throw new SecurityException("权限不足：机构管理员不可任命/变更为 ADMIN 角色（机构主由全局 ADMIN 任命）");
+                throw new SecurityException("权限不足：租户管理员不可任命/变更为 ADMIN 角色（租户主由全局 ADMIN 任命）");
             }
         }
 
@@ -228,26 +228,26 @@ public class AdminUserController {
         if (touched) {
             userMapper.update(null, uw);
         }
-        // 审计归位：按目标用户机构（全局用户=平台主机构留痕）
-        String auditOrg = auditOrg(targetOrg, myOrg);
+        // 审计归位：按目标用户租户（全局用户=平台主租户留痕）
+        String auditTenant = auditTenant(targetTenant, myTenant);
         if (!changes.isEmpty()) {
             auditService.record(operator, "USER_UPDATE", String.valueOf(id),
-                    "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip, auditOrg);
+                    "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip, auditTenant);
         }
         if (resetPassword) {
             auditService.record(operator, "USER_RESET_PWD", String.valueOf(id),
-                    "重置账号 " + user.getUsername() + " 的登录口令（口令不入库留痕、需该用户重新登录）", ip, auditOrg);
+                    "重置账号 " + user.getUsername() + " 的登录口令（口令不入库留痕、需该用户重新登录）", ip, auditTenant);
         }
         user.setPassword(null);
         return Result.success("更新成功", user);
     }
 
-    /** 审计机构归位：目标账号机构优先；全局账号（org_key NULL）按操作者域，操作者亦全局则 default */
-    private static String auditOrg(String targetUserOrg, String operatorOrg) {
-        if (targetUserOrg != null && !targetUserOrg.isBlank()) {
-            return targetUserOrg;
+    /** 审计租户归位：目标账号租户优先；全局账号（tenant_key NULL）按操作者域，操作者亦全局则 default */
+    private static String auditTenant(String targetUserTenant, String operatorTenant) {
+        if (targetUserTenant != null && !targetUserTenant.isBlank()) {
+            return targetUserTenant;
         }
-        return operatorOrg == null || operatorOrg.isBlank() ? CaOrg.PRIMARY_ORG_KEY : operatorOrg;
+        return operatorTenant == null || operatorTenant.isBlank() ? CaTenant.PRIMARY_TENANT_KEY : operatorTenant;
     }
 
     private boolean isSupportedRole(String role) {

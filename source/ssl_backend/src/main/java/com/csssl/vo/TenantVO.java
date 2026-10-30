@@ -1,6 +1,6 @@
 package com.csssl.vo;
 
-import com.csssl.entity.CaOrg;
+import com.csssl.entity.CaTenant;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
@@ -8,22 +8,22 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 机构行视图对象：列表/分页/单机构状态摘要共用（含根CA与SUB_CA状态摘要）。
+ * 租户行视图对象：列表/分页/单租户状态摘要共用（含根CA与SUB_CA状态摘要）。
  * 未取到的可选字段（SUB_CA 明细、statusError）序列化时省略，与原 Map 出参逐 key 对齐。
  */
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class OrgVO {
+public class TenantVO {
 
     /**
-     * 机构标识
+     * 租户标识
      */
-    private String orgKey;
+    private String tenantKey;
 
     /**
-     * 机构名称
+     * 租户名称
      */
-    private String orgName;
+    private String tenantName;
 
     /**
      * 证书主体O
@@ -36,7 +36,7 @@ public class OrgVO {
     private String algorithm;
 
     /**
-     * 机构状态：ACTIVE / SUSPENDED / CLOSED
+     * 租户状态：ACTIVE / SUSPENDED / CLOSED
      */
     private String status;
 
@@ -116,23 +116,23 @@ public class OrgVO {
     private LocalDateTime subCaValidTo;
 
     /**
-     * 单机构状态读取异常原因（如密钥文件损坏；不拖垮整个列表）
+     * 单租户状态读取异常原因（如密钥文件损坏；不拖垮整个列表）
      */
     private String statusError;
 
     /**
-     * 机构档案部分（根CA状态字段由服务层按机构实时状态填充）
+     * 租户档案部分（根CA状态字段由服务层按租户实时状态填充）
      */
-    public static OrgVO from(CaOrg org) {
-        OrgVO vo = new OrgVO();
-        vo.setOrgKey(org.getOrgKey());
-        vo.setOrgName(org.getOrgName());
-        vo.setSubjectO(org.getSubjectO());
-        vo.setAlgorithm(org.getAlgorithm());
-        vo.setStatus(org.getStatus());
-        vo.setContact(org.getContact());
-        vo.setDescription(org.getDescription());
-        vo.setCreatedAt(org.getCreatedAt());
+    public static TenantVO from(CaTenant tenant) {
+        TenantVO vo = new TenantVO();
+        vo.setTenantKey(tenant.getTenantKey());
+        vo.setTenantName(tenant.getTenantName());
+        vo.setSubjectO(tenant.getSubjectO());
+        vo.setAlgorithm(tenant.getAlgorithm());
+        vo.setStatus(tenant.getStatus());
+        vo.setContact(tenant.getContact());
+        vo.setDescription(tenant.getDescription());
+        vo.setCreatedAt(tenant.getCreatedAt());
         return vo;
     }
 }

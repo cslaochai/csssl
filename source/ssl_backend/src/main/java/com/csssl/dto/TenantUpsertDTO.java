@@ -5,23 +5,23 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
- * 新建机构请求（登记即建独立根CA；orgKey 格式与主体O占用由服务端校验）。
+ * 新建租户请求（登记即建独立根CA；tenantKey 格式与主体O占用由服务端校验）。
  */
 @Data
-public class OrgUpsertDTO {
+public class TenantUpsertDTO {
 
     /**
-     * 机构标识（小写字母数字，参与密钥库路径）
+     * 租户标识（小写字母数字，参与密钥库路径）
      */
-    @NotBlank(message = "机构标识不能为空")
-    private String orgKey;
+    @NotBlank(message = "租户标识不能为空")
+    private String tenantKey;
 
     /**
-     * 机构名称
+     * 租户名称
      */
-    @NotBlank(message = "机构名称必填")
-    @Size(max = 64, message = "机构名称必填且不超过64字符")
-    private String orgName;
+    @NotBlank(message = "租户名称必填")
+    @Size(max = 64, message = "租户名称必填且不超过64字符")
+    private String tenantName;
 
     /**
      * 证书主体O

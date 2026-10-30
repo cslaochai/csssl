@@ -14,9 +14,9 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item v-if="isGlobal" label="机构域">
-            <el-select v-model="query.orgKey" placeholder="全部" clearable style="width: 170px" @change="handleSearch">
-              <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
+          <el-form-item v-if="isGlobal" label="租户域">
+            <el-select v-model="query.tenantKey" placeholder="全部" clearable style="width: 170px" @change="handleSearch">
+              <el-option v-for="o in tenantOptions" :key="o.tenantKey" :label="o.tenantName ? `${o.tenantKey}（${o.tenantName}）` : o.tenantKey" :value="o.tenantKey" />
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -40,10 +40,10 @@
             <el-tag size="small" :type="roleTag(row.roleCode)">{{ roleText(row.roleCode) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="归属机构" width="130">
+        <el-table-column label="归属租户" width="130">
           <template #default="{ row }">
-            <el-tag v-if="!row.orgKey" size="small" type="info">全局</el-tag>
-            <span v-else class="mono">{{ row.orgKey }}</span>
+            <el-tag v-if="!row.tenantKey" size="small" type="info">全局</el-tag>
+            <span v-else class="mono">{{ tenantNames[row.tenantKey] || row.tenantKey }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
@@ -86,7 +86,7 @@
         <el-form-item label="账号" required>
           <el-input v-model="form.username" :disabled="editing" placeholder="登录账号（创建后不可改）" />
         </el-form-item>
-        <el-form-item :label="editing ? '重置口令(可选)' : '口令'" required>
+        <el-form-item :label="editing ? '重置口令' : '口令'" required>
           <el-input
             v-model="form.password"
             :placeholder="editing ? '留空则不修改口令' : '至少8位，需同时包含字母和数字'"
@@ -107,17 +107,17 @@
               :disabled="r.status !== 1"
             />
           </el-select>
-          <div class="org-tip">角色由角色配置页维护：停用角色不可分配，名称/职责以角色配置为准</div>
+          <div class="tenant-tip">角色由角色配置页维护：停用角色不可分配，名称/职责以角色配置为准</div>
         </el-form-item>
-        <el-form-item v-if="!editing" label="归属机构">
+        <el-form-item v-if="!editing" label="归属租户">
           <template v-if="isGlobal">
-            <el-select v-model="form.orgKey" style="width: 100%">
-              <el-option label="全局账号（跨机构，不限定域）" value="" />
-              <el-option v-for="o in orgOptions" :key="o.orgKey" :label="o.orgName ? `${o.orgKey}（${o.orgName}）` : o.orgKey" :value="o.orgKey" />
+            <el-select v-model="form.tenantKey" style="width: 100%">
+              <el-option label="全局账号（跨租户，不限定域）" value="" />
+              <el-option v-for="o in tenantOptions" :key="o.tenantKey" :label="o.tenantName ? `${o.tenantKey}（${o.tenantName}）` : o.tenantKey" :value="o.tenantKey" />
             </el-select>
-            <div class="org-tip">机构账号仅能操作本机构数据；全局账号由后端按角色+机构策略管控。</div>
+            <div class="tenant-tip">租户账号仅能操作本租户数据；全局账号由后端按角色+租户策略管控。</div>
           </template>
-          <el-tag v-else size="small" type="warning">机构用户建号恒归本机构：{{ userOrg }}</el-tag>
+          <el-tag v-else size="small" type="warning">租户用户建号恒归本租户：{{ userTenant }}</el-tag>
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
@@ -137,7 +137,7 @@
         <el-descriptions-item label="账号">{{ detail?.username }}</el-descriptions-item>
         <el-descriptions-item label="姓名">{{ detail?.realName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="角色">{{ detail ? roleText(detail.roleCode) : '' }}</el-descriptions-item>
-        <el-descriptions-item label="归属机构">{{ detail?.orgKey || '全局（跨机构）' }}</el-descriptions-item>
+        <el-descriptions-item label="归属租户">{{ tenantNames[detail?.tenantKey] || detail?.tenantKey || '全局（跨租户）' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail?.status === 1 ? '启用' : '禁用' }}</el-descriptions-item>
         <el-descriptions-item label="最近登录">{{ detail?.lastLoginTime || '从未登录' }}</el-descriptions-item>
         <el-descriptions-item label="最近登录IP">{{ detail?.lastLoginIp || '-' }}</el-descriptions-item>
@@ -153,8 +153,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { pageUsers, createUser, updateUser, listOrgsCached, listRoles } from '@/api/system'
-import { isGlobalUser, userOrgKey } from '@/lib/org'
+import { pageUsers, createUser, updateUser, listTenantsCached, listRoles, tenantNameMap } from '@/api/system'
+import { isGlobalUser, userTenantKey } from '@/lib/tenant'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
@@ -175,13 +175,14 @@ function roleLabel(r) {
 }
 
 const isGlobal = ref(isGlobalUser())
-const userOrg = ref(userOrgKey())
-const orgOptions = ref([])
+const userTenant = ref(userTenantKey())
+const tenantNames = ref({})
+const tenantOptions = ref([])
 
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, roleCode: '', orgKey: '' })
+const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, roleCode: '', tenantKey: '' })
 
 // 两卡式列表页：表格只设最大高度，超高内部滚动
 const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
@@ -190,7 +191,7 @@ const editing = ref(false)
 const submitting = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
-const form = reactive({ id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, orgKey: '' })
+const form = reactive({ id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, tenantKey: '' })
 
 function onRowDetail(row) {
   detail.value = row
@@ -213,8 +214,8 @@ async function load() {
       pageNo: query.pageNo,
       pageSize: query.pageSize,
       roleCode: query.roleCode || undefined,
-      // 全局用户可按域过滤（缺省=全部域含全局账号）；机构用户由后端强制本域
-      orgKey: isGlobal.value && query.orgKey ? query.orgKey : undefined
+      // 全局用户可按域过滤（缺省=全部域含全局账号）；租户用户由后端强制本域
+      tenantKey: isGlobal.value && query.tenantKey ? query.tenantKey : undefined
     })
     rows.value = res.data.records || []
     total.value = res.data.total || 0
@@ -232,7 +233,7 @@ function handleSearch() {
 
 function handleReset() {
   query.roleCode = ''
-  query.orgKey = ''
+  query.tenantKey = ''
   handleSearch()
 }
 
@@ -249,7 +250,7 @@ function handleCurrentChange(val) {
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, orgKey: isGlobal.value ? '' : userOrg.value })
+  Object.assign(form, { id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1, tenantKey: isGlobal.value ? '' : userTenant.value })
   dialogVisible.value = true
 }
 
@@ -282,13 +283,13 @@ async function onSave() {
       await updateUser(form.id, { realName: form.realName, roleCode: form.roleCode, status: String(form.status), password: form.password || undefined })
       ElMessage.success('账号已更新')
     } else {
-      // orgKey：空=全局账号；非空=机构账号（机构用户由后端强制本域）
+      // tenantKey：空=全局账号；非空=租户账号（租户用户由后端强制本域）
       await createUser({
         username: form.username,
         password: form.password,
         realName: form.realName,
         roleCode: form.roleCode,
-        orgKey: form.orgKey || undefined
+        tenantKey: form.tenantKey || undefined
       })
       // 不回显初始口令：口令仅创建者本人知道，线下交接
       ElMessage.success('账号已创建，口令已按线下流程告知管理员')
@@ -321,8 +322,9 @@ async function loadRoles() {
 onMounted(async () => {
   await loadRoles()
   load()
+  tenantNames.value = await tenantNameMap()
   if (isGlobal.value) {
-    orgOptions.value = await listOrgsCached()
+    tenantOptions.value = await listTenantsCached()
   }
 })
 </script>
@@ -332,7 +334,7 @@ onMounted(async () => {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;
 }
-.org-tip {
+.tenant-tip {
   font-size: 12px;
   color: #909399;
   line-height: 1.6;

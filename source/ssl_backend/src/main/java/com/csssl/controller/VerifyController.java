@@ -6,7 +6,7 @@ import com.csssl.vo.VerifyResultVO;
 import com.csssl.service.CaService;
 import com.csssl.service.CrlService;
 import com.csssl.service.OcspService;
-import com.csssl.service.OrgService;
+import com.csssl.service.TenantService;
 import com.csssl.service.VerifyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,11 +25,11 @@ import java.util.Base64;
  * 业务系统公开接口（无需登录，供 cslk / csmig / csmis 等子系统对接）：
  * 根证书下载、证书链在线校验、CRL 下载、OCSP 三态查询（RFC 6960）。
  *
- * <p>路线A多机构：机构域公开端点 /ca/public/{orgKey}/...（root/subca/crl/crl/delta/ocsp/verify），
- * 全部委托 per-org 服务方法；无 {orgKey} 的现存端点保持 default 域行为，一行不动。
- * 合规点：机构不存在按现有异常口径抛 IllegalArgumentException（404/400 语义统一走全局异常处理），
- * 但 SUSPENDED/CLOSED 机构仍允许查 root/crl/ocsp/verify——历史证书必须持续可验证，
- * 只读端点绝不因机构状态关闭（机构状态门禁只作用于签发，见 CertService）。</p>
+ * <p>路线A多租户：租户域公开端点 /ca/public/{tenantKey}/...（root/subca/crl/crl/delta/ocsp/verify），
+ * 全部委托 per-tenant 服务方法；无 {tenantKey} 的现存端点保持 default 域行为，一行不动。
+ * 合规点：租户不存在按现有异常口径抛 IllegalArgumentException（404/400 语义统一走全局异常处理），
+ * 但 SUSPENDED/CLOSED 租户仍允许查 root/crl/ocsp/verify——历史证书必须持续可验证，
+ * 只读端点绝不因租户状态关闭（租户状态门禁只作用于签发，见 CertService）。</p>
  */
 @Slf4j
 @RestController
@@ -41,7 +41,7 @@ public class VerifyController {
     private final VerifyService verifyService;
     private final CrlService crlService;
     private final OcspService ocspService;
-    private final OrgService orgService;
+    private final TenantService tenantService;
 
     /** 根证书 PEM 下载（各子系统信任链配置） */
     @GetMapping("/root")
@@ -90,69 +90,69 @@ public class VerifyController {
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
-    // ==================== 机构域公开端点（路线A） ====================
+    // ==================== 租户域公开端点（路线A） ====================
 
-    /** 机构根证书 PEM 下载（default 亦可走此路由，与 /root 等价） */
-    @GetMapping("/{orgKey}/root")
-    public String orgRoot(@PathVariable String orgKey) {
-        requireOrgExists(orgKey);
-        return caService.exportRootPem(orgKey);
+    /** 租户根证书 PEM 下载（default 亦可走此路由，与 /root 等价） */
+    @GetMapping("/{tenantKey}/root")
+    public String tenantRoot(@PathVariable String tenantKey) {
+        requireTenantExists(tenantKey);
+        return caService.exportRootPem(tenantKey);
     }
 
-    /** 机构当前 SUB_CA 证书 PEM（中间CA链配置） */
-    @GetMapping("/{orgKey}/subca")
-    public String orgSubCa(@PathVariable String orgKey) {
-        requireOrgExists(orgKey);
-        return caService.exportSubCaPem(orgKey);
+    /** 租户当前 SUB_CA 证书 PEM（中间CA链配置） */
+    @GetMapping("/{tenantKey}/subca")
+    public String tenantSubCa(@PathVariable String tenantKey) {
+        requireTenantExists(tenantKey);
+        return caService.exportSubCaPem(tenantKey);
     }
 
-    /** 机构域证书链在线校验（沿该机构根链验证） */
-    @PostMapping("/{orgKey}/verify")
-    public Result<VerifyResultVO> orgVerify(@PathVariable String orgKey, @RequestBody VerifyQueryDTO req) {
-        requireOrgExists(orgKey);
-        return Result.success("校验完成", verifyService.verify(req, orgKey));
+    /** 租户域证书链在线校验（沿该租户根链验证） */
+    @PostMapping("/{tenantKey}/verify")
+    public Result<VerifyResultVO> tenantVerify(@PathVariable String tenantKey, @RequestBody VerifyQueryDTO req) {
+        requireTenantExists(tenantKey);
+        return Result.success("校验完成", verifyService.verify(req, tenantKey));
     }
 
-    /** 机构域 CRL 下载（判重发布逻辑同 default，per-org 独立编号） */
-    @GetMapping("/{orgKey}/crl")
-    public String orgCrl(@PathVariable String orgKey) {
-        requireOrgExists(orgKey);
-        return crlService.publishIfNeeded(orgKey).pem();
+    /** 租户域 CRL 下载（判重发布逻辑同 default，per-tenant 独立编号） */
+    @GetMapping("/{tenantKey}/crl")
+    public String tenantCrl(@PathVariable String tenantKey) {
+        requireTenantExists(tenantKey);
+        return crlService.publishIfNeeded(tenantKey).pem();
     }
 
-    /** 机构域增量 CRL（dCRL）下载：该域自最近全量发布以来新增的吊销/挂起条目 */
-    @GetMapping("/{orgKey}/crl/delta")
-    public String orgCrlDelta(@PathVariable String orgKey) {
-        requireOrgExists(orgKey);
-        return crlService.buildDeltaCrl(orgKey).pem();
+    /** 租户域增量 CRL（dCRL）下载：该域自最近全量发布以来新增的吊销/挂起条目 */
+    @GetMapping("/{tenantKey}/crl/delta")
+    public String tenantCrlDelta(@PathVariable String tenantKey) {
+        requireTenantExists(tenantKey);
+        return crlService.buildDeltaCrl(tenantKey).pem();
     }
 
-    /** 机构域 OCSP：POST 请求（该机构 SUB_CA 签响应；SUSPENDED/CLOSED 机构历史证书仍必须可查，只读不门禁） */
-    @PostMapping(value = "/{orgKey}/ocsp", consumes = "application/ocsp-request",
+    /** 租户域 OCSP：POST 请求（该租户 SUB_CA 签响应；SUSPENDED/CLOSED 租户历史证书仍必须可查，只读不门禁） */
+    @PostMapping(value = "/{tenantKey}/ocsp", consumes = "application/ocsp-request",
             produces = "application/ocsp-response")
-    public ResponseEntity<byte[]> orgOcspPost(@PathVariable String orgKey, @RequestBody byte[] body) {
-        requireOrgExists(orgKey);
-        byte[] resp = ocspService.respond(orgKey, body);
+    public ResponseEntity<byte[]> tenantOcspPost(@PathVariable String tenantKey, @RequestBody byte[] body) {
+        requireTenantExists(tenantKey);
+        byte[] resp = ocspService.respond(tenantKey, body);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
-    /** 机构域 OCSP：GET 请求（RFC 6960 base64url 编码的 DER） */
-    @GetMapping(value = "/{orgKey}/ocsp/{b64url}", produces = "application/ocsp-response")
-    public ResponseEntity<byte[]> orgOcspGet(@PathVariable String orgKey, @PathVariable String b64url) {
-        requireOrgExists(orgKey);
+    /** 租户域 OCSP：GET 请求（RFC 6960 base64url 编码的 DER） */
+    @GetMapping(value = "/{tenantKey}/ocsp/{b64url}", produces = "application/ocsp-response")
+    public ResponseEntity<byte[]> tenantOcspGet(@PathVariable String tenantKey, @PathVariable String b64url) {
+        requireTenantExists(tenantKey);
         byte[] req = Base64.getUrlDecoder().decode(b64url);
-        byte[] resp = ocspService.respond(orgKey, req);
+        byte[] resp = ocspService.respond(tenantKey, req);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
     /**
-     * 机构存在性校验：不存在/标识非法按现有异常口径抛 IllegalArgumentException（全局异常处理回 4xx）。
-     * 注意：只校验"存在"，不校验 ACTIVE——SUSPENDED/CLOSED 机构的历史证书验证链路（root/crl/ocsp/verify）
-     * 必须保持可用，这是吊销信息持续可得的合规底线；机构状态门禁只落在签发侧。
+     * 租户存在性校验：不存在/标识非法按现有异常口径抛 IllegalArgumentException（全局异常处理回 4xx）。
+     * 注意：只校验"存在"，不校验 ACTIVE——SUSPENDED/CLOSED 租户的历史证书验证链路（root/crl/ocsp/verify）
+     * 必须保持可用，这是吊销信息持续可得的合规底线；租户状态门禁只落在签发侧。
      */
-    private void requireOrgExists(String orgKey) {
-        if (orgService.findByKey(orgKey) == null) {
-            throw new IllegalArgumentException("机构不存在: " + orgKey);
+    private void requireTenantExists(String tenantKey) {
+        if (tenantService.findByKey(tenantKey) == null) {
+            throw new IllegalArgumentException("租户不存在: " + tenantKey);
         }
     }
 }

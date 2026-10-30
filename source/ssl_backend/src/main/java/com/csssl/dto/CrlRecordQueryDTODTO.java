@@ -12,9 +12,9 @@ import lombok.EqualsAndHashCode;
 public class CrlRecordQueryDTODTO extends PageParam {
 
     /**
-     * 机构数据域过滤
+     * 租户数据域过滤
      */
-    private String orgKey;
+    private String tenantKey;
 
     /**
      * 关键字（命中 主体CN/序列号）

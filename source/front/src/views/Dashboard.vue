@@ -20,7 +20,7 @@
     </div>
 
     <div class="panel-row">
-      <!-- 根CA：本机构信任根，先看是否就绪 -->
+      <!-- 根CA：本租户信任根，先看是否就绪 -->
       <div class="page-card ca-card">
         <div class="section-title">
           根CA
@@ -57,7 +57,7 @@
           <button type="button" class="quick-item" @click="$router.push('/applications')">
             <el-icon><EditPen /></el-icon>
             <span>提交申请</span>
-            <small>录入机构/个人主体与公钥</small>
+            <small>录入租户/个人主体与公钥</small>
           </button>
           <button type="button" class="quick-item" @click="$router.push('/certs')">
             <el-icon><DocumentAdd /></el-icon>

@@ -4,9 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
 import com.csssl.entity.CaCert;
-import com.csssl.entity.CaOrg;
+import com.csssl.entity.CaTenant;
 import com.csssl.mapper.CaCertMapper;
-import com.csssl.mapper.CaOrgMapper;
+import com.csssl.mapper.CaTenantMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.util.KeyVault;
 import com.csssl.util.PemUtil;
@@ -48,11 +48,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>私钥一律经 {@link KeyVault} SM4 加密落盘（key.pem.enc），数据库只存证书与元信息。</li>
  * </ul>
  *
- * <p>路线A多机构（按机构独立根CA）：本类维护 {@code orgKey → OrgCaState} 根池，
- * 每机构独立的锁、门限解封内存缓存、目录路径与保险库（{@link KeyVaultConfig.OrgVaultResolver}）。
+ * <p>路线A多租户（按租户独立根CA）：本类维护 {@code tenantKey → TenantCaState} 根池，
+ * 每租户独立的锁、门限解封内存缓存、目录路径与保险库（{@link KeyVaultConfig.TenantVaultResolver}）。
  * 目录规则：default（存量单根，兼容铁律）沿用 store-dir/{root,subca,issued} 与 root/shares、master.key；
- * 新机构为 store-dir/orgs/{orgKey}/{root,subca,issued,shares} 与 orgs/{orgKey}/master.key。
- * 所有原无参公开方法委托 default 机构，行为与单根时代完全一致；新代码一律使用带 orgKey 的版本。</p>
+ * 新租户为 store-dir/tenants/{tenantKey}/{root,subca,issued,shares} 与 tenants/{tenantKey}/master.key。
+ * 所有原无参公开方法委托 default 租户，行为与单根时代完全一致；新代码一律使用带 tenantKey 的版本。</p>
  */
 @Slf4j
 @Service
@@ -83,104 +83,104 @@ public class CaService implements ApplicationRunner {
     private final CaCertMapper certMapper;
     private final ObjectMapper objectMapper;
     /**
-     * 单例保险库 bean（KeyVaultConfig 提供），与 TsaService 共用同一 store-dir 实例；即 default 机构保险库
+     * 单例保险库 bean（KeyVaultConfig 提供），与 TsaService 共用同一 store-dir 实例；即 default 租户保险库
      */
     private final KeyVault vault;
     /**
-     * 机构保险库解析器：default → 上述单例；其他机构 → store-dir/orgs/{orgKey} 独立保险库
+     * 租户保险库解析器：default → 上述单例；其他租户 → store-dir/tenants/{tenantKey} 独立保险库
      */
-    private final KeyVaultConfig.OrgVaultResolver orgVaults;
-    private final CaOrgMapper orgMapper;
+    private final KeyVaultConfig.TenantVaultResolver tenantVaults;
+    private final CaTenantMapper tenantMapper;
 
     /**
-     * 机构根CA状态池（computeIfAbsent 懒加载）。每机构一把 per-state 锁：
-     * 沿用 B 路线「单一锁对象守护内存密钥读写」的语义，细化到机构粒度——
-     * 杜绝"读到刚被封存的私钥"竞态，同时不同机构互不阻塞。
+     * 租户根CA状态池（computeIfAbsent 懒加载）。每租户一把 per-state 锁：
+     * 沿用 B 路线「单一锁对象守护内存密钥读写」的语义，细化到租户粒度——
+     * 杜绝"读到刚被封存的私钥"竞态，同时不同租户互不阻塞。
      */
-    private final Map<String, OrgCaState> orgStates = new ConcurrentHashMap<>();
+    private final Map<String, TenantCaState> tenantStates = new ConcurrentHashMap<>();
 
-    private OrgCaState stateOf(String orgKey) {
-        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
-        return orgStates.computeIfAbsent(orgKey, k -> new OrgCaState());
+    private TenantCaState stateOf(String tenantKey) {
+        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
+        return tenantStates.computeIfAbsent(tenantKey, k -> new TenantCaState());
     }
 
-    // ==================== 机构态/路径/保险库解析 ====================
+    // ==================== 租户态/路径/保险库解析 ====================
 
     /**
-     * 机构保险库：default 复用共享单例，其他机构按 orgs/{orgKey} 根独立（含独立主密钥）
+     * 租户保险库：default 复用共享单例，其他租户按 tenants/{tenantKey} 根独立（含独立主密钥）
      */
-    private KeyVault vaultFor(String orgKey) {
-        return orgVaults.forOrg(orgKey);
-    }
-
-    /**
-     * 机构落盘根目录：default → store-dir；其他 → store-dir/orgs/{orgKey}
-     */
-    private Path orgBaseDir(String orgKey) {
-        return orgVaults.orgStoreDir(orgKey);
-    }
-
-    private Path rootDir(String orgKey) {
-        return orgBaseDir(orgKey).resolve("root");
-    }
-
-    private Path rootCertFile(String orgKey) {
-        return rootDir(orgKey).resolve("cert.pem");
-    }
-
-    private Path subCaDir(String orgKey) {
-        return orgBaseDir(orgKey).resolve("subca");
-    }
-
-    private Path subCaCertFile(String orgKey) {
-        return subCaDir(orgKey).resolve("cert.pem");
+    private KeyVault vaultFor(String tenantKey) {
+        return tenantVaults.forTenant(tenantKey);
     }
 
     /**
-     * 签发证书落盘目录（issued/{serial}，兼容入口=default 机构）
+     * 租户落盘根目录：default → store-dir；其他 → store-dir/tenants/{tenantKey}
+     */
+    private Path tenantBaseDir(String tenantKey) {
+        return tenantVaults.tenantStoreDir(tenantKey);
+    }
+
+    private Path rootDir(String tenantKey) {
+        return tenantBaseDir(tenantKey).resolve("root");
+    }
+
+    private Path rootCertFile(String tenantKey) {
+        return rootDir(tenantKey).resolve("cert.pem");
+    }
+
+    private Path subCaDir(String tenantKey) {
+        return tenantBaseDir(tenantKey).resolve("subca");
+    }
+
+    private Path subCaCertFile(String tenantKey) {
+        return subCaDir(tenantKey).resolve("cert.pem");
+    }
+
+    /**
+     * 签发证书落盘目录（issued/{serial}，兼容入口=default 租户）
      */
     public Path issuedDir(String serialHex) {
-        return issuedDir(CaOrg.PRIMARY_ORG_KEY, serialHex);
+        return issuedDir(CaTenant.PRIMARY_TENANT_KEY, serialHex);
     }
 
     /**
-     * 签发证书落盘目录：default → store-dir/issued/{serial}；其他 → store-dir/orgs/{orgKey}/issued/{serial}
+     * 签发证书落盘目录：default → store-dir/issued/{serial}；其他 → store-dir/tenants/{tenantKey}/issued/{serial}
      */
-    public Path issuedDir(String orgKey, String serialHex) {
-        return orgBaseDir(orgKey).resolve("issued").resolve(serialHex);
+    public Path issuedDir(String tenantKey, String serialHex) {
+        return tenantBaseDir(tenantKey).resolve("issued").resolve(serialHex);
     }
 
     /**
-     * 门限份额目录：default 沿用 root/shares（存量路径不动）；新机构按约定平铺在机构目录 shares/
+     * 门限份额目录：default 沿用 root/shares（存量路径不动）；新租户按约定平铺在租户目录 shares/
      */
-    private Path sharesDir(String orgKey) {
-        return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
-                ? rootDir(orgKey).resolve("shares")
-                : orgBaseDir(orgKey).resolve("shares");
+    private Path sharesDir(String tenantKey) {
+        return CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)
+                ? rootDir(tenantKey).resolve("shares")
+                : tenantBaseDir(tenantKey).resolve("shares");
     }
 
-    private Path shareFile(String orgKey, int index) {
-        return sharesDir(orgKey).resolve("shares-" + index + ".json");
+    private Path shareFile(String tenantKey, int index) {
+        return sharesDir(tenantKey).resolve("shares-" + index + ".json");
     }
 
     /**
-     * 机构记录（不存在即拒绝操作——路径/密钥材料都锚定注册表，防未登记机构污染磁盘）
+     * 租户记录（不存在即拒绝操作——路径/密钥材料都锚定注册表，防未登记租户污染磁盘）
      */
-    private CaOrg requireOrg(String orgKey) {
-        CaOrg org = orgMapper.selectOne(new LambdaQueryWrapper<CaOrg>().eq(CaOrg::getOrgKey, orgKey));
-        if (org == null) {
-            throw new IllegalStateException("机构不存在: " + orgKey);
+    private CaTenant requireTenant(String tenantKey) {
+        CaTenant tenant = tenantMapper.selectOne(new LambdaQueryWrapper<CaTenant>().eq(CaTenant::getTenantKey, tenantKey));
+        if (tenant == null) {
+            throw new IllegalStateException("租户不存在: " + tenantKey);
         }
-        return org;
+        return tenant;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        // 启动仅确保主机构（OrgScope 已校准）；未登记时不代建，交由机构管理页开机构
-        String primary = CaOrg.PRIMARY_ORG_KEY;
-        if (orgMapper.selectOne(new LambdaQueryWrapper<CaOrg>()
-                .eq(CaOrg::getOrgKey, primary)) == null) {
-            log.info("[CA] 主机构 {} 尚未登记，跳过启动初始化（请在机构管理创建机构）", primary);
+        // 启动仅确保主租户（TenantScope 已校准）；未登记时不代建，交由租户管理页开租户
+        String primary = CaTenant.PRIMARY_TENANT_KEY;
+        if (tenantMapper.selectOne(new LambdaQueryWrapper<CaTenant>()
+                .eq(CaTenant::getTenantKey, primary)) == null) {
+            log.info("[CA] 主租户 {} 尚未登记，跳过启动初始化（请在租户管理创建租户）", primary);
             return;
         }
         try {
@@ -191,7 +191,7 @@ public class CaService implements ApplicationRunner {
             if (ROOT_KEY_ONLINE.equals(rootKeyState(primary))) {
                 ensureRootShares(primary);
             }
-            log.info("[CA] 启动完成（主机构 {}）：root={}({}), subCa 签发就绪，rootKeyState={}",
+            log.info("[CA] 启动完成（主租户 {}）：root={}({}), subCa 签发就绪，rootKeyState={}",
                     primary, root.getSubjectCn(), root.getAlgorithm(), rootKeyState(primary));
         } catch (Exception e) {
             log.error("[CA] 启动初始化失败，请检查 store-dir 权限、主密钥与数据库连接: {}", e.getMessage());
@@ -199,48 +199,48 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 确保根CA存在（幂等，兼容入口=主机构）
+     * 确保根CA存在（幂等，兼容入口=主租户）
      */
     public CaCert ensureRoot() {
-        return ensureRoot(CaOrg.PRIMARY_ORG_KEY);
+        return ensureRoot(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     // ==================== 根CA ====================
 
     /**
-     * 确保指定机构根CA存在（幂等）：优先文件态 → 重建记录 → 全新生成。
+     * 确保指定租户根CA存在（幂等）：优先文件态 → 重建记录 → 全新生成。
      * 根私钥存在性判定兼容两种形态：SM4 加密文件（key.pem.enc）或 Shamir(3,5) 门限份额。
      */
-    public CaCert ensureRoot(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public CaCert ensureRoot(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            CaCert root = doFindRoot(orgKey);
+            CaCert root = doFindRoot(tenantKey);
 
-            if (root != null && (ov.keyExists("root", "key") || doSharesExist(orgKey))) {
+            if (root != null && (ov.keyExists("root", "key") || doSharesExist(tenantKey))) {
                 markExpiredIfNeeded(root);
                 return root;
             }
-            if (root != null && !ov.keyExists("root", "key") && !doSharesExist(orgKey)) {
-                throw new IllegalStateException("根CA私钥缺失（" + rootDir(orgKey) + "），无法签发二级CA，请恢复密钥或重建根CA");
+            if (root != null && !ov.keyExists("root", "key") && !doSharesExist(tenantKey)) {
+                throw new IllegalStateException("根CA私钥缺失（" + rootDir(tenantKey) + "），无法签发二级CA，请恢复密钥或重建根CA");
             }
-            if (root == null && Files.exists(rootCertFile(orgKey)) && ov.keyExists("root", "key")) {
-                CaCert rebuilt = doRebuildFromFiles(orgKey);
-                log.warn("[根CA][{}] 数据库记录缺失，已从落盘文件重建（serial={}）", orgKey, rebuilt.getSerialHex());
+            if (root == null && Files.exists(rootCertFile(tenantKey)) && ov.keyExists("root", "key")) {
+                CaCert rebuilt = doRebuildFromFiles(tenantKey);
+                log.warn("[根CA][{}] 数据库记录缺失，已从落盘文件重建（serial={}）", tenantKey, rebuilt.getSerialHex());
                 return rebuilt;
             }
-            return doGenerateRoot(orgKey, ov);
+            return doGenerateRoot(tenantKey, ov);
         }
     }
 
     /**
-     * 全新生成根CA（管理端 /admin/ca/init 与启动初始化、开机构流程共用）
+     * 全新生成根CA（管理端 /admin/ca/init 与启动初始化、开租户流程共用）
      */
-    private CaCert doGenerateRoot(String orgKey, KeyVault ov) {
+    private CaCert doGenerateRoot(String tenantKey, KeyVault ov) {
         String algorithm;
         X509Certificate cert;
         KeyPair keyPair;
-        if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
+        if (CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
             // default 域：CN/算法/有效期全部沿用全局配置与旧4参自签（DN 含 O=CSSSL），存量行为零变化
             CssslProperties.RootCa rootProps = props.getRootCa();
             algorithm = rootProps.getAlgorithm() == null || rootProps.getAlgorithm().isBlank()
@@ -249,26 +249,26 @@ public class CaService implements ApplicationRunner {
             keyPair = CertUtil.generateKeyPair(algorithm);
             cert = CertUtil.selfSignRoot(keyPair, rootProps.getCn(), algorithm, rootProps.getValidityDays());
         } else {
-            CaOrg org = requireOrg(orgKey);
-            algorithm = org.getAlgorithm() == null || org.getAlgorithm().isBlank()
-                    ? props.getRootCa().getAlgorithm() : org.getAlgorithm().trim();
+            CaTenant tenant = requireTenant(tenantKey);
+            algorithm = tenant.getAlgorithm() == null || tenant.getAlgorithm().isBlank()
+                    ? props.getRootCa().getAlgorithm() : tenant.getAlgorithm().trim();
             CertUtil.checkAlgorithm(algorithm);
             keyPair = CertUtil.generateKeyPair(algorithm);
-            cert = CertUtil.selfSignRoot(keyPair, "CSSSL ROOT CA - " + org.getOrgName(),
-                    org.getSubjectO(), algorithm, props.getRootCa().getValidityDays());
+            cert = CertUtil.selfSignRoot(keyPair, "CSSSL ROOT CA - " + tenant.getTenantName(),
+                    tenant.getSubjectO(), algorithm, props.getRootCa().getValidityDays());
         }
         String serial = cert.getSerialNumber().toString(16);
 
         try {
-            Files.createDirectories(rootDir(orgKey));
-            Files.writeString(rootCertFile(orgKey), PemUtil.certToPem(cert), StandardCharsets.UTF_8);
+            Files.createDirectories(rootDir(tenantKey));
+            Files.writeString(rootCertFile(tenantKey), PemUtil.certToPem(cert), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new IllegalStateException("根CA落盘失败: " + e.getMessage(), e);
         }
         ov.storeKey("root", "key", PemUtil.keyToPem(keyPair.getPrivate()));
 
         CaCert row = new CaCert();
-        row.setOrgKey(orgKey);
+        row.setTenantKey(tenantKey);
         row.setSerialHex(serial);
         row.setSubjectCn(CertUtil.subjectCn(cert));
         row.setCertType(TYPE_ROOT);
@@ -279,28 +279,28 @@ public class CaService implements ApplicationRunner {
                 .atZone(java.time.ZoneId.systemDefault()).toLocalDateTime());
         row.setStatus("VALID");
         row.setCertPem(PemUtil.certToPem(cert));
-        row.setDescription(CaOrg.LEGACY_ORG_KEY.equals(orgKey)
-                ? "系统根CA（首次启动自动初始化）" : "机构根CA（开机构时初始化）");
+        row.setDescription(CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)
+                ? "系统根CA（首次启动自动初始化）" : "租户根CA（开租户时初始化）");
         row.setCreatedBy("SYSTEM");
         row.setCreatedAt(LocalDateTime.now());
         certMapper.insert(row);
         // 门限化由调用方（run/initRoot）按"份额文件齐全"判据触发 ensureRootShares，无需内存标志
-        log.info("[根CA][{}] 初始化完成：cn={}, algorithm={}, serial={}", orgKey, row.getSubjectCn(), algorithm, serial);
+        log.info("[根CA][{}] 初始化完成：cn={}, algorithm={}, serial={}", tenantKey, row.getSubjectCn(), algorithm, serial);
         return row;
     }
 
     /**
      * 数据库记录缺失但落盘文件存在时，从文件重建记录
      */
-    private CaCert doRebuildFromFiles(String orgKey) {
+    private CaCert doRebuildFromFiles(String tenantKey) {
         try {
-            String certPem = Files.readString(rootCertFile(orgKey), StandardCharsets.UTF_8);
+            String certPem = Files.readString(rootCertFile(tenantKey), StandardCharsets.UTF_8);
             X509Certificate cert = PemUtil.parseCert(certPem);
-            // 算法探测沿用存量口径（按配置判断 SM2/RSA）；机构域以注册表 algorithm 为准
-            String hint = CaOrg.LEGACY_ORG_KEY.equals(orgKey)
-                    ? props.getRootCa().getAlgorithm() : requireOrg(orgKey).getAlgorithm();
+            // 算法探测沿用存量口径（按配置判断 SM2/RSA）；租户域以注册表 algorithm 为准
+            String hint = CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)
+                    ? props.getRootCa().getAlgorithm() : requireTenant(tenantKey).getAlgorithm();
             CaCert row = new CaCert();
-            row.setOrgKey(orgKey);
+            row.setTenantKey(tenantKey);
             row.setSerialHex(cert.getSerialNumber().toString(16));
             row.setSubjectCn(CertUtil.subjectCn(cert));
             row.setCertType(TYPE_ROOT);
@@ -322,40 +322,40 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 查询根CA记录（兼容入口=default 机构）
+     * 查询根CA记录（兼容入口=default 租户）
      */
     public CaCert findRoot() {
-        return findRoot(CaOrg.PRIMARY_ORG_KEY);
+        return findRoot(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 查询指定机构根CA记录（serial 全局唯一，机构维度过滤取最新）
+     * 查询指定租户根CA记录（serial 全局唯一，租户维度过滤取最新）
      */
-    public CaCert findRoot(String orgKey) {
-        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
-        return doFindRoot(orgKey);
+    public CaCert findRoot(String tenantKey) {
+        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
+        return doFindRoot(tenantKey);
     }
 
-    private CaCert doFindRoot(String orgKey) {
+    private CaCert doFindRoot(String tenantKey) {
         List<CaCert> roots = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_ROOT)
-                .eq(CaCert::getOrgKey, orgKey)
+                .eq(CaCert::getTenantKey, tenantKey)
                 .orderByDesc(CaCert::getCreatedAt));
         return roots.isEmpty() ? null : roots.get(0);
     }
 
     /**
-     * 加载根证书（兼容入口=default 机构）
+     * 加载根证书（兼容入口=default 租户）
      */
     public X509Certificate loadRootCert() {
-        return loadRootCert(CaOrg.PRIMARY_ORG_KEY);
+        return loadRootCert(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 加载指定机构根证书
+     * 加载指定租户根证书
      */
-    public X509Certificate loadRootCert(String orgKey) {
-        CaCert root = findRoot(orgKey);
+    public X509Certificate loadRootCert(String tenantKey) {
+        CaCert root = findRoot(tenantKey);
         if (root == null) {
             throw new IllegalStateException("根CA未初始化");
         }
@@ -363,17 +363,17 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 加载根CA私钥（兼容入口=default 机构）
+     * 加载根CA私钥（兼容入口=default 租户）
      */
     public PrivateKey loadRootKey() {
-        return loadRootKey(CaOrg.PRIMARY_ORG_KEY);
+        return loadRootKey(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 加载机构根证书（内部版，假定调用方已持有机构锁或仅需只读一致性）
+     * 加载租户根证书（内部版，假定调用方已持有租户锁或仅需只读一致性）
      */
-    private X509Certificate doLoadRootCert(String orgKey) {
-        CaCert root = doFindRoot(orgKey);
+    private X509Certificate doLoadRootCert(String tenantKey) {
+        CaCert root = doFindRoot(tenantKey);
         if (root == null) {
             throw new IllegalStateException("根CA未初始化");
         }
@@ -381,28 +381,28 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 加载机构根CA私钥：优先门限解封缓存；否则 SM4 加密文件（旧模式）；份额分持态必须显式解封。
-     * 与 seal/unseal/份额迁移同为机构锁方法：读缓存与封存写入互斥，杜绝"读到刚被封存的私钥"。
+     * 加载租户根CA私钥：优先门限解封缓存；否则 SM4 加密文件（旧模式）；份额分持态必须显式解封。
+     * 与 seal/unseal/份额迁移同为租户锁方法：读缓存与封存写入互斥，杜绝"读到刚被封存的私钥"。
      */
-    public PrivateKey loadRootKey(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public PrivateKey loadRootKey(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            return doLoadRootKey(orgKey, ov, st);
+            return doLoadRootKey(tenantKey, ov, st);
         }
     }
 
-    private PrivateKey doLoadRootKey(String orgKey, KeyVault ov, OrgCaState st) {
+    private PrivateKey doLoadRootKey(String tenantKey, KeyVault ov, TenantCaState st) {
         if (st.rootKeyCache != null) {
             return st.rootKeyCache;
         }
-        CaCert root = doFindRoot(orgKey);
+        CaCert root = doFindRoot(tenantKey);
         if (root == null) {
             throw new IllegalStateException("根CA未初始化");
         }
         String keyPem = ov.loadKey("root", "key");
         if (keyPem == null) {
-            if (doSharesExist(orgKey)) {
+            if (doSharesExist(tenantKey)) {
                 throw new IllegalStateException("根私钥已切换为 Shamir(3,5) 门限分持，请由密钥管理员提交任意 3 份份额解封后再轮换 SUB_CA");
             }
             throw new IllegalStateException("根CA私钥缺失，请恢复密钥或重建根CA");
@@ -411,21 +411,21 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 根私钥状态（兼容入口=default 机构）
+     * 根私钥状态（兼容入口=default 租户）
      */
     public String rootKeyState() {
-        return rootKeyState(CaOrg.PRIMARY_ORG_KEY);
+        return rootKeyState(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构根私钥状态：SHARES（门限分持）/ ONLINE / SEALED / MISSING
+     * 租户根私钥状态：SHARES（门限分持）/ ONLINE / SEALED / MISSING
      */
-    public String rootKeyState(String orgKey) {
-        return doRootKeyState(orgKey, vaultFor(orgKey));
+    public String rootKeyState(String tenantKey) {
+        return doRootKeyState(tenantKey, vaultFor(tenantKey));
     }
 
-    private String doRootKeyState(String orgKey, KeyVault ov) {
-        if (doSharesExist(orgKey)) {
+    private String doRootKeyState(String tenantKey, KeyVault ov) {
+        if (doSharesExist(tenantKey)) {
             return ROOT_KEY_SHARES;
         }
         if (ov.isSealed("root", "key")) {
@@ -435,75 +435,75 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 封存根私钥（兼容入口=default 机构）
+     * 封存根私钥（兼容入口=default 租户）
      */
     public void sealRootKey() {
-        sealRootKey(CaOrg.PRIMARY_ORG_KEY);
+        sealRootKey(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 封存机构根私钥：门限分持态清除内存缓存；旧模式将加密文件移存 .sealed（幂等）
+     * 封存租户根私钥：门限分持态清除内存缓存；旧模式将加密文件移存 .sealed（幂等）
      */
-    public void sealRootKey(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public void sealRootKey(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            CaCert root = doFindRoot(orgKey);
+            CaCert root = doFindRoot(tenantKey);
             if (root == null) {
                 throw new IllegalStateException("根CA未初始化，无法封存");
             }
-            doEnsureSubCa(orgKey, ov, st);
+            doEnsureSubCa(tenantKey, ov, st);
             st.rootKeyCache = null;
             if (ov.keyExists("root", "key")) {
                 ov.sealKey("root", "key");
             }
             log.info("[根CA][{}] 根私钥已封存（serial={}，门限分持态={}），日常签发由 SUB_CA 承担",
-                    orgKey, root.getSerialHex(), doSharesExist(orgKey));
+                    tenantKey, root.getSerialHex(), doSharesExist(tenantKey));
         }
     }
 
     /**
-     * 解封根私钥（兼容入口=default 机构）
+     * 解封根私钥（兼容入口=default 租户）
      */
     public void unsealRootKey() {
-        unsealRootKey(CaOrg.PRIMARY_ORG_KEY);
+        unsealRootKey(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 解封机构根私钥（旧模式移名恢复在线态；门限分持态须走份额解封接口）
+     * 解封租户根私钥（旧模式移名恢复在线态；门限分持态须走份额解封接口）
      */
-    public void unsealRootKey(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public void unsealRootKey(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            if (doFindRoot(orgKey) == null) {
+            if (doFindRoot(tenantKey) == null) {
                 throw new IllegalStateException("根CA未初始化，无法解封");
             }
-            if (doSharesExist(orgKey)) {
+            if (doSharesExist(tenantKey)) {
                 throw new IllegalStateException("根私钥已切换为 Shamir(3,5) 门限分持，请用份额解封接口提交任意 3 份");
             }
             ov.unsealKey("root", "key");
             if (ov.isSealed("root", "key")) {
                 throw new IllegalStateException("根私钥文件缺失（已封存），无法解封");
             }
-            log.info("[根CA][{}] 根私钥已解封，恢复在线态", orgKey);
+            log.info("[根CA][{}] 根私钥已解封，恢复在线态", tenantKey);
         }
     }
 
     /**
-     * 读取单份门限份额 JSON 文本（兼容入口=default 机构）
+     * 读取单份门限份额 JSON 文本（兼容入口=default 租户）
      */
     public String readShareJson(int index) {
-        return readShareJson(CaOrg.PRIMARY_ORG_KEY, index);
+        return readShareJson(CaTenant.PRIMARY_TENANT_KEY, index);
     }
 
     // ==================== Shamir(3,5) 门限分持 ====================
 
     /**
-     * 读取机构单份门限份额 JSON 文本（管理端导出用；不存在抛 IllegalStateException）
+     * 读取租户单份门限份额 JSON 文本（管理端导出用；不存在抛 IllegalStateException）
      */
-    public String readShareJson(String orgKey, int index) {
-        Path file = shareFile(orgKey, index);
+    public String readShareJson(String tenantKey, int index) {
+        Path file = shareFile(tenantKey, index);
         if (!Files.exists(file)) {
             throw new IllegalStateException("份额文件不存在（编号 " + index + "）：请先执行门限化迁移");
         }
@@ -515,25 +515,25 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 5 份份额是否全部生成（兼容入口=default 机构）
+     * 5 份份额是否全部生成（兼容入口=default 租户）
      */
     public boolean sharesExist() {
-        return sharesExist(CaOrg.PRIMARY_ORG_KEY);
+        return sharesExist(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构 5 份份额是否全部生成（任一缺失视为未完成，避免以不完整份额误判）
+     * 租户 5 份份额是否全部生成（任一缺失视为未完成，避免以不完整份额误判）
      */
-    public boolean sharesExist(String orgKey) {
-        return doSharesExist(orgKey);
+    public boolean sharesExist(String tenantKey) {
+        return doSharesExist(tenantKey);
     }
 
-    private boolean doSharesExist(String orgKey) {
-        if (!Files.isDirectory(sharesDir(orgKey))) {
+    private boolean doSharesExist(String tenantKey) {
+        if (!Files.isDirectory(sharesDir(tenantKey))) {
             return false;
         }
         for (int i = 1; i <= SHARE_TOTAL; i++) {
-            if (!Files.exists(shareFile(orgKey, i))) {
+            if (!Files.exists(shareFile(tenantKey, i))) {
                 return false;
             }
         }
@@ -541,26 +541,26 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 份额状态（兼容入口=default 机构）
+     * 份额状态（兼容入口=default 租户）
      */
     public RootSharesVO shareState() {
-        return shareState(CaOrg.PRIMARY_ORG_KEY);
+        return shareState(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构份额状态（管理端展示：5 份各自存在性 + 阈值）
+     * 租户份额状态（管理端展示：5 份各自存在性 + 阈值）
      */
-    public RootSharesVO shareState(String orgKey) {
-        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
+    public RootSharesVO shareState(String tenantKey) {
+        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
         List<RootSharesVO.ShareItem> shares = new ArrayList<>();
         for (int i = 1; i <= SHARE_TOTAL; i++) {
             RootSharesVO.ShareItem item = new RootSharesVO.ShareItem();
             item.setIndex(i);
-            item.setExists(Files.exists(shareFile(orgKey, i)));
+            item.setExists(Files.exists(shareFile(tenantKey, i)));
             shares.add(item);
         }
         RootSharesVO vo = new RootSharesVO();
-        vo.setGenerated(doSharesExist(orgKey));
+        vo.setGenerated(doSharesExist(tenantKey));
         vo.setTotal(SHARE_TOTAL);
         vo.setThreshold(SHARE_THRESHOLD);
         vo.setShares(shares);
@@ -568,30 +568,30 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 根私钥门限化（兼容入口=default 机构）
+     * 根私钥门限化（兼容入口=default 租户）
      */
     public void ensureRootShares() {
-        ensureRootShares(CaOrg.PRIMARY_ORG_KEY);
+        ensureRootShares(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构根私钥门限化（幂等）：把当前 SM4 加密落盘的根私钥拆为 Shamir(3,5) 份额并删除单点加密文件。
+     * 租户根私钥门限化（幂等）：把当前 SM4 加密落盘的根私钥拆为 Shamir(3,5) 份额并删除单点加密文件。
      * 仅当 5 份份额全部成功落盘后才删除原始文件；任何一份失败则保留原始文件并报错（不静默降级）。
      * 触发：run()/initRoot() 以「份额文件是否齐全」为唯一判据调用（中断/重启后可安全重试）；旧环境也可由管理员显式调用迁移接口。
      */
-    public void ensureRootShares(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public void ensureRootShares(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            doEnsureRootShares(orgKey, ov, st);
+            doEnsureRootShares(tenantKey, ov, st);
         }
     }
 
-    private void doEnsureRootShares(String orgKey, KeyVault ov, OrgCaState st) {
-        if (doSharesExist(orgKey)) {
+    private void doEnsureRootShares(String tenantKey, KeyVault ov, TenantCaState st) {
+        if (doSharesExist(tenantKey)) {
             return;
         }
-        CaCert root = doFindRoot(orgKey);
+        CaCert root = doFindRoot(tenantKey);
         if (root == null) {
             throw new IllegalStateException("根CA未初始化，无法生成门限份额");
         }
@@ -600,64 +600,64 @@ public class CaService implements ApplicationRunner {
             throw new IllegalStateException("根私钥不可用（无 SM4 加密副本可拆分），无法生成门限份额");
         }
         try {
-            Files.createDirectories(sharesDir(orgKey));
+            Files.createDirectories(sharesDir(tenantKey));
             PrivateKey key = PemUtil.parsePrivateKey(keyPem);
             ShamirUtil.Share[] shares = ShamirUtil.split(key.getEncoded(), SHARE_TOTAL, SHARE_THRESHOLD);
             for (ShamirUtil.Share s : shares) {
-                Files.writeString(shareFile(orgKey, s.index()),
+                Files.writeString(shareFile(tenantKey, s.index()),
                         objectMapper.writeValueAsString(s), StandardCharsets.UTF_8);
             }
         } catch (Exception e) {
             throw new IllegalStateException("门限份额生成失败（原始根私钥未删除）: " + e.getMessage(), e);
         }
         // 5 份份额全部落盘成功后才删除单点加密文件
-        if (doSharesExist(orgKey)) {
+        if (doSharesExist(tenantKey)) {
             ov.deleteKey("root", "key");
             st.rootKeyCache = null;
             log.warn("[根CA][{}] 根私钥已切换为 Shamir(3,5) 门限分持（serial={}）：5 份份额落盘，原始加密文件已删除，恢复需任意 3 份",
-                    orgKey, root.getSerialHex());
+                    tenantKey, root.getSerialHex());
         } else {
             throw new IllegalStateException("份额写入不完整，已保留原始根私钥，请检查份额目录后重试");
         }
     }
 
     /**
-     * 旧环境迁移（兼容入口=default 机构）
+     * 旧环境迁移（兼容入口=default 租户）
      */
     public RootSharesVO migrateRootShares() {
-        return migrateRootShares(CaOrg.PRIMARY_ORG_KEY);
+        return migrateRootShares(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构迁移：把已存在的 SM4 加密根私钥转为门限份额（显式调用，避免误删生产密钥）
+     * 租户迁移：把已存在的 SM4 加密根私钥转为门限份额（显式调用，避免误删生产密钥）
      */
-    public RootSharesVO migrateRootShares(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public RootSharesVO migrateRootShares(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            if (doSharesExist(orgKey)) {
-                return shareState(orgKey);
+            if (doSharesExist(tenantKey)) {
+                return shareState(tenantKey);
             }
-            doEnsureRootShares(orgKey, ov, st);
-            return shareState(orgKey);
+            doEnsureRootShares(tenantKey, ov, st);
+            return shareState(tenantKey);
         }
     }
 
     /**
-     * 份额解封（兼容入口=default 机构）
+     * 份额解封（兼容入口=default 租户）
      */
     public void unsealRootKeyWithShares(List<String> shareJsons) {
-        unsealRootKeyWithShares(CaOrg.PRIMARY_ORG_KEY, shareJsons);
+        unsealRootKeyWithShares(CaTenant.PRIMARY_TENANT_KEY, shareJsons);
     }
 
     /**
-     * 机构份额解封：提交任意 3 份门限份额，重组根私钥并置入该机构内存缓存（仅本次进程有效）。
-     * 重组结果用该机构根证书公钥做签名挑战校验，防止份额被篡改/错配。
+     * 租户份额解封：提交任意 3 份门限份额，重组根私钥并置入该租户内存缓存（仅本次进程有效）。
+     * 重组结果用该租户根证书公钥做签名挑战校验，防止份额被篡改/错配。
      */
-    public void unsealRootKeyWithShares(String orgKey, List<String> shareJsons) {
-        OrgCaState st = stateOf(orgKey);
+    public void unsealRootKeyWithShares(String tenantKey, List<String> shareJsons) {
+        TenantCaState st = stateOf(tenantKey);
         synchronized (st.lock) {
-            CaCert root = doFindRoot(orgKey);
+            CaCert root = doFindRoot(tenantKey);
             if (root == null) {
                 throw new IllegalStateException("根CA未初始化，无法解封");
             }
@@ -678,7 +678,7 @@ public class CaService implements ApplicationRunner {
                 PrivateKey key = PemUtil.parsePrivateKey(PemUtil.toPem("PRIVATE KEY", der));
                 verifyRootKeyMatch(key, root);
                 st.rootKeyCache = key;
-                log.warn("[根CA][{}] 已通过 {} 份门限份额解封根私钥（内存缓存），使用后请及时封存", orgKey, shares.size());
+                log.warn("[根CA][{}] 已通过 {} 份门限份额解封根私钥（内存缓存），使用后请及时封存", tenantKey, shares.size());
             } catch (IllegalArgumentException e) {
                 throw e;
             } catch (Exception e) {
@@ -688,7 +688,7 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 用根证书公钥校验重组私钥匹配（签名挑战，防份额错配/篡改；份额天然按机构目录存放，跨机构份额无法互用）
+     * 用根证书公钥校验重组私钥匹配（签名挑战，防份额错配/篡改；份额天然按租户目录存放，跨租户份额无法互用）
      */
     private void verifyRootKeyMatch(PrivateKey key, CaCert root) {
         byte[] challenge = "csssl-root-key-shamir-verify".getBytes(StandardCharsets.UTF_8);
@@ -712,60 +712,60 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 管理端主动初始化（兼容入口=default 机构）
+     * 管理端主动初始化（兼容入口=default 租户）
      */
     public CaStatusVO initRoot() {
-        return initRoot(CaOrg.PRIMARY_ORG_KEY);
+        return initRoot(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构根CA初始化：已就绪则原样返回；根私钥丢失则吊销旧根并重建（连带吊销旧SUB_CA）。
-     * default 域保持存量 CN/算法配置；新机构按注册表 algorithm/subject_o 生成独立根。
+     * 租户根CA初始化：已就绪则原样返回；根私钥丢失则吊销旧根并重建（连带吊销旧SUB_CA）。
+     * default 域保持存量 CN/算法配置；新租户按注册表 algorithm/subject_o 生成独立根。
      */
-    public CaStatusVO initRoot(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public CaStatusVO initRoot(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            CaCert root = doFindRoot(orgKey);
-            if (root != null && (ov.keyExists("root", "key") || doSharesExist(orgKey))) {
+            CaCert root = doFindRoot(tenantKey);
+            if (root != null && (ov.keyExists("root", "key") || doSharesExist(tenantKey))) {
                 // 幂等修复路径：首建中途失败会留下"有根无SUB_CA"的裸域，此处补建（已有有效SUB_CA即直接复用）
-                doEnsureSubCa(orgKey, ov, st);
-                return doStatus(orgKey, ov);
+                doEnsureSubCa(tenantKey, ov, st);
+                return doStatus(tenantKey, ov);
             }
             if (root != null) {
-                doRevokeAllSubCa(orgKey, ov, "ROOT_KEY_LOST", root.getSubjectCn());
+                doRevokeAllSubCa(tenantKey, ov, "ROOT_KEY_LOST", root.getSubjectCn());
                 root.setStatus("REVOKED");
                 root.setRevokeReason("ROOT_KEY_LOST");
                 root.setRevokedAt(LocalDateTime.now());
                 certMapper.updateById(root);
                 // 清理旧根密钥残留（含半套旧份额）：防遗留份额文件被"份额齐全"判据误命中、跳过新根门限化
-                doClearRootKeyMaterial(orgKey, ov);
-                log.warn("[根CA][{}] 旧根私钥缺失，已吊销（serial={}）并重建新根", orgKey, root.getSerialHex());
+                doClearRootKeyMaterial(tenantKey, ov);
+                log.warn("[根CA][{}] 旧根私钥缺失，已吊销（serial={}）并重建新根", tenantKey, root.getSerialHex());
             }
-            CaCert created = doGenerateRoot(orgKey, ov);
-            doEnsureSubCa(orgKey, ov, st);
+            CaCert created = doGenerateRoot(tenantKey, ov);
+            doEnsureSubCa(tenantKey, ov, st);
             // 新根自动切换为 Shamir(3,5) 门限分持（删单点加密文件）
-            doEnsureRootShares(orgKey, ov, st);
-            CaStatusVO vo = doStatus(orgKey, ov);
+            doEnsureRootShares(tenantKey, ov, st);
+            CaStatusVO vo = doStatus(tenantKey, ov);
             vo.setMessage("根CA已重建：" + created.getSubjectCn() + "（序列号 " + created.getSerialHex() + "），已签发新SUB_CA，根私钥已切换为 Shamir(3,5) 门限分持（请尽快导存 5 份份额）");
             return vo;
         }
     }
 
     /**
-     * 吊销该机构全部有效 SUB_CA（根重建/根丢失时调用，旧链整体失效），并清理其磁盘私钥（仅 CA 类密钥）
+     * 吊销该租户全部有效 SUB_CA（根重建/根丢失时调用，旧链整体失效），并清理其磁盘私钥（仅 CA 类密钥）
      */
-    private void doRevokeAllSubCa(String orgKey, KeyVault ov, String reason, String rootCn) {
+    private void doRevokeAllSubCa(String tenantKey, KeyVault ov, String reason, String rootCn) {
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA)
-                .eq(CaCert::getOrgKey, orgKey));
+                .eq(CaCert::getTenantKey, tenantKey));
         for (CaCert sub : subs) {
             if (!"REVOKED".equals(sub.getStatus())) {
                 sub.setStatus("REVOKED");
                 sub.setRevokeReason(reason);
                 sub.setRevokedAt(LocalDateTime.now());
                 certMapper.updateById(sub);
-                purgeCaKeyFiles(subCaDir(orgKey), ov, sub.getSerialHex());
+                purgeCaKeyFiles(subCaDir(tenantKey), ov, sub.getSerialHex());
             }
         }
     }
@@ -788,86 +788,86 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 根重建前清理该机构旧根密钥残留：全形态加密文件 + 旧门限份额文件
+     * 根重建前清理该租户旧根密钥残留：全形态加密文件 + 旧门限份额文件
      */
-    private void doClearRootKeyMaterial(String orgKey, KeyVault ov) {
-        purgeCaKeyFiles(rootDir(orgKey), ov, "ROOT");
+    private void doClearRootKeyMaterial(String tenantKey, KeyVault ov) {
+        purgeCaKeyFiles(rootDir(tenantKey), ov, "ROOT");
         for (int i = 1; i <= SHARE_TOTAL; i++) {
-            Path stale = shareFile(orgKey, i);
+            Path stale = shareFile(tenantKey, i);
             try {
                 if (Files.deleteIfExists(stale)) {
-                    log.info("[根CA][{}] 重建前已删除旧根遗留份额文件: {}", orgKey, stale);
+                    log.info("[根CA][{}] 重建前已删除旧根遗留份额文件: {}", tenantKey, stale);
                 }
             } catch (IOException e) {
-                log.warn("[根CA][{}] 旧份额文件删除失败（不阻断重建）: {}", orgKey, e.getMessage());
+                log.warn("[根CA][{}] 旧份额文件删除失败（不阻断重建）: {}", tenantKey, e.getMessage());
             }
         }
     }
 
     /**
-     * 确保 SUB_CA 存在（兼容入口=default 机构）
+     * 确保 SUB_CA 存在（兼容入口=default 租户）
      */
     public CaCert ensureSubCa() {
-        return ensureSubCa(CaOrg.PRIMARY_ORG_KEY);
+        return ensureSubCa(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     // ==================== SUB_CA（服务签发二级CA） ====================
 
     /**
-     * 确保机构 SUB_CA 存在（幂等，新建/轮换专用）：仅限启动、封存窗口（sealRootKey/initRoot）
+     * 确保租户 SUB_CA 存在（幂等，新建/轮换专用）：仅限启动、封存窗口（sealRootKey/initRoot）
      * 与每日预检 {@link #dailyPrecheck()} 调用；日常签发路径不再经过这里。
      */
-    public CaCert ensureSubCa(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public CaCert ensureSubCa(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
-            return doEnsureSubCa(orgKey, ov, st);
+            return doEnsureSubCa(tenantKey, ov, st);
         }
     }
 
-    private CaCert doEnsureSubCa(String orgKey, KeyVault ov, OrgCaState st) {
-        CaCert sub = doFindValidSubCa(orgKey);
+    private CaCert doEnsureSubCa(String tenantKey, KeyVault ov, TenantCaState st) {
+        CaCert sub = doFindValidSubCa(tenantKey);
         if (sub != null && ov.keyExists("subca", "key")) {
             return sub;
         }
         // 根私钥离线（封存/门限分持未解封）时不允许新建/轮换 SUB_CA
-        String rkState = doRootKeyState(orgKey, ov);
+        String rkState = doRootKeyState(tenantKey, ov);
         if (sub == null && (ROOT_KEY_SEALED.equals(rkState)
                 || (ROOT_KEY_SHARES.equals(rkState) && st.rootKeyCache == null))) {
             throw new IllegalStateException("根CA私钥离线（封存/门限分持）且无有效 SUB_CA，请先解封根密钥后轮换签发");
         }
-        X509Certificate rootCert = doLoadRootCert(orgKey);
-        PrivateKey rootKey = doLoadRootKey(orgKey, ov, st);
+        X509Certificate rootCert = doLoadRootCert(tenantKey);
+        PrivateKey rootKey = doLoadRootKey(tenantKey, ov, st);
 
         CssslProperties.SubCa subProps = props.getSubCa();
-        // SUB_CA 算法跟随该机构根（RSA根→RSA SUB_CA，国密根→SM2 SUB_CA）
-        String algorithm = doFindRoot(orgKey).getAlgorithm();
+        // SUB_CA 算法跟随该租户根（RSA根→RSA SUB_CA，国密根→SM2 SUB_CA）
+        String algorithm = doFindRoot(tenantKey).getAlgorithm();
         KeyPair subKey = CertUtil.generateKeyPair(algorithm);
         X509Certificate subCert;
-        if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
+        if (CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
             // default 域走旧 CN 入口（DN 含 O=CSSSL），存量证书逐字节兼容
             subCert = CertUtil.issue(subKey, rootCert, rootKey,
                     subProps.getCn(), TYPE_SUB_CA, subProps.getValidityDays(), null, null, null);
         } else {
-            CaOrg org = requireOrg(orgKey);
-            subCert = CertUtil.issue(CertUtil.subjectDn("CSSSL SubCA - " + org.getOrgName(), org.getSubjectO()),
+            CaTenant tenant = requireTenant(tenantKey);
+            subCert = CertUtil.issue(CertUtil.subjectDn("CSSSL SubCA - " + tenant.getTenantName(), tenant.getSubjectO()),
                     subKey.getPublic(), rootCert, rootKey,
                     TYPE_SUB_CA, subProps.getValidityDays(), null, null, null);
         }
 
         String serial = subCert.getSerialNumber().toString(16);
         try {
-            Files.createDirectories(subCaDir(orgKey));
-            Files.writeString(subCaCertFile(orgKey), PemUtil.certToPem(subCert), StandardCharsets.UTF_8);
+            Files.createDirectories(subCaDir(tenantKey));
+            Files.writeString(subCaCertFile(tenantKey), PemUtil.certToPem(subCert), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new IllegalStateException("SUB_CA落盘失败: " + e.getMessage(), e);
         }
         ov.storeKey("subca", "key", PemUtil.keyToPem(subKey.getPrivate()));
 
-        // 该机构旧 SUB_CA 标记 EXPIRED（由新 SUB_CA 接管在线签发）
+        // 该租户旧 SUB_CA 标记 EXPIRED（由新 SUB_CA 接管在线签发）
         List<CaCert> oldSubs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA)
-                .eq(CaCert::getOrgKey, orgKey)
+                .eq(CaCert::getTenantKey, tenantKey)
                 .eq(CaCert::getStatus, "VALID"));
         for (CaCert old : oldSubs) {
             if (!old.getSerialHex().equalsIgnoreCase(serial)) {
@@ -877,7 +877,7 @@ public class CaService implements ApplicationRunner {
         }
 
         CaCert row = new CaCert();
-        row.setOrgKey(orgKey);
+        row.setTenantKey(tenantKey);
         row.setSerialHex(serial);
         row.setSubjectCn(CertUtil.subjectCn(subCert));
         row.setCertType(TYPE_SUB_CA);
@@ -893,29 +893,29 @@ public class CaService implements ApplicationRunner {
         row.setCreatedAt(LocalDateTime.now());
         certMapper.insert(row);
         log.info("[SUB_CA][{}] 已用根签发二级CA：cn={}, algorithm={}, serial={}, 有效期{}天",
-                orgKey, row.getSubjectCn(), algorithm, serial, subProps.getValidityDays());
+                tenantKey, row.getSubjectCn(), algorithm, serial, subProps.getValidityDays());
         return row;
     }
 
     /**
-     * 查询当前有效 SUB_CA（兼容入口=default 机构）
+     * 查询当前有效 SUB_CA（兼容入口=default 租户）
      */
     public CaCert findValidSubCa() {
-        return findValidSubCa(CaOrg.PRIMARY_ORG_KEY);
+        return findValidSubCa(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 查询机构当前有效 SUB_CA（未过期且距到期 > renewBeforeDays）
+     * 查询租户当前有效 SUB_CA（未过期且距到期 > renewBeforeDays）
      */
-    public CaCert findValidSubCa(String orgKey) {
-        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
-        return doFindValidSubCa(orgKey);
+    public CaCert findValidSubCa(String tenantKey) {
+        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
+        return doFindValidSubCa(tenantKey);
     }
 
-    private CaCert doFindValidSubCa(String orgKey) {
+    private CaCert doFindValidSubCa(String tenantKey) {
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA)
-                .eq(CaCert::getOrgKey, orgKey)
+                .eq(CaCert::getTenantKey, tenantKey)
                 .eq(CaCert::getStatus, "VALID")
                 .orderByDesc(CaCert::getCreatedAt));
         if (subs.isEmpty()) {
@@ -932,22 +932,22 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 每日到期预检（定时任务，与签发路径解耦）：遍历 default + 全部 ACTIVE 机构逐一预检；
+     * 每日到期预检（定时任务，与签发路径解耦）：遍历 default + 全部 ACTIVE 租户逐一预检；
      * 存量单根环境（仅有 default）行为与路线 B 完全一致。
      */
     @Scheduled(cron = "${csssl.subca-precheck-cron:0 30 3 * * ?}")
     public void dailyPrecheck() {
         List<String> keys = new ArrayList<>();
-        keys.add(CaOrg.PRIMARY_ORG_KEY);
+        keys.add(CaTenant.PRIMARY_TENANT_KEY);
         try {
-            List<CaOrg> orgs = orgMapper.selectList(new LambdaQueryWrapper<CaOrg>()
-                    .eq(CaOrg::getStatus, "ACTIVE")
-                    .ne(CaOrg::getOrgKey, CaOrg.PRIMARY_ORG_KEY));
-            for (CaOrg org : orgs) {
-                keys.add(org.getOrgKey());
+            List<CaTenant> tenants = tenantMapper.selectList(new LambdaQueryWrapper<CaTenant>()
+                    .eq(CaTenant::getStatus, "ACTIVE")
+                    .ne(CaTenant::getTenantKey, CaTenant.PRIMARY_TENANT_KEY));
+            for (CaTenant tenant : tenants) {
+                keys.add(tenant.getTenantKey());
             }
         } catch (Exception e) {
-            log.warn("[SUB_CA] 机构清单读取失败，本轮仅预检 default 域: {}", e.getMessage());
+            log.warn("[SUB_CA] 租户清单读取失败，本轮仅预检 default 域: {}", e.getMessage());
         }
         for (String key : keys) {
             try {
@@ -959,117 +959,117 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 机构 SUB_CA 到期预检：缺失/进入 renewBeforeDays 续期窗口且根私钥可用（在线或份额已解封）时轮换；
+     * 租户 SUB_CA 到期预检：缺失/进入 renewBeforeDays 续期窗口且根私钥可用（在线或份额已解封）时轮换；
      * 根封存期间只告警，绝不隐式触发需根私钥的操作。
      */
-    public void dailyPrecheck(String orgKey) {
-        OrgCaState st = stateOf(orgKey);
-        KeyVault ov = vaultFor(orgKey);
+    public void dailyPrecheck(String tenantKey) {
+        TenantCaState st = stateOf(tenantKey);
+        KeyVault ov = vaultFor(tenantKey);
         synchronized (st.lock) {
             try {
-                if (doFindValidSubCa(orgKey) != null && ov.keyExists("subca", "key")) {
+                if (doFindValidSubCa(tenantKey) != null && ov.keyExists("subca", "key")) {
                     return;
                 }
-                String rkState = doRootKeyState(orgKey, ov);
+                String rkState = doRootKeyState(tenantKey, ov);
                 boolean rootUsable = ROOT_KEY_ONLINE.equals(rkState)
                         || (ROOT_KEY_SHARES.equals(rkState) && st.rootKeyCache != null);
                 if (!rootUsable) {
-                    log.warn("[SUB_CA][{}] 预检发现 SUB_CA 缺失/临近到期，但根私钥离线（{}），请在根解封窗口轮换", orgKey, rkState);
+                    log.warn("[SUB_CA][{}] 预检发现 SUB_CA 缺失/临近到期，但根私钥离线（{}），请在根解封窗口轮换", tenantKey, rkState);
                     return;
                 }
-                doEnsureSubCa(orgKey, ov, st);
-                log.info("[SUB_CA][{}] 到期预检完成轮换", orgKey);
+                doEnsureSubCa(tenantKey, ov, st);
+                log.info("[SUB_CA][{}] 到期预检完成轮换", tenantKey);
             } catch (Exception e) {
-                log.warn("[SUB_CA][{}] 到期预检失败: {}", orgKey, e.getMessage());
+                log.warn("[SUB_CA][{}] 到期预检失败: {}", tenantKey, e.getMessage());
             }
         }
     }
 
     /**
-     * 当前签发CA（兼容入口=default 机构）
+     * 当前签发CA（兼容入口=default 租户）
      */
     public X509Certificate signingCert() {
-        return signingCert(CaOrg.PRIMARY_ORG_KEY);
+        return signingCert(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构当前签发CA（SUB_CA）证书：只取现有有效 SUB_CA，不触发轮换（轮换见 {@link #dailyPrecheck(String)}）
+     * 租户当前签发CA（SUB_CA）证书：只取现有有效 SUB_CA，不触发轮换（轮换见 {@link #dailyPrecheck(String)}）
      */
-    public X509Certificate signingCert(String orgKey) {
-        return PemUtil.parseCert(doRequireValidSubCa(orgKey).getCertPem());
+    public X509Certificate signingCert(String tenantKey) {
+        return PemUtil.parseCert(doRequireValidSubCa(tenantKey).getCertPem());
     }
 
     public PrivateKey signingKey() {
-        return signingKey(CaOrg.PRIMARY_ORG_KEY);
+        return signingKey(CaTenant.PRIMARY_TENANT_KEY);
     }
 
-    public PrivateKey signingKey(String orgKey) {
-        doRequireValidSubCa(orgKey);
-        String keyPem = vaultFor(orgKey).loadKey("subca", "key");
+    public PrivateKey signingKey(String tenantKey) {
+        doRequireValidSubCa(tenantKey);
+        String keyPem = vaultFor(tenantKey).loadKey("subca", "key");
         if (keyPem == null) {
             throw new IllegalStateException("SUB_CA私钥缺失，请在根解封窗口轮换");
         }
         return PemUtil.parsePrivateKey(keyPem);
     }
 
-    private CaCert doRequireValidSubCa(String orgKey) {
-        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
-        CaCert sub = doFindValidSubCa(orgKey);
+    private CaCert doRequireValidSubCa(String tenantKey) {
+        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
+        CaCert sub = doFindValidSubCa(tenantKey);
         if (sub == null) {
             // 区分两种成因便于运维定位：域内从未建成 SUB_CA（裸根）vs 建成但已过期/被吊销
-            throw new IllegalStateException(doCurrentSubCa(orgKey) == null
-                    ? "SUB_CA缺失（机构域未初始化完成），请重新调用机构初始化补建"
+            throw new IllegalStateException(doCurrentSubCa(tenantKey) == null
+                    ? "SUB_CA缺失（租户域未初始化完成），请重新调用租户初始化补建"
                     : "SUB_CA已过期，请在根解封窗口轮换");
         }
         return sub;
     }
 
     /**
-     * 当前有效 SUB_CA 记录（兼容入口=default 机构）
+     * 当前有效 SUB_CA 记录（兼容入口=default 租户）
      */
     public CaCert currentSubCa() {
-        return currentSubCa(CaOrg.PRIMARY_ORG_KEY);
+        return currentSubCa(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构当前有效 SUB_CA 记录（供链组装/OCSP 使用；无则返回该机构最近一张；均无则 null）
+     * 租户当前有效 SUB_CA 记录（供链组装/OCSP 使用；无则返回该租户最近一张；均无则 null）
      */
-    public CaCert currentSubCa(String orgKey) {
-        KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
-        return doCurrentSubCa(orgKey);
+    public CaCert currentSubCa(String tenantKey) {
+        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
+        return doCurrentSubCa(tenantKey);
     }
 
-    private CaCert doCurrentSubCa(String orgKey) {
-        CaCert sub = doFindValidSubCa(orgKey);
+    private CaCert doCurrentSubCa(String tenantKey) {
+        CaCert sub = doFindValidSubCa(tenantKey);
         return sub != null ? sub : certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA)
-                .eq(CaCert::getOrgKey, orgKey)
+                .eq(CaCert::getTenantKey, tenantKey)
                 .orderByDesc(CaCert::getCreatedAt)
                 .last("limit 1"));
     }
 
     /**
-     * 根CA状态（兼容入口=default 机构）
+     * 根CA状态（兼容入口=default 租户）
      */
     public CaStatusVO status() {
-        return status(CaOrg.PRIMARY_ORG_KEY);
+        return status(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     // ==================== 状态/导出/签发密钥存取 ====================
 
     /**
-     * 机构根CA状态（不抛异常，返回未初始化原因供页面展示；含 SUB_CA 与根密钥封存状态）
+     * 租户根CA状态（不抛异常，返回未初始化原因供页面展示；含 SUB_CA 与根密钥封存状态）
      */
-    public CaStatusVO status(String orgKey) {
-        return doStatus(orgKey, vaultFor(orgKey));
+    public CaStatusVO status(String tenantKey) {
+        return doStatus(tenantKey, vaultFor(tenantKey));
     }
 
-    private CaStatusVO doStatus(String orgKey, KeyVault ov) {
+    private CaStatusVO doStatus(String tenantKey, KeyVault ov) {
         CaStatusVO vo = new CaStatusVO();
-        CaCert root = doFindRoot(orgKey);
+        CaCert root = doFindRoot(tenantKey);
         if (root == null) {
             vo.setInitialized(false);
-            if (Files.exists(rootCertFile(orgKey)) || ov.keyExists("root", "key")) {
+            if (Files.exists(rootCertFile(tenantKey)) || ov.keyExists("root", "key")) {
                 vo.setMessage("证书文件存在但数据库记录缺失，调用初始化接口可自动恢复");
             } else {
                 vo.setMessage("根CA未初始化，首次启动或点击「初始化根CA」自动生成");
@@ -1082,15 +1082,15 @@ public class CaService implements ApplicationRunner {
         vo.setValidFrom(root.getValidFrom());
         vo.setValidTo(root.getValidTo());
         vo.setStatus(root.getStatus());
-        vo.setRootKeyState(doRootKeyState(orgKey, ov));
-        vo.setShareState(shareState(orgKey));
+        vo.setRootKeyState(doRootKeyState(tenantKey, ov));
+        vo.setShareState(shareState(tenantKey));
         if (ROOT_KEY_MISSING.equals(vo.getRootKeyState())) {
             vo.setInitialized(false);
             vo.setMessage("根CA私钥缺失，无法签发二级CA，请恢复密钥或重建根CA");
         } else {
             vo.setInitialized(true);
         }
-        CaCert sub = doCurrentSubCa(orgKey);
+        CaCert sub = doCurrentSubCa(tenantKey);
         if (sub != null) {
             CaStatusVO.SubCaStatus subVo = new CaStatusVO.SubCaStatus();
             subVo.setCn(sub.getSubjectCn());
@@ -1106,17 +1106,17 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 根证书 PEM（兼容入口=default 机构）
+     * 根证书 PEM（兼容入口=default 租户）
      */
     public String exportRootPem() {
-        return exportRootPem(CaOrg.PRIMARY_ORG_KEY);
+        return exportRootPem(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构根证书 PEM（业务系统信任链配置用）
+     * 租户根证书 PEM（业务系统信任链配置用）
      */
-    public String exportRootPem(String orgKey) {
-        CaCert root = findRoot(orgKey);
+    public String exportRootPem(String tenantKey) {
+        CaCert root = findRoot(tenantKey);
         if (root == null) {
             throw new IllegalStateException("根CA未初始化");
         }
@@ -1124,17 +1124,17 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 当前 SUB_CA 证书 PEM（兼容入口=default 机构）
+     * 当前 SUB_CA 证书 PEM（兼容入口=default 租户）
      */
     public String exportSubCaPem() {
-        return exportSubCaPem(CaOrg.PRIMARY_ORG_KEY);
+        return exportSubCaPem(CaTenant.PRIMARY_TENANT_KEY);
     }
 
     /**
-     * 机构当前 SUB_CA 证书 PEM（中间CA链配置用）
+     * 租户当前 SUB_CA 证书 PEM（中间CA链配置用）
      */
-    public String exportSubCaPem(String orgKey) {
-        CaCert sub = currentSubCa(orgKey);
+    public String exportSubCaPem(String tenantKey) {
+        CaCert sub = currentSubCa(tenantKey);
         if (sub == null) {
             throw new IllegalStateException("SUB_CA未签发");
         }
@@ -1142,39 +1142,39 @@ public class CaService implements ApplicationRunner {
     }
 
     /**
-     * 签发证书私钥加密落盘（兼容入口=default 机构）
+     * 签发证书私钥加密落盘（兼容入口=default 租户）
      */
     public void storeIssuedKey(String serialHex, String keyPem) {
-        storeIssuedKey(CaOrg.PRIMARY_ORG_KEY, serialHex, keyPem);
+        storeIssuedKey(CaTenant.PRIMARY_TENANT_KEY, serialHex, keyPem);
     }
 
     /**
-     * 机构签发证书私钥加密落盘
+     * 租户签发证书私钥加密落盘
      */
-    public void storeIssuedKey(String orgKey, String serialHex, String keyPem) {
-        vaultFor(orgKey).storeKey("issued/" + serialHex, "key", keyPem);
+    public void storeIssuedKey(String tenantKey, String serialHex, String keyPem) {
+        vaultFor(tenantKey).storeKey("issued/" + serialHex, "key", keyPem);
     }
 
     /**
-     * 读取签发证书私钥（兼容入口=default 机构）
+     * 读取签发证书私钥（兼容入口=default 租户）
      */
     public String loadIssuedKey(String serialHex) {
-        return loadIssuedKey(CaOrg.PRIMARY_ORG_KEY, serialHex);
+        return loadIssuedKey(CaTenant.PRIMARY_TENANT_KEY, serialHex);
     }
 
     /**
-     * 读取机构签发证书私钥（无则返回 null；已封存/主密钥错误时抛异常）
+     * 读取租户签发证书私钥（无则返回 null；已封存/主密钥错误时抛异常）
      */
-    public String loadIssuedKey(String orgKey, String serialHex) {
-        return vaultFor(orgKey).loadKey("issued/" + serialHex, "key");
+    public String loadIssuedKey(String tenantKey, String serialHex) {
+        return vaultFor(tenantKey).loadKey("issued/" + serialHex, "key");
     }
 
     public boolean issuedKeyExists(String serialHex) {
-        return issuedKeyExists(CaOrg.PRIMARY_ORG_KEY, serialHex);
+        return issuedKeyExists(CaTenant.PRIMARY_TENANT_KEY, serialHex);
     }
 
-    public boolean issuedKeyExists(String orgKey, String serialHex) {
-        return vaultFor(orgKey).keyExists("issued/" + serialHex, "key");
+    public boolean issuedKeyExists(String tenantKey, String serialHex) {
+        return vaultFor(tenantKey).keyExists("issued/" + serialHex, "key");
     }
 
     /**
@@ -1188,14 +1188,14 @@ public class CaService implements ApplicationRunner {
         }
     }
 
-    private static final class OrgCaState {
+    private static final class TenantCaState {
         /**
-         * 机构锁对象：该机构 rootKeyCache 及根/子CA密钥读写的唯一互斥域
+         * 租户锁对象：该租户 rootKeyCache 及根/子CA密钥读写的唯一互斥域
          */
         final Object lock = new Object();
         /**
          * 份额解封后的临时根私钥（仅内存，用后 seal 清除）。
-         * 所有读写（loadRootKey / seal / unseal / 份额迁移 / ensureSubCa 离线判定）统一持本机构锁。
+         * 所有读写（loadRootKey / seal / unseal / 份额迁移 / ensureSubCa 离线判定）统一持本租户锁。
          */
         PrivateKey rootKeyCache;
     }

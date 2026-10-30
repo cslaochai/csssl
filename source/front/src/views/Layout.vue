@@ -19,32 +19,32 @@
         </nav>
       </div>
       <div class="header-right">
-        <!-- 当前机构：全局管理员可下拉切换；机构账号只读显示本机构 -->
+        <!-- 当前租户：全局管理员可下拉切换；租户账号只读显示本租户 -->
         <el-dropdown v-if="isGlobal" trigger="click" @command="onDomainChange">
-          <button class="org-chip" title="切换机构">
+          <button class="tenant-chip" title="切换租户">
             <el-icon><OfficeBuilding /></el-icon>
-            <span class="org-chip-label">当前机构</span>
-            <span class="org-chip-name">{{ orgDisplay }}</span>
-            <el-icon class="org-chip-arrow"><ArrowDown /></el-icon>
+            <span class="tenant-chip-label">当前租户</span>
+            <span class="tenant-chip-name">{{ tenantDisplay }}</span>
+            <el-icon class="tenant-chip-arrow"><ArrowDown /></el-icon>
           </button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item
-                v-for="o in orgOptions"
-                :key="o.orgKey"
-                :command="o.orgKey"
+                v-for="o in tenantOptions"
+                :key="o.tenantKey"
+                :command="o.tenantKey"
               >
-                <span :style="o.orgKey === domain ? 'font-weight:600' : ''">
-                  {{ o.orgKey === domain ? '✓ ' : '' }}{{ o.orgName || o.orgKey }}
+                <span :style="o.tenantKey === domain ? 'font-weight:600' : ''">
+                  {{ o.tenantKey === domain ? '✓ ' : '' }}{{ o.tenantName || o.tenantKey }}
                 </span>
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <div v-else class="org-chip org-chip-readonly">
+        <div v-else class="tenant-chip tenant-chip-readonly">
           <el-icon><OfficeBuilding /></el-icon>
-          <span class="org-chip-label">本机构</span>
-          <span class="org-chip-name">{{ orgDisplay }}</span>
+          <span class="tenant-chip-label">本租户</span>
+          <span class="tenant-chip-name">{{ tenantDisplay }}</span>
         </div>
 
         <div class="header-divider"></div>
@@ -112,7 +112,7 @@
       </el-aside>
 
       <el-main class="app-main">
-        <!-- 切换机构域时按域重建页面组件，当前页数据自动重载 -->
+        <!-- 切换租户域时按域重建页面组件，当前页数据自动重载 -->
         <router-view :key="`${route.path}@${domainFlag}`" />
       </el-main>
     </el-container>
@@ -151,9 +151,9 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { logout, changePassword, listOrgsCached, getMyPerms } from '@/api/system'
+import { logout, changePassword, listTenantsCached, getMyPerms } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
-import { isGlobalUser, currentOrg, setDomain, syncPrimaryOrg, clearOrgState } from '@/lib/org'
+import { isGlobalUser, currentTenant, setDomain, syncPrimaryTenant, clearTenantState } from '@/lib/tenant'
 import { hasPerm, permReady, loadRoleName, savePerms, saveRoleName, clearPerms } from '@/lib/perm'
 import logo from '@/assets/logo.svg'
 
@@ -204,42 +204,42 @@ const updateClock = () => {
   currentWeekday.value = dayNames[now.getDay()]
 }
 
-// ===== 当前机构（机构用户锁定本机构；全局用户经下拉切换工作机构，缺省=平台主机构） =====
+// ===== 当前租户（租户用户锁定本租户；全局用户经下拉切换工作租户，缺省=平台主租户） =====
 const isGlobal = ref(isGlobalUser())
-const domain = ref(currentOrg())
-// 参与 router-view key：切换机构后当前页组件重建、数据重载
-const domainFlag = ref(currentOrg())
-const orgOptions = ref([])
-const orgName = ref('')
-const orgDisplay = computed(() => orgName.value || domain.value || '未配置机构')
-const orgTitle = computed(() => domain.value ? `${orgDisplay.value}（${domain.value}）` : '尚未登记机构')
+const domain = ref(currentTenant())
+// 参与 router-view key：切换租户后当前页组件重建、数据重载
+const domainFlag = ref(currentTenant())
+const tenantOptions = ref([])
+const tenantName = ref('')
+const tenantDisplay = computed(() => tenantName.value || domain.value || '未配置租户')
+const tenantTitle = computed(() => domain.value ? `${tenantDisplay.value}（${domain.value}）` : '尚未登记租户')
 
-/** 下拉切换工作机构：各页数据域请求按 currentOrg() 自动附带，router-view 以 path 重建不感知域 */
+/** 下拉切换工作租户：各页数据域请求按 currentTenant() 自动附带，router-view 以 path 重建不感知域 */
 function onDomainChange(v) {
   if (v === domain.value) return
   setDomain(v)
   domain.value = v
   domainFlag.value = v
-  orgName.value = orgOptions.value.find(o => o.orgKey === v)?.orgName || ''
-  ElMessage.success(`已切换到 ${orgName.value || v}`)
+  tenantName.value = tenantOptions.value.find(o => o.tenantKey === v)?.tenantName || ''
+  ElMessage.success(`已切换到 ${tenantName.value || v}`)
 }
 
 onMounted(async () => {
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
   if (isGlobal.value) {
-    const orgs = await listOrgsCached()
-    orgOptions.value = orgs
-    // 旧会话自愈：补齐 primaryOrg 并清掉机构表里已不存在的非法域（如已删除的 default）
-    const healed = syncPrimaryOrg(orgs)
+    const tenants = await listTenantsCached()
+    tenantOptions.value = tenants
+    // 旧会话自愈：补齐 primaryTenant 并清掉租户表里已不存在的非法域（如已删除的 default）
+    const healed = syncPrimaryTenant(tenants)
     if (healed && healed !== domain.value) {
       domain.value = healed
       domainFlag.value = healed
-      orgName.value = orgs.find(o => o.orgKey === healed)?.orgName || ''
+      tenantName.value = tenants.find(o => o.tenantKey === healed)?.tenantName || ''
     }
   }
-  if (domain.value && !orgName.value) {
-    orgName.value = orgOptions.value.find(o => o.orgKey === domain.value)?.orgName || ''
+  if (domain.value && !tenantName.value) {
+    tenantName.value = tenantOptions.value.find(o => o.tenantKey === domain.value)?.tenantName || ''
   }
   window.addEventListener('perms-updated', onPermsUpdated)
   await refreshMyPerms()
@@ -342,7 +342,7 @@ function clearSession() {
   localStorage.removeItem('username')
   localStorage.removeItem('role')
   clearPerms()
-  clearOrgState()
+  clearTenantState()
   resetSm2Cache()
 }
 
@@ -529,8 +529,8 @@ async function onCommand(command) {
   color: rgba(255, 255, 255, 0.75);
 }
 
-/* ---------- 当前机构徽标（全局用户点击下拉切换，机构用户只读） ---------- */
-.org-chip {
+/* ---------- 当前租户徽标（全局用户点击下拉切换，租户用户只读） ---------- */
+.tenant-chip {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -545,34 +545,34 @@ async function onCommand(command) {
   max-width: 320px;
 }
 
-button.org-chip {
+button.tenant-chip {
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-button.org-chip:hover {
+button.tenant-chip:hover {
   background: rgba(255, 255, 255, 0.2);
   border-color: rgba(255, 255, 255, 0.45);
 }
 
-.org-chip-label {
+.tenant-chip-label {
   color: rgba(255, 255, 255, 0.72);
   flex-shrink: 0;
 }
 
-.org-chip-name {
+.tenant-chip-name {
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.org-chip-arrow {
+.tenant-chip-arrow {
   color: rgba(255, 255, 255, 0.8);
   flex-shrink: 0;
 }
 
-.org-chip-readonly {
+.tenant-chip-readonly {
   background: rgba(255, 255, 255, 0.08);
   border-style: dashed;
 }

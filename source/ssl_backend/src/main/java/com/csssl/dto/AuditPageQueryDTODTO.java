@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 审计日志分页查询（action 精确、orgKey 域过滤）。
+ * 审计日志分页查询（action 精确、tenantKey 域过滤）。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -17,7 +17,7 @@ public class AuditPageQueryDTODTO extends PageParam {
     private String action;
 
     /**
-     * 机构数据域过滤
+     * 租户数据域过滤
      */
-    private String orgKey;
+    private String tenantKey;
 }

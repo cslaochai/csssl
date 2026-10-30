@@ -4,7 +4,7 @@ import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.csssl.dto.LoginDTO;
-import com.csssl.entity.CaOrg;
+import com.csssl.entity.CaTenant;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
 import com.csssl.mapper.SysRoleMapper;
@@ -50,11 +50,11 @@ public class AuthService {
     private final PermissionService permissionService;
 
     /**
-     * 审计机构归位：账号归属机构（全局账号/无账号=平台主机构）
+     * 审计租户归位：账号归属租户（全局账号/无账号=平台主租户）
      */
-    private static String orgOfUser(SysUser user) {
-        return user == null || user.getOrgKey() == null || user.getOrgKey().isBlank()
-                ? CaOrg.PRIMARY_ORG_KEY : user.getOrgKey();
+    private static String tenantOfUser(SysUser user) {
+        return user == null || user.getTenantKey() == null || user.getTenantKey().isBlank()
+                ? CaTenant.PRIMARY_TENANT_KEY : user.getTenantKey();
     }
 
     /**
@@ -103,41 +103,41 @@ public class AuthService {
 
         SysUser user = loadByUsername(username);
         if (user == null) {
-            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, CaOrg.PRIMARY_ORG_KEY);
+            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, CaTenant.PRIMARY_TENANT_KEY);
             throw new IllegalArgumentException("账号或口令错误");
         }
         LocalDateTime now = LocalDateTime.now();
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(now)) {
-            auditService.record(username, "LOGIN", null, "登录失败（账号锁定中）", ip, orgOfUser(user));
+            auditService.record(username, "LOGIN", null, "登录失败（账号锁定中）", ip, tenantOfUser(user));
             throw new IllegalArgumentException("账号已锁定，请稍后再试");
         }
         // 停用账号与口令错误同口径回显，避免账号枚举
         if (user.getStatus() == null || user.getStatus() != 1) {
-            auditService.record(username, "LOGIN", null, "登录失败（账号已停用）", ip, orgOfUser(user));
+            auditService.record(username, "LOGIN", null, "登录失败（账号已停用）", ip, tenantOfUser(user));
             throw new IllegalArgumentException("账号或口令错误");
         }
         if (!passwordMatches(password, user)) {
             registerLoginFailure(user, now);
-            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, orgOfUser(user));
+            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, tenantOfUser(user));
             throw new IllegalArgumentException("账号或口令错误");
         }
         // 角色停用即整类账号不可登录（口令校验通过后才判定，避免账号/角色枚举）
         SysRole role = roleOf(user.getRoleCode());
         if (role != null && (role.getStatus() == null || role.getStatus() != 1)) {
             auditService.record(username, "LOGIN", null, "登录失败（角色已停用：" + user.getRoleCode() + "）",
-                    ip, orgOfUser(user));
+                    ip, tenantOfUser(user));
             throw new IllegalArgumentException("账号所属角色已停用，请联系系统管理员");
         }
 
         String token = jwtUtil.createToken(user.getUsername(), user.getRoleCode(),
-                user.getId(), user.getTokenVersion(), user.getOrgKey(), user.getRealName());
+                user.getId(), user.getTokenVersion(), user.getTenantKey(), user.getRealName());
         userMapper.update(null, new LambdaUpdateWrapper<SysUser>()
                 .eq(SysUser::getId, user.getId())
                 .set(SysUser::getFailedAttempts, 0)
                 .set(SysUser::getLockedUntil, null)
                 .set(SysUser::getLastLoginTime, now)
                 .set(SysUser::getLastLoginIp, ip));
-        auditService.record(user.getUsername(), "LOGIN", null, "登录成功", ip, orgOfUser(user));
+        auditService.record(user.getUsername(), "LOGIN", null, "登录成功", ip, tenantOfUser(user));
 
         LoginVO data = new LoginVO();
         data.setToken(token);
@@ -148,10 +148,10 @@ public class AuthService {
         data.setRoleName(role == null ? user.getRoleCode() : role.getRoleName());
         // 生效权限点（菜单 + 按钮）：前端据此构建侧栏、守卫与按钮显隐；服务端仍逐接口强校验
         data.setPerms(permissionService.effectiveList(user.getRoleCode()));
-        // 机构数据域：null=全局账号；前端据此锁定/展示机构切换（服务端各域操作仍强制校验，不信任前端）
-        data.setOrgKey(user.getOrgKey());
-        // 平台主机构（各机构标识由管理员在机构管理维护；全局账号默认落在它上面）
-        data.setPrimaryOrg(CaOrg.PRIMARY_ORG_KEY);
+        // 租户数据域：null=全局账号；前端据此锁定/展示租户切换（服务端各域操作仍强制校验，不信任前端）
+        data.setTenantKey(user.getTenantKey());
+        // 平台主租户（各租户标识由管理员在租户管理维护；全局账号默认落在它上面）
+        data.setPrimaryTenant(CaTenant.PRIMARY_TENANT_KEY);
         return data;
     }
 
@@ -177,7 +177,7 @@ public class AuthService {
         String oldPassword = sm2Util.decryptPassword(oldPasswordCipher);
         String newPassword = sm2Util.decryptPassword(newPasswordCipher);
         if (!passwordMatches(oldPassword, user)) {
-            auditService.record(user.getUsername(), "PWD_CHANGE", null, "修改口令失败（原口令错误）", ip, orgOfUser(user));
+            auditService.record(user.getUsername(), "PWD_CHANGE", null, "修改口令失败（原口令错误）", ip, tenantOfUser(user));
             throw new IllegalArgumentException("原口令错误");
         }
         checkPasswordComplexity(newPassword);
@@ -187,16 +187,16 @@ public class AuthService {
         userMapper.update(null, bumpTokenVersion(new LambdaUpdateWrapper<SysUser>()
                 .eq(SysUser::getId, user.getId()))
                 .set(SysUser::getPassword, BCrypt.hashpw(newPassword, BCrypt.gensalt())));
-        auditService.record(user.getUsername(), "PWD_CHANGE", null, "自助修改登录口令成功（需重新登录）", ip, orgOfUser(user));
+        auditService.record(user.getUsername(), "PWD_CHANGE", null, "自助修改登录口令成功（需重新登录）", ip, tenantOfUser(user));
         log.info("[账号] {} 自助修改口令，会话版本已递增", user.getUsername());
     }
 
     /**
-     * 退出登录：仅记录审计，JWT 无状态，客户端丢弃令牌即可（审计按用户机构归位，查不到账号记 default）
+     * 退出登录：仅记录审计，JWT 无状态，客户端丢弃令牌即可（审计按用户租户归位，查不到账号记 default）
      */
     public void logout(String username, String ip) {
         SysUser user = username == null || username.isBlank() ? null : loadByUsername(username.trim());
-        auditService.record(username, "LOGOUT", null, "退出登录", ip, orgOfUser(user));
+        auditService.record(username, "LOGOUT", null, "退出登录", ip, tenantOfUser(user));
     }
 
     /**

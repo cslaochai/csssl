@@ -11,7 +11,7 @@ import com.csssl.vo.RoleSavePermsVO;
 import com.csssl.dto.RoleUpdateDTO;
 import com.csssl.vo.RoleDetailVO;
 import com.csssl.vo.RoleVO;
-import com.csssl.entity.CaOrg;
+import com.csssl.entity.CaTenant;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
 import com.csssl.entity.LoginUser;
@@ -130,7 +130,7 @@ public class RoleController {
         role.setUpdatedAt(LocalDateTime.now());
         roleMapper.insert(role);
         auditService.record(UserUtils.requireLoginUser().getUsername(), "ROLE_CREATE", code,
-                "创建自定义角色：" + code, clientIp(request), CaOrg.PRIMARY_ORG_KEY);
+                "创建自定义角色：" + code, clientIp(request), CaTenant.PRIMARY_TENANT_KEY);
         RoleDetailVO vo = new RoleDetailVO();
         vo.setRoleCode(role.getRoleCode());
         vo.setRoleName(role.getRoleName());
@@ -159,7 +159,7 @@ public class RoleController {
         roleMapper.deleteById(role.getId());
         permissionService.invalidate(role.getRoleCode());
         auditService.record(UserUtils.requireLoginUser().getUsername(), "ROLE_DELETE", role.getRoleCode(),
-                "删除自定义角色：" + role.getRoleCode(), clientIp(request), CaOrg.PRIMARY_ORG_KEY);
+                "删除自定义角色：" + role.getRoleCode(), clientIp(request), CaTenant.PRIMARY_TENANT_KEY);
         return Result.success("角色已删除", null);
     }
 
@@ -269,7 +269,7 @@ public class RoleController {
         if (!changes.isEmpty()) {
             auditService.record(UserUtils.requireLoginUser().getUsername(), "ROLE_UPDATE", role.getRoleCode(),
                     "更新角色 " + role.getRoleCode() + "：" + String.join("；", changes),
-                    clientIp(request), CaOrg.PRIMARY_ORG_KEY);
+                    clientIp(request), CaTenant.PRIMARY_TENANT_KEY);
         }
         RoleDetailVO vo = new RoleDetailVO();
         vo.setRoleCode(role.getRoleCode());
@@ -290,18 +290,18 @@ public class RoleController {
         requireGlobalActor();
         SysRole role = requireRole(roleCode);
         permissionService.save(role.getRoleCode(), saveDTO.getPerms(),
-                UserUtils.requireLoginUser().getUsername(), clientIp(request), CaOrg.PRIMARY_ORG_KEY);
+                UserUtils.requireLoginUser().getUsername(), clientIp(request), CaTenant.PRIMARY_TENANT_KEY);
         RoleSavePermsVO vo = new RoleSavePermsVO();
         vo.setRoleCode(role.getRoleCode());
         vo.setPerms(permissionService.effectiveList(role.getRoleCode()));
         return Result.success("权限已保存，即时生效", vo);
     }
 
-    /** 角色配置属全局管理动作：机构管理员（org_key 非空）一律拒绝，防止单机构改动影响全院分权口径 */
+    /** 角色配置属全局管理动作：租户管理员（tenant_key 非空）一律拒绝，防止单租户改动影响全院分权口径 */
     private void requireGlobalActor() {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String org = loginUser.getOrgKey();
-        if (org != null && !org.isBlank()) {
+        String tenant = loginUser.getTenantKey();
+        if (tenant != null && !tenant.isBlank()) {
             throw new SecurityException("权限不足：角色配置属全局管理动作，仅全局系统管理员可操作");
         }
     }

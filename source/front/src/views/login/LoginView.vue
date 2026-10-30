@@ -64,7 +64,7 @@ import {ElMessage} from 'element-plus'
 import {Lock, Search, User} from '@element-plus/icons-vue'
 import {login} from '@/api/system'
 import {encryptPassword, resetPublicKeyCache} from '@/lib/password'
-import {saveSessionOrg} from '@/lib/org'
+import {saveSessionTenant} from '@/lib/tenant'
 import {savePerms, saveRoleName} from '@/lib/perm'
 import {copyText} from '@/lib/clipboard'
 import logo from '@/assets/logo.svg'
@@ -80,7 +80,7 @@ const form = reactive({
 })
 
 // ===== 演示账号凭据（与后端 ssl_sys_user 同步；口令已统一为 123456）=====
-// 数据来源：直读 ssl_ca.ssl_sys_user（2026-10-29）—— admin / suwenwen 启用，wanghao / songqingran 停用
+// 数据来源：直读 ssl_ca.ssl_sys_user（2026-10-30）—— 8 个全局账号全部启用
 const credVisible = ref(false)
 
 const credRows = [
@@ -88,7 +88,7 @@ const credRows = [
     role: '系统管理员',
     login: 'admin',
     name: '系统管理员',
-    ability: '用户/角色管理、全量兜底（含全部操作权限）',
+    ability: '用户/角色/租户档案维护，业务台账只读（签发/审核/吊销等业务操作一律不沾）',
   },
   {
     role: '审计员',
@@ -97,16 +97,40 @@ const credRows = [
     ability: '仅可查看审计与证书，不可签发/审核/管理',
   },
   {
+    role: '审计员',
+    login: 'zhouziang',
+    name: '周子昂',
+    ability: '仅可查看审计与证书，不可签发/审核/管理',
+  },
+  {
     role: 'CA操作员',
     login: 'songqingran',
     name: '宋清然',
-    ability: '录入证书申请、执行签发（签发与审核分离）',
+    ability: '录入证书申请、执行签发、发起吊销/挂起/更新操作单',
+  },
+  {
+    role: 'CA操作员',
+    login: 'zhaoqiming',
+    name: '赵启明',
+    ability: '录入证书申请、执行签发、发起吊销/挂起/更新操作单',
+  },
+  {
+    role: 'CA操作员',
+    login: 'liwenbo',
+    name: '李文博',
+    ability: '录入证书申请、执行签发、发起吊销/挂起/更新操作单',
   },
   {
     role: '审核员',
     login: 'suwenwen',
     name: '苏雯雯',
-    ability: '审核证书申请（不得与录入同一人）',
+    ability: '审核申请单、审批操作单（批准即执行，不得与发起人同一人）',
+  },
+  {
+    role: '审核员',
+    login: 'hejing',
+    name: '何静',
+    ability: '审核申请单、审批操作单（批准即执行，不得与发起人同一人）',
   }
 ]
 
@@ -187,8 +211,8 @@ async function onSubmit() {
     // 角色名称与生效权限点：侧栏/守卫/按钮均按权限点收敛（服务端仍逐接口强校验）
     saveRoleName(res.data.roleName || '')
     savePerms(res.data.perms || [])
-    // 机构域：orgKey=null 全局用户（落平台主机构），非空机构用户（固定本域）
-    saveSessionOrg(res.data.orgKey || '', res.data.primaryOrg || '')
+    // 租户域：tenantKey=null 全局用户（落平台主租户），非空租户用户（固定本域）
+    saveSessionTenant(res.data.tenantKey || '', res.data.primaryTenant || '')
     ElMessage.success('登录成功')
     // 落到根路由（首页=概览；redirect 优先）
     const redirect = route.query.redirect || '/'

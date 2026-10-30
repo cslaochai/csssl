@@ -23,9 +23,9 @@ public class CertApplication {
     private Long id;
 
     /**
-     * 受理机构（签发落到该机构根域）；default=院内默认域
+     * 受理租户（签发落到该租户根域）；default=院内默认域
      */
-    private String orgKey;
+    private String tenantKey;
 
     /**
      * 申请单号（RA20261027xxx）
@@ -33,12 +33,12 @@ public class CertApplication {
     private String applyNo;
 
     /**
-     * 申请人类别：INSTITUTION-机构 / PERSON-个人
+     * 申请人类别（证书主体类型）：INSTITUTION-单位 / PERSON-个人；与租户租户域无关
      */
     private String applicantType;
 
     /**
-     * 申请人/机构名称
+     * 申请人/租户名称
      */
     private String applicantName;
 

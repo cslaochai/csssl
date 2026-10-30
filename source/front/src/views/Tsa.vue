@@ -5,14 +5,6 @@
         <div class="section-title">可信时间戳（TSA）服务</div>
         <el-button :loading="loading" @click="load">刷新</el-button>
       </div>
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="本页为 TSA 验签公钥说明页：业务系统（HIS 等）对签名摘要盖章取得时间戳令牌后，用以下公钥离线验证令牌真伪。盖章接口 POST /ssl/tsa/stamp 为公开接口（摘要须为64位十六进制）。"
-        style="margin-bottom: 14px"
-      />
-
       <el-descriptions v-if="info.publicKeyPem" :column="2" border>
         <el-descriptions-item label="密钥算法">
           <el-tag size="small">{{ info.algorithm }}</el-tag>
@@ -25,11 +17,11 @@
         </el-descriptions-item>
         <el-descriptions-item label="服务说明" :span="2">{{ info.note }}</el-descriptions-item>
       </el-descriptions>
-      <el-empty v-else-if="!loading" description="未获取到 TSA 公钥（首次盖章时自动生成）" />
+      <el-empty v-else-if="!loading" description="未获取到 TSA 公钥（首次盖章时自动生成）"/>
 
       <template v-if="info.publicKeyPem">
         <div class="section-title" style="margin: 16px 0 10px">验签公钥（PEM / SPKI）</div>
-        <el-input :model-value="info.publicKeyPem" type="textarea" :rows="8" readonly class="pem-preview" />
+        <el-input :model-value="info.publicKeyPem" type="textarea" :rows="8" readonly class="pem-preview"/>
         <div style="margin-top: 12px">
           <el-button type="primary" plain @click="onDownloadPem">下载公钥 PEM</el-button>
           <el-button plain @click="onCopyPem">复制公钥</el-button>
@@ -54,10 +46,10 @@ curl -s -X POST http://&lt;CA主机&gt;:8092/ssl/tsa/stamp \
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getTsaPublicKey } from '@/api/system'
-import { downloadText } from '@/lib/download'
+import {onMounted, ref} from 'vue'
+import {ElMessage} from 'element-plus'
+import {getTsaPublicKey} from '@/api/system'
+import {downloadText} from '@/lib/download'
 
 const loading = ref(false)
 const info = ref({})
@@ -97,15 +89,18 @@ onMounted(load)
   font-weight: 600;
   color: var(--his-title);
 }
+
 .pem-preview {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;
 }
+
 .mono-wrap {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;
   word-break: break-all;
 }
+
 .cmd-block {
   background: #f5f7fa;
   border: 1px solid #e4e7ed;

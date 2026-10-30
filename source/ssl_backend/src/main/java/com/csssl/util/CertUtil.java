@@ -98,7 +98,7 @@ public final class CertUtil {
         return selfSignRoot(rootKey, cn, "CSSSL", algorithm, validityDays);
     }
 
-    /** 根CA自签证书（多机构版：主体 O 取自机构注册表 subject_o，机构受控） */
+    /** 根CA自签证书（多租户版：主体 O 取自租户注册表 subject_o，租户受控） */
     public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String organization,
                                                String algorithm, int validityDays) {
         try {
@@ -227,7 +227,7 @@ public final class CertUtil {
 
     /**
      * 用签发CA签发证书（RA 公钥申请场景：主体 DN 与公钥由申请方提供，私钥自持不落盘）。
-     * subjectDn 为 RFC2253 格式（如 "CN=张三,O=医院,OU=门诊部"）。
+     * subjectDn 为 RFC2253 格式（如 "CN=张三,O=医院"）。
      */
     public static X509Certificate issuePublicKey(String subjectDn, String publicKeyPem,
                                                  X509Certificate caCert, PrivateKey caKey,
@@ -498,7 +498,7 @@ public final class CertUtil {
         return names;
     }
 
-    /** 组装主体 DN（CN+O，多机构场景 O 受控于机构注册表；特殊字符按 RFC2253 转义） */
+    /** 组装主体 DN（CN+O，多租户场景 O 受控于租户注册表；特殊字符按 RFC2253 转义） */
     public static X500Name subjectDn(String cn, String organization) {
         return new X500Name("CN=" + escapeX500(cn) + ",O=" + escapeX500(organization));
     }

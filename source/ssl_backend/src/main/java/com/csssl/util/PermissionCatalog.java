@@ -37,7 +37,7 @@ public final class PermissionCatalog {
     public static final String MENU_CRL = "menu:crl";
     public static final String MENU_OCSP = "menu:ocsp";
     public static final String MENU_TSA = "menu:tsa";
-    public static final String MENU_ORGS = "menu:orgs";
+    public static final String MENU_TENANTS = "menu:tenants";
     public static final String MENU_ROOT_CA = "menu:root-ca";
     public static final String MENU_TEMPLATES = "menu:templates";
     public static final String MENU_USERS = "menu:users";
@@ -61,6 +61,7 @@ public final class PermissionCatalog {
     public static final String CERT_DOWNLOAD = "cert:download";
     public static final String CERT_KEY_DOWNLOAD = "cert:key:download";
     public static final String CERT_EXPORT = "cert:export";
+    public static final String CERT_OP_APPROVE = "cert:op:approve";
     public static final String CRL_DOWNLOAD = "crl:download";
 
     public static final String TEMPLATE_CREATE = "template:create";
@@ -77,10 +78,10 @@ public final class PermissionCatalog {
     public static final String CA_ROOT_DOWNLOAD = "ca:root:download";
     public static final String CA_SUBCA_DOWNLOAD = "ca:subca:download";
 
-    public static final String ORG_CREATE = "org:create";
-    public static final String ORG_SUSPEND = "org:suspend";
-    public static final String ORG_RESUME = "org:resume";
-    public static final String ORG_CLOSE = "org:close";
+    public static final String TENANT_CREATE = "tenant:create";
+    public static final String TENANT_SUSPEND = "tenant:suspend";
+    public static final String TENANT_RESUME = "tenant:resume";
+    public static final String TENANT_CLOSE = "tenant:close";
 
     public static final String USER_LIST = "user:list";
     public static final String USER_CREATE = "user:create";
@@ -109,7 +110,7 @@ public final class PermissionCatalog {
         menu(MENU_CRL, "CRL吊销", "吊销列表查看与下载");
         menu(MENU_OCSP, "OCSP查询", "证书状态在线查询");
         menu(MENU_TSA, "时间戳TSA", "可信时间戳服务");
-        menu(MENU_ORGS, "机构管理", "多机构域注册与启停（仅全局系统管理员）");
+        menu(MENU_TENANTS, "租户管理", "多租户域注册与启停（仅全局系统管理员）");
         menu(MENU_ROOT_CA, "根CA管理", "根CA初始化、密钥封存与门限分持");
         menu(MENU_TEMPLATES, "证书模板", "证书策略模板（KeyUsage/EKU/策略OID）");
         menu(MENU_USERS, "用户管理", "管理账号的建号、改角色、启停与重置口令");
@@ -134,6 +135,7 @@ public final class PermissionCatalog {
         action("证书业务", CERT_DOWNLOAD, "下载证书", "公钥证书 PEM");
         action("证书业务", CERT_KEY_DOWNLOAD, "下载私钥", "仅 CA 侧托管私钥的证书，强审计");
         action("证书业务", CERT_EXPORT, "导出PKCS#12", "口令加密导出软件证书");
+        action("证书业务", CERT_OP_APPROVE, "审批证书操作单", "吊销/挂起/解除挂起双人复核：批准即执行进 CRL，不得与发起人同一人");
         action("证书业务", CRL_DOWNLOAD, "下载CRL", "全量/增量吊销列表发布");
 
         // ---------- 证书模板 ----------
@@ -152,11 +154,11 @@ public final class PermissionCatalog {
         action("根CA与密钥", CA_ROOT_DOWNLOAD, "下载根证书", "供子系统信任链配置");
         action("根CA与密钥", CA_SUBCA_DOWNLOAD, "下载二级CA证书", "中间CA链配置");
 
-        // ---------- 机构管理 ----------
-        action("机构管理", ORG_CREATE, "新建机构", "登记即生成独立根CA");
-        action("机构管理", ORG_SUSPEND, "暂停机构", "停止对外签发");
-        action("机构管理", ORG_RESUME, "恢复机构", "恢复签发");
-        action("机构管理", ORG_CLOSE, "关闭机构", "CLOSED 终态");
+        // ---------- 租户管理 ----------
+        action("租户管理", TENANT_CREATE, "新建租户", "登记即生成独立根CA");
+        action("租户管理", TENANT_SUSPEND, "暂停租户", "停止对外签发");
+        action("租户管理", TENANT_RESUME, "恢复租户", "恢复签发");
+        action("租户管理", TENANT_CLOSE, "关闭租户", "CLOSED 终态");
 
         // ---------- 用户与角色 ----------
         action("用户与角色", USER_LIST, "查看账号", "管理账号列表");
@@ -202,21 +204,6 @@ public final class PermissionCatalog {
     public static boolean isMenu(String code) {
         PermDef def = get(code);
         return def != null && TYPE_MENU.equals(def.type());
-    }
-
-    /** 全量权限目录中除审计组与审计菜单外的权限点（系统管理员法定上限：具备除审计外的全部） */
-    public static Set<String> allButAudit() {
-        Set<String> s = new LinkedHashSet<>();
-        for (PermDef d : ALL) {
-            if (TYPE_ACTION.equals(d.type()) && d.code().startsWith("audit:")) {
-                continue;
-            }
-            if (MENU_AUDIT.equals(d.code())) {
-                continue;
-            }
-            s.add(d.code());
-        }
-        return Collections.unmodifiableSet(s);
     }
 
     /**

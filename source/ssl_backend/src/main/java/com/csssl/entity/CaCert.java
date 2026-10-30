@@ -11,7 +11,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * CA 证书总账：根CA与所有签发证书（含吊销信息）。私钥只落盘（store-dir），不进本表。
+ * CA 证书总账：根CA与所有签发证书（含吊销信息）。私钥密文落库 ssl_key_vault（SM4），不进本表。
  */
 @Data
 @TableName("ssl_ca_cert")
@@ -22,9 +22,9 @@ public class CaCert {
     private Long id;
 
     /**
-     * 所属机构（独立根CA域）；default=院内默认域（存量单根）
+     * 所属租户（独立根CA域）；default=院内默认域（存量单根）
      */
-    private String orgKey;
+    private String tenantKey;
 
     /**
      * 证书序列号（16进制，唯一）

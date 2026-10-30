@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { currentOrg } from '@/lib/org'
+import { currentTenant } from '@/lib/tenant'
 
 // CSSSL 后端 context-path 为 /ssl（vite 代理 /ssl → http://localhost:8092）
 const request = axios.create({
@@ -43,9 +43,10 @@ function httpStatusFallback(status) {
   return map[status] || `请求失败（${status}）`
 }
 
-// 全域业务接口路径：GET 自动附加 ?orgKey=（当前机构域），POST 缺省并入 body.orgKey；
-// /admin/orgs（机构管理本身）与 /admin/users（归属需显式口径）不参与自动注入
-const ORG_BIZ_RE = /^\/admin\/(ca|certs|applications|templates|audit|crl)(\/|$)/
+// 全域业务接口路径：GET 自动附加 ?tenantKey=（当前租户域）；POST 后端口径统一从 @RequestParam（query）读，
+// 部分 DTO 另收 body.tenantKey 做兜底——因此 POST 同时补 query 与 body 两处；
+// /admin/tenants（租户管理本身）与 /admin/users（归属需显式口径）不参与自动注入
+const TENANT_BIZ_RE = /^\/admin\/(ca|certs|cert-ops|applications|templates|audit|crl)(\/|$)/
 
 request.interceptors.request.use(
   config => {
@@ -54,20 +55,23 @@ request.interceptors.request.use(
       config.headers['Authorization'] = `Bearer ${token}`
     }
     const url = config.url || ''
-    if (ORG_BIZ_RE.test(url) && !url.startsWith('/admin/orgs')) {
-      const org = currentOrg()
+    if (TENANT_BIZ_RE.test(url) && !url.startsWith('/admin/tenants')) {
+      const tenant = currentTenant()
       const method = (config.method || '').toLowerCase()
-      if (org && method === 'get') {
+      if (tenant && method === 'get') {
         const params = config.params || {}
-        if (params.orgKey === undefined) {
-          config.params = { ...params, orgKey: org }
+        if (params.tenantKey === undefined) {
+          config.params = { ...params, tenantKey: tenant }
         }
-      } else if (org && method === 'post') {
+      } else if (tenant && method === 'post') {
+        // 调用方显式带 tenantKey（含空串=全局口径）时不覆盖
+        if (config.params?.tenantKey === undefined) {
+          config.params = { ...(config.params || {}), tenantKey: tenant }
+        }
         const data = config.data
         const isPlain = data === undefined || data === null || (typeof data === 'object' && !Array.isArray(data))
-        // 调用方显式带 orgKey（含空串=全局口径）时不覆盖
-        if (isPlain && !(data && 'orgKey' in data)) {
-          config.data = { ...(data || {}), orgKey: org }
+        if (isPlain && !(data && 'tenantKey' in data)) {
+          config.data = { ...(data || {}), tenantKey: tenant }
         }
       }
     }
@@ -118,7 +122,7 @@ request.interceptors.response.use(
           localStorage.removeItem('role')
           localStorage.removeItem('roleName')
           localStorage.removeItem('perms')
-          localStorage.removeItem('orgKey')
+          localStorage.removeItem('tenantKey')
           localStorage.removeItem('caDomain')
           if (!redirectingToLogin) {
             redirectingToLogin = true
@@ -130,7 +134,7 @@ request.interceptors.response.use(
       // 真实 HTTP 403：越域/角色不足，统一越域口径提示，不跳登录页
       if (status === 403) {
         if (!silent) {
-          notifyError(message || '越域访问被拒：当前账号无该机构权限')
+          notifyError(message || '越域访问被拒：当前账号无该租户权限')
         }
         return Promise.reject(error)
       }

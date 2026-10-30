@@ -18,16 +18,16 @@ import java.util.Set;
  * 其授权上限为全量权限目录（见 {@code PermissionCatalog.statutoryMax}），由配置方自行组合。</p>
  *
  * <p>角色模型：11 个预置角色 = 六类法定核心角色（ADMIN/OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN）
- * + 按 GB/T 25056 §10.1 八类职责拆出的运营子角色（ORG_ADMIN/USER_ADMIN/RA_ADMIN/CERT_OFFICER/AUDIT_ADMIN）；
+ * + 按 GB/T 25056 §10.1 八类职责拆出的运营子角色（TENANT_ADMIN/USER_ADMIN/RA_ADMIN/CERT_OFFICER/AUDIT_ADMIN）；
  * 另支持后台自建自定义角色（builtin=0）。</p>
  * <ul>
- *   <li>ADMIN          系统管理员（超级管理员）：用户/角色/机构与根CA维护，具备除审计外的全部业务操作权限</li>
+ *   <li>ADMIN          系统管理员：用户/角色/租户档案等人工信息维护，业务台账只读；签发/审核/吊销/模板/根密钥等业务操作不沾（三员分立）</li>
  *   <li>OPERATOR       CA操作员：录入证书申请、执行签发（签发与审核分离）</li>
  *   <li>APPROVER       审核员：审核证书申请（不得与录入同一人）</li>
  *   <li>AUDITOR        审计员：仅可查看审计与证书，不可签发/审核，独立于业务操作</li>
  *   <li>SECURITY_ADMIN 安全管理员：证书模板/证书策略（KeyUsage/EKU/策略OID）管理</li>
  *   <li>KEY_ADMIN      密钥管理员：根密钥门限分持/封存/解封（份额保管与恢复）</li>
- *   <li>ORG_ADMIN      机构管理员：多机构域（独立根CA）的创建/启停/恢复/关闭</li>
+ *   <li>TENANT_ADMIN      租户管理员：多租户域（独立根CA）的创建/启停/恢复/关闭</li>
  *   <li>USER_ADMIN     用户与角色管理员：账号与角色档案维护（建号、改角色、启停、授权）</li>
  *   <li>RA_ADMIN       RA业务管理员：RA 操作员账号与审核流程配置（与录入分离）</li>
  *   <li>CERT_OFFICER   证书签发操作员：仅执行证书签发/吊销/挂起/更新/换密钥/下载（不含申请录入）</li>
@@ -37,8 +37,15 @@ import java.util.Set;
 @Getter
 public enum RoleCodeEnum {
 
-    ADMIN("ADMIN", "系统管理员", "用户/角色/机构与根CA维护，具备除审计外的全部业务操作权限", 10, true,
-            PermissionCatalog.allButAudit()),
+    ADMIN("ADMIN", "系统管理员", "用户/角色/租户档案等人工信息维护，业务台账只读；签发/审核/吊销/模板/根密钥等业务操作一律不沾（三员分立）", 10, true, set(
+            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
+            PermissionCatalog.MENU_CRL, PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
+            PermissionCatalog.MENU_TENANTS, PermissionCatalog.MENU_USERS, PermissionCatalog.MENU_ROLES,
+            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_DOWNLOAD, PermissionCatalog.CRL_DOWNLOAD,
+            PermissionCatalog.TENANT_CREATE, PermissionCatalog.TENANT_SUSPEND, PermissionCatalog.TENANT_RESUME,
+            PermissionCatalog.TENANT_CLOSE,
+            PermissionCatalog.USER_LIST, PermissionCatalog.USER_CREATE, PermissionCatalog.USER_UPDATE,
+            PermissionCatalog.ROLE_UPDATE, PermissionCatalog.ROLE_PERM)),
 
     OPERATOR("OPERATOR", "CA操作员", "证书申请录入、签发、吊销/挂起/更新；签发与审核分离", 20, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
@@ -48,10 +55,12 @@ public enum RoleCodeEnum {
             PermissionCatalog.CERT_SUSPEND, PermissionCatalog.CERT_RENEW, PermissionCatalog.CERT_REKEY,
             PermissionCatalog.CERT_DOWNLOAD, PermissionCatalog.CRL_DOWNLOAD)),
 
-    APPROVER("APPROVER", "审核员", "审核证书申请；不得与录入人同一人", 30, true, set(
-            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CRL,
+    APPROVER("APPROVER", "审核员", "审核证书申请与证书操作单（吊销/挂起复核）；不得与发起人同一人", 30, true, set(
+            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
+            PermissionCatalog.MENU_CRL,
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
-            PermissionCatalog.APP_APPROVE, PermissionCatalog.APP_REJECT)),
+            PermissionCatalog.APP_APPROVE, PermissionCatalog.APP_REJECT,
+            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_OP_APPROVE)),
 
     AUDITOR("AUDITOR", "审计员", "审计日志查询/验签/归档；只读，不可签发/审核，独立于业务操作", 40, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_CRL, PermissionCatalog.MENU_OCSP,
@@ -73,11 +82,11 @@ public enum RoleCodeEnum {
             PermissionCatalog.CA_SHARE_UNSEAL, PermissionCatalog.CA_ROOT_DOWNLOAD, PermissionCatalog.CA_SUBCA_DOWNLOAD,
             PermissionCatalog.CRL_DOWNLOAD)),
 
-    ORG_ADMIN("ORG_ADMIN", "机构管理员", "多机构域（独立根CA）的创建/启停/恢复/关闭", 70, true, set(
-            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_ORGS, PermissionCatalog.MENU_CRL,
+    TENANT_ADMIN("TENANT_ADMIN", "租户管理员", "多租户域（独立根CA）的创建/启停/恢复/关闭", 70, true, set(
+            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_TENANTS, PermissionCatalog.MENU_CRL,
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
-            PermissionCatalog.ORG_CREATE, PermissionCatalog.ORG_SUSPEND, PermissionCatalog.ORG_RESUME,
-            PermissionCatalog.ORG_CLOSE)),
+            PermissionCatalog.TENANT_CREATE, PermissionCatalog.TENANT_SUSPEND, PermissionCatalog.TENANT_RESUME,
+            PermissionCatalog.TENANT_CLOSE)),
 
     USER_ADMIN("USER_ADMIN", "用户与角色管理员", "管理账号与角色档案（建号、改角色、启停、重置口令、角色授权）", 80, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_USERS, PermissionCatalog.MENU_ROLES,

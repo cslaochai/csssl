@@ -1,6 +1,6 @@
 import router from './index'
 import { ElMessage } from 'element-plus'
-import { isGlobalUser } from '@/lib/org'
+import { isGlobalUser } from '@/lib/tenant'
 import { permReady, hasPerm } from '@/lib/perm'
 
 function clearSession() {
@@ -9,7 +9,7 @@ function clearSession() {
   localStorage.removeItem('role')
   localStorage.removeItem('roleName')
   localStorage.removeItem('perms')
-  localStorage.removeItem('orgKey')
+  localStorage.removeItem('tenantKey')
   localStorage.removeItem('caDomain')
 }
 
@@ -32,7 +32,7 @@ function firstAllowedPath() {
 // 登录守卫：未登录一律回登录页；已登录访问登录页则回首个可用页；
 // role 丢失视为未登录（清本地会话回登录页）；
 // 页面权限点（meta.perm）优先，旧会话（无权限缓存）回退 meta.roles；
-// meta.globalOnly 页面（机构管理/角色配置）机构用户不可进入。
+// meta.globalOnly 页面（租户管理/角色配置）租户用户不可进入。
 router.beforeEach(to => {
   const token = localStorage.getItem('token')
   if (!to.meta.public && !token) {
@@ -70,7 +70,7 @@ router.beforeEach(to => {
       }
     }
     if (to.meta.globalOnly && !isGlobalUser()) {
-      ElMessage.warning('机构用户不可访问该页面，已返回概览')
+      ElMessage.warning('租户用户不可访问该页面，已返回概览')
       return '/dashboard'
     }
   }

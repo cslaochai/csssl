@@ -24,7 +24,7 @@ import java.util.Set;
 /**
  * 启动初始化：确保默认管理员账号存在（首次启动创建 admin / 123456，密码 BCrypt 存储）、
  * 初始化内置证书模板（GM/T 0034 §5.3.4）、执行过期证书归档扫描（§12 生命周期）。
- * 机构不在此处创建：空库由管理员在机构管理页开首个机构（开机构即初始化该机构独立根CA）。
+ * 租户不在此处创建：空库由管理员在租户管理页开首个租户（开租户即初始化该租户独立根CA）。
  */
 @Slf4j
 @Component
@@ -48,7 +48,7 @@ public class DataInitializer implements ApplicationRunner {
             admin.setPassword(BCrypt.hashpw("123456", BCrypt.gensalt()));
             admin.setRealName("系统管理员");
             admin.setRoleCode("ADMIN");
-            admin.setOrgKey(null); // 默认管理员=全局账号（org_key NULL：跨机构总览，机构域操作仍须显式传 orgKey）
+            admin.setTenantKey(null); // 默认管理员=全局账号（tenant_key NULL：跨租户总览，租户域操作仍须显式传 tenantKey）
             admin.setStatus(1);
             admin.setCreatedAt(LocalDateTime.now());
             userMapper.insert(admin);
@@ -115,10 +115,10 @@ public class DataInitializer implements ApplicationRunner {
 
     /**
      * 内置证书模板（编码唯一，重复启动幂等；KeyUsage/EKU/策略OID 锁定，签发按模板）。
-     * 内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：org_key=NULL，所有机构可见。
+     * 内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：tenant_key=NULL，所有租户可见。
      */
     private void initTemplates() {
-        insertIfAbsent("SERVER_COMM", "机构通信证书", "SERVER", "SM2", 730,
+        insertIfAbsent("SERVER_COMM", "租户通信证书", "SERVER", "SM2", 730,
                 "digitalSignature,keyEncipherment", "serverAuth",
                 "1.2.156.112562.2.2.15", "医保前置/局端等系统间加密传输通信证书（SM2 签名证书策略）");
         insertIfAbsent("DOCTOR_SIGN", "医生签名证书", "CLIENT", "SM2", 365,
@@ -136,7 +136,7 @@ public class DataInitializer implements ApplicationRunner {
             return;
         }
         CertTemplate tpl = new CertTemplate();
-        tpl.setOrgKey(null); // 内置模板=全局模板（ssl_cert_template.org_key NULL：所有机构可见集内）
+        tpl.setTenantKey(null); // 内置模板=全局模板（ssl_cert_template.tenant_key NULL：所有租户可见集内）
         tpl.setTemplateCode(code);
         tpl.setTemplateName(name);
         tpl.setCertType(certType);

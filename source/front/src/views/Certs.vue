@@ -22,7 +22,7 @@
           <el-form-item label="关键字">
             <el-input
               v-model="query.keyword"
-              placeholder="CN / 序列号"
+              placeholder="主体CN / 序列号"
               clearable
               style="width: 220px"
               @keyup.enter="handleSearch"
@@ -35,7 +35,7 @@
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-tag size="small" type="info" effect="plain">当前域：{{ orgDomain }}</el-tag>
+          <el-tag size="small" type="info" effect="plain">当前域：{{ tenantName || tenantDomain }}</el-tag>
           <template v-if="canIssue">
             <el-button v-perm="'cert:issue'" type="primary" @click="openIssue">签发证书</el-button>
             <el-button v-perm="'cert:issue'" @click="openCsr">CSR签发</el-button>
@@ -68,60 +68,32 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" label="用途说明" min-width="140" show-overflow-tooltip />
-        <el-table-column align="right" label="操作" width="540" fixed="right">
+        <el-table-column align="right" label="操作" width="360" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
-            <el-button v-if="canDownloadCert" v-perm="'cert:download'" link type="primary" size="small" @click="onDownloadCert(row)">证书</el-button>
-            <el-button v-if="canDownloadKey" v-perm="'cert:key:download'" link type="primary" size="small" @click="onDownloadKey(row)">私钥</el-button>
             <el-button
-              v-if="canDownloadKey && ['SERVER', 'CLIENT'].includes(row.certType)"
-              v-perm="'cert:export'"
+              v-for="a in visibleRowActions(row)"
+              :key="a.label"
               link
               size="small"
-              @click="openExportP12(row)"
-            >导出P12</el-button>
-            <el-button
-              v-if="row.status === 'VALID'"
-              v-perm="'cert:suspend'"
-              link
-              type="warning"
-              size="small"
-              :disabled="row.certType === 'ROOT'"
-              @click="openSuspend(row)"
-            >挂起</el-button>
-            <el-button
-              v-if="row.status === 'FROZEN'"
-              v-perm="'cert:suspend'"
-              link
-              type="success"
-              size="small"
-              @click="onUnsuspend(row)"
-            >解除挂起</el-button>
-            <el-button
-              v-if="['VALID', 'FROZEN'].includes(row.status)"
-              v-perm="'cert:renew'"
-              link
-              type="primary"
-              size="small"
-              :disabled="row.certType === 'ROOT'"
-              @click="openRenew(row, 'renew')"
-            >更新</el-button>
-            <el-button
-              v-if="['VALID', 'FROZEN'].includes(row.status) && row.certType === 'SERVER'"
-              v-perm="'cert:rekey'"
-              link
-              type="primary"
-              size="small"
-              @click="openRenew(row, 'rekey')"
-            >重签</el-button>
-            <el-button
-              v-perm="'cert:revoke'"
-              link
-              type="danger"
-              size="small"
-              :disabled="row.status !== 'VALID' || row.certType === 'ROOT'"
-              @click="onRevoke(row)"
-            >吊销</el-button>
+              :type="a.type || 'primary'"
+              :disabled="a.disabled"
+              @click="a.run()"
+            >{{ a.label }}</el-button>
+            <el-dropdown v-if="moreRowActions(row).length" trigger="click" @command="cmd => cmd.run()">
+              <el-button link type="primary" size="small">
+                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="a in moreRowActions(row)"
+                    :key="a.label"
+                    :command="a"
+                    :disabled="a.disabled"
+                  >{{ a.label }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -140,18 +112,18 @@
     </el-card>
 
     <!-- 签发证书 -->
-    <el-dialog v-model="issueVisible" title="签发证书" width="520px" :close-on-click-modal="false">
+    <el-dialog v-model="issueVisible" title="签发证书" width="640px" :close-on-click-modal="false">
       <el-alert
-        v-if="isOrgDomain"
+        v-if="isTenantDomain"
         type="info"
         :closable="false"
         show-icon
-        :title="`机构域「${orgDomain}」签发：O 取机构主体，无需手填，仅需填写 CN（后端按机构口径受控附加并校验 O）。`"
+        :title="`租户域「${tenantName || tenantDomain}」签发：证书主体归属由租户确定，无需手填，仅需填写主体CN。`"
         style="margin-bottom: 12px"
       />
-      <el-form :model="issueForm" label-width="110px">
+      <el-form :model="issueForm" label-width="150px">
         <el-form-item label="主体CN" required>
-          <el-input v-model="issueForm.subjectCn" :placeholder="isOrgDomain ? '仅填 CN，如 his.yibao.local（O 由后端受控）' : '如 his.cslk.local / csmig 前置机'" />
+          <el-input v-model="issueForm.subjectCn" :placeholder="isTenantDomain ? '仅填主体CN，如 his.yibao.local（主体归属由后端按租户附加）' : '如 his.cslk.local / csmig 前置机'" />
         </el-form-item>
         <el-form-item label="证书类型">
           <el-radio-group v-model="issueForm.certType">
@@ -169,7 +141,7 @@
         <el-form-item label="有效期(天)">
           <el-input-number v-model="issueForm.validityDays" :min="1" :max="36500" />
         </el-form-item>
-        <el-form-item label="SAN">
+        <el-form-item label="主体别名（SAN）">
           <el-input v-model="issueForm.san" placeholder="逗号分隔：DNS或IP，如 his.cslk.local,192.168.1.10" />
         </el-form-item>
         <el-form-item label="用途说明">
@@ -185,9 +157,9 @@
     </el-dialog>
 
     <!-- CSR 签发 -->
-    <el-dialog v-model="csrVisible" title="CSR 签发（主体与公钥取自 CSR）" width="560px" :close-on-click-modal="false">
-      <el-form :model="csrForm" label-width="110px">
-        <el-form-item label="CSR 内容" required>
+    <el-dialog v-model="csrVisible" title="证书请求签发（CSR）" width="680px" :close-on-click-modal="false">
+      <el-form :model="csrForm" label-width="150px">
+        <el-form-item label="证书请求内容（CSR）" required>
           <el-input
             v-model="csrForm.csrPem"
             type="textarea"
@@ -204,7 +176,7 @@
         <el-form-item label="有效期(天)">
           <el-input-number v-model="csrForm.validityDays" :min="1" :max="36500" />
         </el-form-item>
-        <el-form-item label="SAN（可选）">
+        <el-form-item label="主体别名（SAN）">
           <el-input v-model="csrForm.san" placeholder="CSR自带SAN时优先使用CSR的" />
         </el-form-item>
         <el-form-item label="用途说明">
@@ -220,16 +192,16 @@
     </el-dialog>
 
     <!-- 公钥直签（RA 场景：申请方自持私钥） -->
-    <el-dialog v-model="pubKeyVisible" title="公钥直签（申请方自持私钥，仅提交公钥）" width="560px" :close-on-click-modal="false">
+    <el-dialog v-model="pubKeyVisible" title="公钥直签（申请方自持私钥，仅提交公钥）" width="680px" :close-on-click-modal="false">
       <el-alert
-        v-if="isOrgDomain"
+        v-if="isTenantDomain"
         type="info"
         :closable="false"
         show-icon
-        :title="`机构域「${orgDomain}」签发：主体DN 的 O 取机构主体，仅填 CN（CN=xxx，O 交给后端受控校验）。`"
+        :title="`租户域「${tenantName || tenantDomain}」签发：证书主体归属由租户确定，仅需填写主体CN。`"
         style="margin-bottom: 12px"
       />
-      <el-form :model="pubKeyForm" label-width="110px">
+      <el-form :model="pubKeyForm" label-width="150px">
         <el-form-item label="公钥PEM" required>
           <el-input
             v-model="pubKeyForm.publicKeyPem"
@@ -255,7 +227,7 @@
         <el-form-item label="有效期(天)">
           <el-input-number v-model="pubKeyForm.validityDays" :min="1" :max="36500" />
         </el-form-item>
-        <el-form-item label="SAN">
+        <el-form-item label="主体别名（SAN）">
           <el-input v-model="pubKeyForm.san" placeholder="逗号分隔：DNS或IP（模板锁定SAN时以模板为准）" />
         </el-form-item>
         <el-form-item label="用途说明">
@@ -270,10 +242,11 @@
       </template>
     </el-dialog>
 
-    <!-- 挂起 -->
-    <el-dialog v-model="suspendVisible" title="挂起证书（GM/T 0034 §12.6，可解除）" width="460px" :close-on-click-modal="false">
+    <!-- 挂起（发起操作单，待他人审批后执行） -->
+    <el-dialog v-model="suspendVisible" title="发起挂起操作单（GM/T 0034 §12.6，可解除）" width="460px" :close-on-click-modal="false">
       <p style="margin-bottom: 12px">
-        确定挂起证书 <b>{{ suspendTarget?.subjectCn }}</b> 吗？挂起期间证书进入 CRL（certificateHold）、OCSP 返回 on-hold，解除后恢复。
+        为证书 <b>{{ suspendTarget?.subjectCn }}</b> 发起挂起申请。提交后生成待审批操作单，
+        由持审批权限的其他人员批准后才实际执行（挂起期间进 CRL certificateHold、OCSP 返回 on-hold）。
       </p>
       <el-form label-width="90px">
         <el-form-item label="原因">
@@ -287,17 +260,18 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="suspendVisible = false">取消</el-button>
-          <el-button type="warning" :loading="submitting" @click="onSuspendConfirm">挂起</el-button>
+          <el-button type="warning" :loading="submitting" @click="onSuspendConfirm">提交审批</el-button>
         </div>
       </template>
     </el-dialog>
 
-    <!-- 更新 / 重签 -->
-    <el-dialog v-model="renewVisible" :title="renewAction === 'renew' ? '证书更新（同公钥重签）' : '密钥更新 rekey（新密钥对）'" width="500px" :close-on-click-modal="false">
+    <!-- 更新 / 重签（发起操作单，待他人审批后执行） -->
+    <el-dialog v-model="renewVisible" :title="renewAction === 'renew' ? '发起证书更新操作单（GM/T 0034 §12.2）' : '发起密钥更新操作单（rekey，GM/T 0034 §12.2）'" width="500px" :close-on-click-modal="false">
       <p style="margin-bottom: 12px">
         {{ renewAction === 'renew'
-          ? `原证书 ${renewTarget?.subjectCn} 将被吊销（SUPERSEDED），以其公钥重签新证书（私钥仍由持有方自持）。`
-          : `原证书 ${renewTarget?.subjectCn} 将被吊销（SUPERSEDED），由 CA 生成新密钥对重签（仅限私钥在 CA 侧的在线签发证书）。` }}
+          ? `为证书 ${renewTarget?.subjectCn} 发起更新申请：批准后原证书吊销（SUPERSEDED），以其公钥重签新证书（私钥仍由持有方自持）。`
+          : `为证书 ${renewTarget?.subjectCn} 发起重签申请：批准后原证书吊销（SUPERSEDED），由 CA 生成新密钥对重签（仅限私钥在 CA 侧的在线签发证书）。` }}
+        提交后生成待审批操作单，由持审批权限的其他人员批准后才实际执行。
       </p>
       <el-form label-width="110px">
         <el-form-item label="新有效期(天)">
@@ -307,7 +281,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="renewVisible = false">取消</el-button>
-          <el-button type="primary" :loading="submitting" @click="onRenewConfirm">{{ renewAction === 'renew' ? '更新' : '重签' }}</el-button>
+          <el-button type="primary" :loading="submitting" @click="onRenewConfirm">提交审批</el-button>
         </div>
       </template>
     </el-dialog>
@@ -331,10 +305,11 @@
       </template>
     </el-dialog>
 
-    <!-- 吊销 -->
-    <el-dialog v-model="revokeVisible" title="吊销证书" width="460px" :close-on-click-modal="false">
+    <!-- 吊销（发起操作单，待他人审批后执行） -->
+    <el-dialog v-model="revokeVisible" title="发起吊销操作单" width="460px" :close-on-click-modal="false">
       <p style="margin-bottom: 12px">
-        确定吊销证书 <b>{{ revokeTarget?.subjectCn }}</b> 吗？吊销后该证书立即失效并进入 CRL。
+        为证书 <b>{{ revokeTarget?.subjectCn }}</b> 发起吊销申请。提交后生成待审批操作单，
+        由持审批权限的其他人员批准后才实际执行（吊销后立即失效并进入 CRL）。
       </p>
       <el-form label-width="90px">
         <el-form-item label="吊销原因">
@@ -353,7 +328,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="revokeVisible = false">取消</el-button>
-          <el-button type="danger" :loading="submitting" @click="onRevokeConfirm">吊销</el-button>
+          <el-button type="danger" :loading="submitting" @click="onRevokeConfirm">提交审批</el-button>
         </div>
       </template>
     </el-dialog>
@@ -366,13 +341,13 @@
         <el-descriptions-item label="类型">{{ detail ? typeText(detail.certType) : '' }}</el-descriptions-item>
         <el-descriptions-item label="算法">{{ detail?.algorithm }}</el-descriptions-item>
         <el-descriptions-item label="颁发CA">{{ detail?.issuerCn }}</el-descriptions-item>
-        <el-descriptions-item label="SAN">{{ detail?.san || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="主体别名（SAN）">{{ detail?.san || '无' }}</el-descriptions-item>
         <el-descriptions-item label="有效期">{{ detail?.validFrom }} ~ {{ detail?.validTo }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
         <el-descriptions-item v-if="detail?.revokedAt" label="吊销时间/原因">{{ detail?.revokedAt }}（{{ detail?.revokeReason }}）</el-descriptions-item>
-        <el-descriptions-item label="所属机构">{{ detail?.orgKey || '全局' }}</el-descriptions-item>
-        <el-descriptions-item label="签发人">{{ detail?.createdBy || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="用途说明">{{ detail?.description || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="所属租户">{{ detail?.tenantName || detail?.tenantKey || '全局' }}</el-descriptions-item>
+        <el-descriptions-item label="签发人">{{ detail?.createdByName || detail?.createdBy || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="用途说明">{{ detail?.description || '无' }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
   </div>
@@ -381,24 +356,21 @@
 <script setup>
 import { computed, reactive, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { Refresh, Search, ArrowDown } from '@element-plus/icons-vue'
 import {
   pageCerts,
   issueCert,
   issueCertByCsr,
   issueCertByPublicKey,
   pageTemplates,
-  revokeCert,
-  suspendCert,
-  unsuspendCert,
-  renewCert,
-  rekeyCert,
+  submitCertOp,
   exportCertP12,
   downloadCertPem,
-  downloadKeyPem
+  downloadKeyPem,
+  listTenantsCached
 } from '@/api/system'
 import { downloadText } from '@/lib/download'
-import { currentOrg } from '@/lib/org'
+import { currentTenant } from '@/lib/tenant'
 import { hasPerm, permReady } from '@/lib/perm'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
@@ -406,13 +378,14 @@ import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 // 按钮权限点与后端接口校验一一对应；旧会话（无权限缓存）回退角色判断，服务端仍强校验
 const role = localStorage.getItem('role') || ''
 const permLoaded = permReady()
-const canIssue = permLoaded ? hasPerm('cert:issue') : ['ADMIN', 'OPERATOR'].includes(role)
+const canIssue = permLoaded ? hasPerm('cert:issue') : role === 'OPERATOR'
 const canDownloadCert = permLoaded ? hasPerm('cert:download') : ['ADMIN', 'OPERATOR'].includes(role)
-const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : ['ADMIN', 'KEY_ADMIN'].includes(role)
+const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : role === 'KEY_ADMIN'
 
-// 当前机构域：列表/签发/吊销等请求由 request 封装自动附带 orgKey=currentOrg()
-const orgDomain = ref(currentOrg())
-const isOrgDomain = computed(() => !!orgDomain.value)
+// 当前租户域：列表/签发/吊销等请求由 request 封装自动附带 tenantKey=currentTenant()
+const tenantDomain = ref(currentTenant())
+const tenantName = ref('')
+const isTenantDomain = computed(() => !!tenantDomain.value)
 
 const loading = ref(false)
 const rows = ref([])
@@ -488,6 +461,46 @@ function statusTag(s) {
 function onRowDetail(row) {
   detail.value = row
   detailVisible.value = true
+}
+
+// 操作列口径：前 3 个平铺，其余收进「更多」下拉（列表页统一模式）
+const ACTION_VISIBLE = 3
+
+function certActions(row) {
+  const acts = [{ label: '详情', run: () => onRowDetail(row) }]
+  if (canDownloadCert) acts.push({ label: '下载证书', run: () => onDownloadCert(row) })
+  // 私钥类操作只对 CA 侧落了私钥的证书开放（CSR/公钥直签的私钥由申请方自持，CA 无钥可下载）
+  if (canDownloadKey && row.keyHeld) acts.push({ label: '下载私钥', run: () => onDownloadKey(row) })
+  if (canDownloadKey && row.keyHeld && ['SERVER', 'CLIENT'].includes(row.certType)) {
+    acts.push({ label: '导出P12', run: () => openExportP12(row) })
+  }
+  if (hasPerm('cert:suspend')) {
+    if (row.status === 'VALID') {
+      acts.push({ label: '挂起', type: 'warning', disabled: row.certType === 'ROOT', run: () => openSuspend(row) })
+    }
+    if (row.status === 'FROZEN') {
+      acts.push({ label: '解除挂起', type: 'success', run: () => onUnsuspend(row) })
+    }
+  }
+  if (hasPerm('cert:renew') && ['VALID', 'FROZEN'].includes(row.status)) {
+    acts.push({ label: '更新', disabled: row.certType === 'ROOT', run: () => openRenew(row, 'renew') })
+  }
+  if (hasPerm('cert:rekey') && ['VALID', 'FROZEN'].includes(row.status) && row.keyHeld
+      && !['ROOT', 'SUB_CA'].includes(row.certType)) {
+    acts.push({ label: '重签', run: () => openRenew(row, 'rekey') })
+  }
+  if (hasPerm('cert:revoke')) {
+    acts.push({ label: '吊销', type: 'danger', disabled: row.status !== 'VALID' || row.certType === 'ROOT', run: () => onRevoke(row) })
+  }
+  return acts
+}
+
+function visibleRowActions(row) {
+  return certActions(row).slice(0, ACTION_VISIBLE)
+}
+
+function moreRowActions(row) {
+  return certActions(row).slice(ACTION_VISIBLE)
 }
 
 async function load() {
@@ -651,22 +664,20 @@ function openSuspend(row) {
 async function onSuspendConfirm() {
   submitting.value = true
   try {
-    await suspendCert(suspendTarget.value.id, suspendReason.value)
-    ElMessage.success('已挂起（CRL certificateHold / OCSP on-hold）')
+    const res = await submitCertOp({ opType: 'SUSPEND', certId: suspendTarget.value.id, reason: suspendReason.value })
+    ElMessage.success(`挂起操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     suspendVisible.value = false
-    load()
   } finally {
     submitting.value = false
   }
 }
 
 async function onUnsuspend(row) {
-  await ElMessageBox.confirm(`确定解除挂起证书 ${row.subjectCn} 吗？解除后恢复有效并移出 CRL。`, '提示', { type: 'warning' })
+  await ElMessageBox.confirm(`为证书 ${row.subjectCn} 发起解除挂起申请？提交后由持审批权限的其他人员批准后执行。`, '发起操作单', { type: 'warning' })
   submitting.value = true
   try {
-    await unsuspendCert(row.id)
-    ElMessage.success('已解除挂起，恢复有效')
-    load()
+    const res = await submitCertOp({ opType: 'UNSUSPEND', certId: row.id })
+    ElMessage.success(`解除挂起操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
   } finally {
     submitting.value = false
   }
@@ -682,15 +693,10 @@ function openRenew(row, action) {
 async function onRenewConfirm() {
   submitting.value = true
   try {
-    if (renewAction.value === 'renew') {
-      await renewCert(renewTarget.value.id, renewDays.value)
-      ElMessage.success('证书已更新（原证书吊销 SUPERSEDED）')
-    } else {
-      await rekeyCert(renewTarget.value.id, renewDays.value)
-      ElMessage.success('密钥已更新（新证书签发）')
-    }
+    const opType = renewAction.value === 'renew' ? 'RENEW' : 'REKEY'
+    const res = await submitCertOp({ opType, certId: renewTarget.value.id, validityDays: renewDays.value })
+    ElMessage.success(`${opType === 'RENEW' ? '证书更新' : '密钥更新'}操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     renewVisible.value = false
-    load()
   } finally {
     submitting.value = false
   }
@@ -728,10 +734,9 @@ async function onExportP12() {
 async function onRevokeConfirm() {
   submitting.value = true
   try {
-    await revokeCert(revokeTarget.value.id, revokeReason.value)
-    ElMessage.success('已吊销并加入CRL')
+    const res = await submitCertOp({ opType: 'REVOKE', certId: revokeTarget.value.id, reason: revokeReason.value })
+    ElMessage.success(`吊销操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     revokeVisible.value = false
-    load()
   } finally {
     submitting.value = false
   }
@@ -753,7 +758,13 @@ async function onDownloadKey(row) {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  load()
+  if (tenantDomain.value) {
+    const hit = (await listTenantsCached()).find(o => o.tenantKey === tenantDomain.value)
+    tenantName.value = hit?.tenantName || ''
+  }
+})
 </script>
 
 <style scoped>

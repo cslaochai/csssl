@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
- * 创建管理账号请求（orgKey 空=全局账号；角色/机构越域由服务端强制）。
+ * 创建管理账号请求（tenantKey 空=全局账号；角色/租户越域由服务端强制）。
  */
 @Data
 public class UserCreateDTO {
@@ -32,7 +32,7 @@ public class UserCreateDTO {
     private String roleCode;
 
     /**
-     * 归属机构（空=全局账号）
+     * 归属租户（空=全局账号）
      */
-    private String orgKey;
+    private String tenantKey;
 }

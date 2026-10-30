@@ -34,7 +34,7 @@
               </el-form-item>
             </el-form>
             <div class="query-actions">
-              <el-tag size="small" type="info" effect="plain">当前域：{{ orgDomain }}</el-tag>
+              <el-tag size="small" type="info" effect="plain">当前域：{{ tenantDomain }}</el-tag>
               <el-button v-perm="'crl:download'" type="primary" :icon="Download" :loading="crlLoading" @click="onDownloadCrl">下载 CRL</el-button>
             </div>
           </div>
@@ -111,7 +111,7 @@
             <el-descriptions-item label="本次更新（thisUpdate）">{{ delta.thisUpdate }}</el-descriptions-item>
             <el-descriptions-item label="下次更新（nextUpdate）">{{ delta.nextUpdate }}</el-descriptions-item>
             <el-descriptions-item label="增量条目数">{{ delta.entryCount }}</el-descriptions-item>
-            <el-descriptions-item label="CRL 编号（crlNumber）">{{ delta.crlNumber }}</el-descriptions-item>
+            <el-descriptions-item label="吊销列表编号（crlNumber）">{{ delta.crlNumber }}</el-descriptions-item>
             <el-descriptions-item label="基础编号（baseCrlNumber）">
               <el-tag size="small" type="warning">{{ delta.baseCrlNumber }}</el-tag>
             </el-descriptions-item>
@@ -150,12 +150,12 @@ import { ElMessage } from 'element-plus'
 import { Download, Refresh, Search } from '@element-plus/icons-vue'
 import { getCrlView, pageCrlRecords, downloadCrl, getDeltaCrl } from '@/api/system'
 import { downloadText } from '@/lib/download'
-import { currentOrg } from '@/lib/org'
+import { currentTenant } from '@/lib/tenant'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
-// 全量/dCRL 均按机构域取数（api 缺省 orgKey=currentOrg()，页面随域切换重建）
-const orgDomain = ref(currentOrg())
+// 全量/dCRL 均按租户域取数（api 缺省 tenantKey=currentTenant()，页面随域切换重建）
+const tenantDomain = ref(currentTenant())
 
 const activeTab = ref('full')
 const loading = ref(false)
@@ -276,8 +276,8 @@ function onTabChange(name) {
 async function onDownloadCrl() {
   crlLoading.value = true
   try {
-    const pem = await downloadCrl(orgDomain.value)
-    downloadText(pem, `csssl-crl-${orgDomain.value}.pem`)
+    const pem = await downloadCrl(tenantDomain.value)
+    downloadText(pem, `csssl-crl-${tenantDomain.value}.pem`)
     ElMessage.success('CRL已下载')
   } catch (e) {
     // 错误提示已由拦截器统一处理
@@ -289,7 +289,7 @@ async function onDownloadCrl() {
 async function onDownloadDelta() {
   deltaDownLoading.value = true
   try {
-    downloadText(delta.value.deltaPem, `csssl-delta-crl-${orgDomain.value}.pem`)
+    downloadText(delta.value.deltaPem, `csssl-delta-crl-${tenantDomain.value}.pem`)
     ElMessage.success('增量CRL已下载')
   } finally {
     deltaDownLoading.value = false

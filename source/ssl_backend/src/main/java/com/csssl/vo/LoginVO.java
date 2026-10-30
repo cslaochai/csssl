@@ -5,7 +5,7 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * 登录成功视图对象：会话令牌 + 用户/角色/权限/机构数据域信息。
+ * 登录成功视图对象：会话令牌 + 用户/角色/权限/租户数据域信息。
  */
 @Data
 public class LoginVO {
@@ -41,12 +41,12 @@ public class LoginVO {
     private List<String> perms;
 
     /**
-     * 机构数据域：null=全局账号；前端据此锁定/展示机构切换
+     * 租户数据域：null=全局账号；前端据此锁定/展示租户切换
      */
-    private String orgKey;
+    private String tenantKey;
 
     /**
-     * 平台主机构（各机构标识由管理员在机构管理维护；全局账号默认落在它上面）
+     * 平台主租户（各租户标识由管理员在租户管理维护；全局账号默认落在它上面）
      */
-    private String primaryOrg;
+    private String primaryTenant;
 }

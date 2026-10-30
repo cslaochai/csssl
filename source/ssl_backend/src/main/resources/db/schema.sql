@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS ssl_audit_log (
 -- 证书模板：固化类型/算法/有效期/KeyUsage/EKU/策略OID（GM/T 0034 §5.3.4 证书策略管理）
 CREATE TABLE IF NOT EXISTS ssl_cert_template (
     id             BIGINT       NOT NULL AUTO_INCREMENT,
-    template_code  VARCHAR(32)  NOT NULL COMMENT '模板编码：SERVER_COMM-机构通信/DOCTOR_SIGN-医生签名/SUB_CA-二级CA',
+    template_code  VARCHAR(32)  NOT NULL COMMENT '模板编码：SERVER_COMM-租户通信/DOCTOR_SIGN-医生签名/SUB_CA-二级CA',
     template_name  VARCHAR(64)  NOT NULL COMMENT '模板名称',
     cert_type      VARCHAR(16)  NOT NULL COMMENT '证书类型：SERVER/CLIENT/SUB_CA',
     algorithm      VARCHAR(32)  NOT NULL DEFAULT 'SM2' COMMENT '算法：RSA2048 / SM2',
@@ -81,9 +81,9 @@ CREATE TABLE IF NOT EXISTS ssl_cert_template (
 CREATE TABLE IF NOT EXISTS ssl_cert_application (
     id              BIGINT       NOT NULL AUTO_INCREMENT,
     apply_no        VARCHAR(32)  NOT NULL COMMENT '申请单号',
-    applicant_type  VARCHAR(16)  NOT NULL COMMENT '申请人类别：INSTITUTION-机构 PERSON-个人',
-    applicant_name  VARCHAR(64)  NOT NULL COMMENT '申请人/机构名称',
-    subject_dn      VARCHAR(255) NOT NULL COMMENT '证书主体DN（RFC2253，如 CN=张三,O=医院,OU=门诊部）',
+    applicant_type  VARCHAR(16)  NOT NULL COMMENT '申请人类别：INSTITUTION-租户 PERSON-个人',
+    applicant_name  VARCHAR(64)  NOT NULL COMMENT '申请人/租户名称',
+    subject_dn      VARCHAR(255) NOT NULL COMMENT '证书主体DN（RFC2253，如 CN=张三,O=医院；只放姓名/租户等稳定身份，科室等易变属性不进DN）',
     template_id     BIGINT       NOT NULL COMMENT '证书模板ID',
     san             VARCHAR(500) NULL COMMENT 'SAN列表（DNS/IP，逗号分隔）',
     public_key_pem  MEDIUMTEXT   NULL COMMENT '申请方公钥PEM（自持私钥场景，可为空则由CA在线生成）',
@@ -178,37 +178,37 @@ CREATE TABLE IF NOT EXISTS ssl_crl_state (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CRL发布状态（多实例一致性，取代crl-state.json）';
 
 -- =============================================================================
--- ===== 路线 A：多机构（按机构独立根CA） =====
--- 兼容铁律：存量单根原样成为 default 机构（subject_o='CSSSL'），
--- 其落盘路径沿用现有根路径；新机构路径 store-dir/orgs/{orgKey}/…，互相不信任。
+-- ===== 路线 A：多租户（按租户独立根CA） =====
+-- 兼容铁律：存量单根原样成为 default 租户（subject_o='CSSSL'），
+-- 其落盘路径沿用现有根路径；新租户路径 store-dir/tenants/{tenantKey}/…，互相不信任。
 -- =============================================================================
 
--- 机构注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额）
-CREATE TABLE IF NOT EXISTS ssl_ca_org (
+-- 租户注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额）
+CREATE TABLE IF NOT EXISTS ssl_ca_tenant (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
-    org_key     VARCHAR(32)  NOT NULL COMMENT '机构标识（小写字母数字，如 his1；default=院内默认域/存量单根）',
-    org_name    VARCHAR(64)  NOT NULL COMMENT '机构名称（展示与新根CA CN用）',
-    subject_o   VARCHAR(128) NOT NULL COMMENT '证书主体O（机构受控，根/子CA DN 的 O 字段，全局唯一）',
-    algorithm   VARCHAR(32)  NOT NULL DEFAULT 'SM2' COMMENT '根CA算法：RSA2048 / SM2（建机构时定，SUB_CA 跟随根）',
+    tenant_key     VARCHAR(32)  NOT NULL COMMENT '租户标识（小写字母数字，如 his1；default=院内默认域/存量单根）',
+    tenant_name    VARCHAR(64)  NOT NULL COMMENT '租户名称（展示与新根CA CN用）',
+    subject_o   VARCHAR(128) NOT NULL COMMENT '证书主体O（租户受控，根/子CA DN 的 O 字段，全局唯一）',
+    algorithm   VARCHAR(32)  NOT NULL DEFAULT 'SM2' COMMENT '根CA算法：RSA2048 / SM2（建租户时定，SUB_CA 跟随根）',
     status      VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE' COMMENT '状态：ACTIVE-启用 SUSPENDED-暂停 CLOSED-关闭',
     contact     VARCHAR(64)  NULL COMMENT '联系人/联系方式',
     description VARCHAR(500) NULL COMMENT '备注',
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_org_key (org_key),
+    UNIQUE KEY uk_tenant_key (tenant_key),
     UNIQUE KEY uk_subject_o (subject_o)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA机构注册表（多根CA域隔离）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA租户注册表（多根CA域隔离）';
 
--- 幂等加列：各业务表归属机构。存量行由 DEFAULT 'default' 自动归位院内默认域；
--- 模板/用户用 NULL 表达"全局"语义（全局模板对所有机构可见、全局管理员不受限）
+-- 幂等加列：各业务表归属租户。存量行由 DEFAULT 'default' 自动归位院内默认域；
+-- 模板/用户用 NULL 表达"全局"语义（全局模板对所有租户可见、全局管理员不受限）
 SET @c10 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'org_key');
-SET @s10 = IF(@c10 = 0, 'ALTER TABLE ssl_ca_cert ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属机构（独立根CA域），default=院内默认域'' AFTER id', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'tenant_key');
+SET @s10 = IF(@c10 = 0, 'ALTER TABLE ssl_ca_cert ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（独立根CA域），default=院内默认域'' AFTER id', 'SELECT 1');
 PREPARE s10 FROM @s10; EXECUTE s10; DEALLOCATE PREPARE s10;
 
 SET @c11 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'org_key');
-SET @s11 = IF(@c11 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理机构（签发落到该机构根域）'' AFTER id', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'tenant_key');
+SET @s11 = IF(@c11 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理租户（签发落到该租户根域）'' AFTER id', 'SELECT 1');
 PREPARE s11 FROM @s11; EXECUTE s11; DEALLOCATE PREPARE s11;
 
 -- 幂等加列：申请单提交人/审核人展示用真实姓名。登录账号仍保留在 applied_by/reviewed_by
@@ -225,46 +225,46 @@ SET @s_name2 = IF(@c_name2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN rev
 PREPARE s_name2 FROM @s_name2; EXECUTE s_name2; DEALLOCATE PREPARE s_name2;
 
 SET @c12 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'org_key');
-SET @s12 = IF(@c12 = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''操作归属机构（全局操作记 default）'' AFTER username', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'tenant_key');
+SET @s12 = IF(@c12 = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''操作归属租户（全局操作记 default）'' AFTER username', 'SELECT 1');
 PREPARE s12 FROM @s12; EXECUTE s12; DEALLOCATE PREPARE s12;
 
 SET @c13 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_template' AND column_name = 'org_key');
-SET @s13 = IF(@c13 = 0, 'ALTER TABLE ssl_cert_template ADD COLUMN org_key VARCHAR(32) NULL COMMENT ''归属机构；NULL=全局模板（所有机构可用）'' AFTER id', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_template' AND column_name = 'tenant_key');
+SET @s13 = IF(@c13 = 0, 'ALTER TABLE ssl_cert_template ADD COLUMN tenant_key VARCHAR(32) NULL COMMENT ''归属租户；NULL=全局模板（所有租户可用）'' AFTER id', 'SELECT 1');
 PREPARE s13 FROM @s13; EXECUTE s13; DEALLOCATE PREPARE s13;
 
 SET @c14 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'org_key');
-SET @s14 = IF(@c14 = 0, 'ALTER TABLE ssl_sys_user ADD COLUMN org_key VARCHAR(32) NULL COMMENT ''归属机构；NULL=全局管理员（跨机构）'' AFTER role_code', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'tenant_key');
+SET @s14 = IF(@c14 = 0, 'ALTER TABLE ssl_sys_user ADD COLUMN tenant_key VARCHAR(32) NULL COMMENT ''归属租户；NULL=全局管理员（跨租户）'' AFTER role_code', 'SELECT 1');
 PREPARE s14 FROM @s14; EXECUTE s14; DEALLOCATE PREPARE s14;
 
 SET @c15 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'org_key');
-SET @s15 = IF(@c15 = 0, 'ALTER TABLE ssl_crl_state ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属机构（每机构独立CRL发布状态行）'' AFTER id', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'tenant_key');
+SET @s15 = IF(@c15 = 0, 'ALTER TABLE ssl_crl_state ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（每租户独立CRL发布状态行）'' AFTER id', 'SELECT 1');
 PREPARE s15 FROM @s15; EXECUTE s15; DEALLOCATE PREPARE s15;
 
--- 幂等加索引：证书按机构过滤（机构化查询主路径）、审计按机构+时间检索
+-- 幂等加索引：证书按租户过滤（租户化查询主路径）、审计按租户+时间检索
 SET @c16 = (SELECT COUNT(*) FROM information_schema.statistics
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_org');
-SET @s16 = IF(@c16 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_org (org_key, status)', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_tenant');
+SET @s16 = IF(@c16 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_tenant (tenant_key, status)', 'SELECT 1');
 PREPARE s16 FROM @s16; EXECUTE s16; DEALLOCATE PREPARE s16;
 
 SET @c17 = (SELECT COUNT(*) FROM information_schema.statistics
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND index_name = 'idx_org_time');
-SET @s17 = IF(@c17 = 0, 'ALTER TABLE ssl_audit_log ADD KEY idx_org_time (org_key, created_at)', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND index_name = 'idx_tenant_time');
+SET @s17 = IF(@c17 = 0, 'ALTER TABLE ssl_audit_log ADD KEY idx_tenant_time (tenant_key, created_at)', 'SELECT 1');
 PREPARE s17 FROM @s17; EXECUTE s17; DEALLOCATE PREPARE s17;
 
--- CRL 发布状态每机构一行：org_key 唯一（并发首建靠唯一索引闭环，代码侧 DuplicateKey 重试兜底）
+-- CRL 发布状态每租户一行：tenant_key 唯一（并发首建靠唯一索引闭环，代码侧 DuplicateKey 重试兜底）
 SET @c18 = (SELECT COUNT(*) FROM information_schema.statistics
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND index_name = 'uk_crl_state_org');
-SET @s18 = IF(@c18 = 0, 'ALTER TABLE ssl_crl_state ADD UNIQUE KEY uk_crl_state_org (org_key)', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND index_name = 'uk_crl_state_tenant');
+SET @s18 = IF(@c18 = 0, 'ALTER TABLE ssl_crl_state ADD UNIQUE KEY uk_crl_state_tenant (tenant_key)', 'SELECT 1');
 PREPARE s18 FROM @s18; EXECUTE s18; DEALLOCATE PREPARE s18;
 
--- 机构域内按序列号检索（OCSP/verify 域内命中）
+-- 租户域内按序列号检索（OCSP/verify 域内命中）
 SET @c19 = (SELECT COUNT(*) FROM information_schema.statistics
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_org_serial');
-SET @s19 = IF(@c19 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_org_serial (org_key, serial_hex)', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_tenant_serial');
+SET @s19 = IF(@c19 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_tenant_serial (tenant_key, serial_hex)', 'SELECT 1');
 PREPARE s19 FROM @s19; EXECUTE s19; DEALLOCATE PREPARE s19;
 
 -- =============================================================================
@@ -297,3 +297,58 @@ CREATE TABLE IF NOT EXISTS ssl_role_perm (
     UNIQUE KEY uk_role_perm (role_code, perm_code),
     KEY idx_perm_code (perm_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色-权限点授权（保存/读取双向与法定上限取交集）';
+
+CREATE TABLE IF NOT EXISTS ssl_key_vault (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    tenant_key     VARCHAR(32)  NOT NULL COMMENT '租户域（default=存量单根保险库；其他=租户独立保险库，主密钥亦独立）',
+    rel_dir     VARCHAR(128) NOT NULL COMMENT '保险库相对目录（root/subca/tsa/audit-sign/issued/{serial}），沿用原文件路径语义',
+    name        VARCHAR(64)  NOT NULL COMMENT '密钥名（key/pub）',
+    cipher_hex  TEXT         NOT NULL COMMENT 'SM4 加密后的私钥 PEM（hex 密文）；主密钥（KEK）不入库，走 SSL_MASTER_KEY 或 master.key 文件',
+    sealed      TINYINT      NOT NULL DEFAULT 0 COMMENT '1-已封存离线（对应原 .sealed 文件态） 0-在线',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_vault_entry (tenant_key, rel_dir, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='密钥保险库（私钥 SM4 密文落库，替代原 key.pem.enc 文件形态）';
+
+-- 证书操作审批单（吊销/挂起/解除挂起/证书更新/密钥更新 双人复核：发起→他人审批→批准即执行，GM/T 0034 §10.1g 分权制衡；
+-- 直接执行通道已拆除，系统管理员同样只能走单）
+CREATE TABLE IF NOT EXISTS ssl_cert_op_ticket (
+    id               BIGINT       NOT NULL AUTO_INCREMENT,
+    tenant_key       VARCHAR(32)  NULL COMMENT '受理租户（NULL=存量单根域历史证书的操作单）',
+    op_no            VARCHAR(32)  NOT NULL COMMENT '操作单号（CO+时间戳+随机，同申请单号规则）',
+    op_type          VARCHAR(16)  NOT NULL COMMENT '操作类型：REVOKE-吊销 SUSPEND-挂起 UNSUSPEND-解除挂起 RENEW-证书更新 REKEY-密钥更新',
+    cert_id          BIGINT       NOT NULL COMMENT '目标证书ID',
+    cert_serial_hex  VARCHAR(64)  NOT NULL COMMENT '目标证书序列号（发起时快照，列表检索用）',
+    cert_subject_cn  VARCHAR(255) NOT NULL COMMENT '目标证书主体CN（发起时快照）',
+    reason            VARCHAR(255) NULL COMMENT '操作原因（RFC 5280 吊销/挂起原因码；解除挂起无需）',
+    validity_days     INT          NULL COMMENT '新有效期天数（RENEW/REKEY 操作单专用，批准后按此天数重签）',
+    status           VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING-待审批 EXECUTED-已执行 REJECTED-已驳回 CANCELLED-已撤销',
+    requested_by     VARCHAR(64)  NOT NULL COMMENT '发起人账号',
+    requested_by_name VARCHAR(64) NULL COMMENT '发起人真实姓名（登录账号见 requested_by）',
+    requested_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发起时间',
+    reviewed_by      VARCHAR(64)  NULL COMMENT '审批人账号（不得与发起人同一人）',
+    reviewed_by_name VARCHAR(64)  NULL COMMENT '审批人真实姓名',
+    reviewed_at      DATETIME     NULL COMMENT '审批时间',
+    review_comment   VARCHAR(500) NULL COMMENT '审批意见（驳回必填）',
+    executed_at      DATETIME     NULL COMMENT '实际执行进 CRL/OCSP 的时间（批准即执行，同事务）',
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_op_no (op_no),
+    KEY idx_cert (cert_id),
+    KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='证书操作审批单（吊销/挂起/更新/重签双人复核）';
+
+-- 幂等补列（存量库升级：validity_days 为 RENEW/REKEY 操作单专用）
+SET @col_exists := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_op_ticket' AND COLUMN_NAME = 'validity_days');
+SET @ddl := IF(@col_exists = 0,
+    'ALTER TABLE ssl_cert_op_ticket ADD COLUMN validity_days INT NULL COMMENT ''新有效期天数（RENEW/REKEY 操作单专用，批准后按此天数重签）'' AFTER reason',
+    'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 幂等播种：cert:op:approve 权限点（DataInitializer 对已存在角色只修剪不补授，新权限需 DDL 显式播种；
+-- 审批权给审核员（法定上限）——是否可批仍由「不得与发起人同一人」硬校验把关；
+-- ADMIN 已收口为档案/只读 21 项白名单，不含审批权）
+INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
+    ('APPROVER', 'cert:op:approve');

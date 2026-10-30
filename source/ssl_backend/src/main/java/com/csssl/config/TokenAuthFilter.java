@@ -90,12 +90,12 @@ public class TokenAuthFilter extends OncePerRequestFilter {
         List<String> permCodes = permissionService.effectiveList(user.getRoleCode());
         // HIS 同款：把"当前登录人"整体装进 SecurityContextHolder（身份载体 LoginUser 实现 UserDetails），
         // 业务侧用 UserUtils.getLoginUser() 取；该身份由签名校验+回库后写入，前端无法伪造。
-        // 真实姓名取自令牌快照（登录时写入）；角色与机构数据域以库中当前值为准。
+        // 真实姓名取自令牌快照（登录时写入）；角色与租户数据域以库中当前值为准。
         LoginUser loginUser = new LoginUser(
                 user.getUsername(),
                 claims.realName(),
                 user.getRoleCode(),
-                user.getOrgKey(),
+                user.getTenantKey(),
                 role != null && role.getBuiltin() != null && role.getBuiltin() == 1,
                 permCodes);
         // getAuthorities() 已含 ROLE_<role> + 各权限点，既支持 hasAuthority 也支持未来 hasRole

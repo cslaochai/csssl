@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 证书申请单分页查询（status 精确、keyword 命中姓名/主体DN/申请编号、orgKey 域过滤）。
+ * 证书申请单分页查询（status 精确、keyword 命中姓名/主体DN/申请编号、tenantKey 域过滤）。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -22,7 +22,7 @@ public class ApplicationPageQueryDTO extends PageParam {
     private String keyword;
 
     /**
-     * 机构数据域过滤
+     * 租户数据域过滤
      */
-    private String orgKey;
+    private String tenantKey;
 }

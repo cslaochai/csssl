@@ -1,10 +1,10 @@
 import request from './request'
-import { currentOrg } from '@/lib/org'
+import { currentTenant } from '@/lib/tenant'
 
 /**
  * CSSSL · CA根认证中心 API 封装（与后端 /ssl context-path 对齐）。
- * 多机构（路线A）：/admin 全域业务接口的机构域参数由 request 拦截器按 currentOrg() 自动附加；
- * 根CA/CRL 等按域操作在本文件中显式带 orgKey（缺省取当前域）。
+ * 多租户（路线A）：/admin 全域业务接口的租户域参数由 request 拦截器按 currentTenant() 自动附加；
+ * 根CA/CRL 等按域操作在本文件中显式带 tenantKey（缺省取当前域）。
  */
 
 // ===== 登录鉴权 =====
@@ -22,79 +22,88 @@ export function changePassword(data) {
   return request.post('/auth/changePassword', data)
 }
 
-// ===== 机构管理（多机构域，仅全局 ADMIN） =====
-export function listOrgs() {
-  return request.get('/admin/orgs')
+// ===== 租户管理（多租户域，仅全局 ADMIN） =====
+export function listTenants() {
+  return request.get('/admin/tenants')
 }
-/** 机构分页查询：{pageNo,pageSize,keyword,status}（keyword 命中 标识/名称/主体O） */
-export function pageOrgs(params) {
-  return request.get('/admin/orgs/page', { params })
+/** 租户分页查询：{pageNo,pageSize,keyword,status}（keyword 命中 标识/名称/主体O） */
+export function pageTenants(params) {
+  return request.get('/admin/tenants/page', { params })
 }
-export function getOrg(orgKey) {
-  return request.get(`/admin/orgs/${orgKey}`)
+export function getTenant(tenantKey) {
+  return request.get(`/admin/tenants/${tenantKey}`)
 }
-/** 创建即生成该机构独立根CA+SUB_CA，可能耗时数秒 */
-export function createOrg(data) {
-  return request.post('/admin/orgs', data)
+/** 创建即生成该租户独立根CA+SUB_CA，可能耗时数秒 */
+export function createTenant(data) {
+  return request.post('/admin/tenants', data)
 }
-export function suspendOrg(orgKey) {
-  return request.post(`/admin/orgs/${orgKey}/suspend`)
+export function suspendTenant(tenantKey) {
+  return request.post(`/admin/tenants/${tenantKey}/suspend`)
 }
-export function resumeOrg(orgKey) {
-  return request.post(`/admin/orgs/${orgKey}/resume`)
+export function resumeTenant(tenantKey) {
+  return request.post(`/admin/tenants/${tenantKey}/resume`)
 }
-export function closeOrg(orgKey) {
-  return request.post(`/admin/orgs/${orgKey}/close`)
+export function closeTenant(tenantKey) {
+  return request.post(`/admin/tenants/${tenantKey}/close`)
 }
 
-/** 机构列表模块级缓存（顶栏/各页机构下拉共用；失败返回空数组不阻断页面） */
-let orgsCache = null
-export async function listOrgsCached(force = false) {
-  if (orgsCache && !force) return orgsCache
+/** 租户列表模块级缓存（顶栏/各页租户下拉共用；失败返回空数组不阻断页面） */
+let tenantsCache = null
+export async function listTenantsCached(force = false) {
+  if (tenantsCache && !force) return tenantsCache
   try {
-    const res = await listOrgs()
+    const res = await listTenants()
     const d = res.data
-    orgsCache = Array.isArray(d) ? d : d?.records || []
-    // 顶栏机构下拉常驻 Layout，缓存刷新后广播，避免新增/停用机构后要整页刷新才可见
-    window.dispatchEvent(new Event('orgs-updated'))
+    tenantsCache = Array.isArray(d) ? d : d?.records || []
+    // 顶栏租户下拉常驻 Layout，缓存刷新后广播，避免新增/停用租户后要整页刷新才可见
+    window.dispatchEvent(new Event('tenants-updated'))
   } catch (e) {
-    orgsCache = orgsCache || []
+    tenantsCache = tenantsCache || []
   }
-  return orgsCache
+  return tenantsCache
 }
 
-// ===== 根CA（按机构域） =====
-export function getCaStatus(orgKey = currentOrg()) {
-  return request.get('/admin/ca/status', { params: { orgKey } })
-}
-export function initCa(orgKey = currentOrg()) {
-  return request.post('/admin/ca/init', { orgKey })
-}
-export function downloadRootCert(orgKey = currentOrg()) {
-  return request.get('/admin/ca/root/download', { params: { orgKey } })
-}
-export function sealRootKey(orgKey = currentOrg()) {
-  return request.post('/admin/ca/seal', { orgKey })
-}
-export function unsealRootKey(orgKey = currentOrg()) {
-  return request.post('/admin/ca/unseal', { orgKey })
-}
-export function downloadSubCaCert(orgKey = currentOrg()) {
-  return request.get('/admin/ca/subca/download', { params: { orgKey } })
+/** 租户标识→中文名映射（缓存清单）：界面展示一律中文名优先，未命中回落标识 */
+export async function tenantNameMap() {
+  const map = {}
+  for (const t of await listTenantsCached()) {
+    if (t.tenantKey) map[t.tenantKey] = t.tenantName || t.tenantKey
+  }
+  return map
 }
 
-// ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN；按机构域） =====
-export function getCaShares(orgKey = currentOrg()) {
-  return request.get('/admin/ca/shares', { params: { orgKey } })
+// ===== 根CA（按租户域） =====
+export function getCaStatus(tenantKey = currentTenant()) {
+  return request.get('/admin/ca/status', { params: { tenantKey } })
 }
-export function migrateCaShares(orgKey = currentOrg()) {
-  return request.post('/admin/ca/shares/migrate', { orgKey })
+export function initCa(tenantKey = currentTenant()) {
+  return request.post('/admin/ca/init', { tenantKey })
 }
-export function downloadCaShare(index, orgKey = currentOrg()) {
-  return request.get(`/admin/ca/shares/${index}`, { params: { orgKey } })
+export function downloadRootCert(tenantKey = currentTenant()) {
+  return request.get('/admin/ca/root/download', { params: { tenantKey } })
 }
-export function unsealCaShares(shares, orgKey = currentOrg()) {
-  return request.post('/admin/ca/unseal-shares', { shares, orgKey })
+export function sealRootKey(tenantKey = currentTenant()) {
+  return request.post('/admin/ca/seal', { tenantKey })
+}
+export function unsealRootKey(tenantKey = currentTenant()) {
+  return request.post('/admin/ca/unseal', { tenantKey })
+}
+export function downloadSubCaCert(tenantKey = currentTenant()) {
+  return request.get('/admin/ca/subca/download', { params: { tenantKey } })
+}
+
+// ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN；按租户域） =====
+export function getCaShares(tenantKey = currentTenant()) {
+  return request.get('/admin/ca/shares', { params: { tenantKey } })
+}
+export function migrateCaShares(tenantKey = currentTenant()) {
+  return request.post('/admin/ca/shares/migrate', { tenantKey })
+}
+export function downloadCaShare(index, tenantKey = currentTenant()) {
+  return request.get(`/admin/ca/shares/${index}`, { params: { tenantKey } })
+}
+export function unsealCaShares(shares, tenantKey = currentTenant()) {
+  return request.post('/admin/ca/unseal-shares', { shares, tenantKey })
 }
 
 // ===== 证书管理 =====
@@ -114,34 +123,31 @@ export function issueCertByCsr(data) {
 export function issueCertByPublicKey(data) {
   return request.post('/admin/certs/public-key', data)
 }
-export function revokeCert(id, reason) {
-  return request.post(`/admin/certs/${id}/revoke`, { reason })
-}
 export function downloadCertPem(id) {
   return request.get(`/admin/certs/${id}/cert.pem`)
 }
 export function downloadKeyPem(id) {
   return request.get(`/admin/certs/${id}/key.pem`)
 }
-/** 证书概览（按机构域）；全局用户可传指定域，机构用户由后端锁本域 */
-export function getOverview(orgKey = currentOrg()) {
-  return request.get('/admin/overview', { params: { orgKey } })
+/** 证书概览（按租户域）；全局用户可传指定域，租户用户由后端锁本域 */
+export function getOverview(tenantKey = currentTenant()) {
+  return request.get('/admin/overview', { params: { tenantKey } })
 }
 
-// ===== CRL 吊销列表（按机构域） =====
-export function getCrlView(orgKey = currentOrg()) {
-  return request.get('/admin/crl', { params: { orgKey } })
+// ===== CRL 吊销列表（按租户域） =====
+export function getCrlView(tenantKey = currentTenant()) {
+  return request.get('/admin/crl', { params: { tenantKey } })
 }
-/** 吊销记录分页查询：{pageNo,pageSize,keyword,status,reason}（orgKey 由请求层自动注入） */
+/** 吊销记录分页查询：{pageNo,pageSize,keyword,status,reason}（tenantKey 由请求层自动注入） */
 export function pageCrlRecords(params) {
   return request.get('/admin/crl/records', { params })
 }
-export function downloadCrl(orgKey = currentOrg()) {
-  return request.get('/admin/crl/download', { params: { orgKey } })
+export function downloadCrl(tenantKey = currentTenant()) {
+  return request.get('/admin/crl/download', { params: { tenantKey } })
 }
 /** 增量 CRL（dCRL）：{deltaPem, thisUpdate, nextUpdate, entryCount, crlNumber, baseCrlNumber} */
-export function getDeltaCrl(orgKey = currentOrg()) {
-  return request.get('/admin/crl/delta', { params: { orgKey } })
+export function getDeltaCrl(tenantKey = currentTenant()) {
+  return request.get('/admin/crl/delta', { params: { tenantKey } })
 }
 
 // ===== 审计日志 =====
@@ -228,18 +234,21 @@ export function cancelApplication(id) {
   return request.post(`/admin/applications/${id}/cancel`)
 }
 
-// ===== 证书生命周期扩展（GM/T 0034 §12.6/12.7/12.2） =====
-export function suspendCert(id, reason) {
-  return request.post(`/admin/certs/${id}/suspend`, { reason })
+// ===== 证书操作审批单（吊销/挂起/解除挂起双人复核，批准即执行进 CRL） =====
+export function submitCertOp(data) {
+  return request.post('/admin/cert-ops', data)
 }
-export function unsuspendCert(id) {
-  return request.post(`/admin/certs/${id}/unsuspend`)
+export function pageCertOps(params) {
+  return request.get('/admin/cert-ops', { params })
 }
-export function renewCert(id, validityDays) {
-  return request.post(`/admin/certs/${id}/renew`, { validityDays })
+export function approveCertOp(id, comment) {
+  return request.post(`/admin/cert-ops/${id}/approve`, { comment })
 }
-export function rekeyCert(id, validityDays) {
-  return request.post(`/admin/certs/${id}/rekey`, { validityDays })
+export function rejectCertOp(id, comment) {
+  return request.post(`/admin/cert-ops/${id}/reject`, { comment })
+}
+export function cancelCertOp(id) {
+  return request.post(`/admin/cert-ops/${id}/cancel`)
 }
 
 // ===== 导出（PKCS#12 软件证书 / 审计归档 CSV） =====
@@ -256,8 +265,8 @@ export function getTsaPublicKey() {
   return request.get('/tsa/publicKey')
 }
 
-// ===== 公开验证端点（按机构域，无需登录） =====
-/** 证书在线验证三态：POST /ca/public/{orgKey}/verify，body {certPem, purpose} */
-export function verifyCertPublic(orgKey, data) {
-  return request.post(`/ca/public/${orgKey}/verify`, data)
+// ===== 公开验证端点（按租户域，无需登录） =====
+/** 证书在线验证三态：POST /ca/public/{tenantKey}/verify，body {certPem, purpose} */
+export function verifyCertPublic(tenantKey, data) {
+  return request.post(`/ca/public/${tenantKey}/verify`, data)
 }

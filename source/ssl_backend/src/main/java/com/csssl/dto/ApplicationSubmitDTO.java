@@ -5,30 +5,30 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 /**
- * 提交证书申请请求（录入员代录；身份材料由受理机构留存，平台只收主体与公钥）。
+ * 提交证书申请请求（录入员代录；身份材料由受理租户留存，平台只收主体与公钥）。
  */
 @Data
 public class ApplicationSubmitDTO {
 
     /**
-     * 受理机构（缺省走 ?orgKey= / 登录域归一）
+     * 受理租户（缺省走 ?tenantKey= / 登录域归一）
      */
-    private String orgKey;
+    private String tenantKey;
 
     /**
-     * 申请人类别：INSTITUTION-机构 / PERSON-个人
+     * 申请人类别（证书主体类型）：INSTITUTION-单位（系统/法人等非个人主体） / PERSON-个人（自然人）；与租户租户域无关
      */
     @NotBlank(message = "申请人类别不能为空")
     private String applicantType;
 
     /**
-     * 申请人/机构名称
+     * 申请人/租户名称
      */
-    @NotBlank(message = "参数 applicantName 不能为空（申请人/机构名称）")
+    @NotBlank(message = "参数 applicantName 不能为空（申请人/租户名称）")
     private String applicantName;
 
     /**
-     * 主体DN（如 CN=张三,O=麓康医院,OU=门诊部）
+     * 主体DN（如 CN=张三,O=麓康医院）；只放姓名/租户等稳定身份，科室等易变属性不进 DN
      */
     @NotBlank(message = "参数 subjectDn 不能为空（主体DN）")
     private String subjectDn;

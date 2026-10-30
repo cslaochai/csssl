@@ -8,7 +8,7 @@ import com.csssl.dto.TemplateUpdateDTO;
 import com.csssl.entity.CertTemplate;
 import com.csssl.entity.LoginUser;
 import com.csssl.service.CertTemplateService;
-import com.csssl.util.OrgScope;
+import com.csssl.util.TenantScope;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -25,10 +25,10 @@ import org.springframework.web.bind.annotation.RestController;
  * 证书模板接口（GM/T 0034 §5.3.4）：查询需登录，增删改仅安全管理员/系统管理员
  * （证书策略管理职责从 OPERATOR 剥离，对应预置角色中的安全管理员）。
  *
- * <p>路线A数据域：列表/详情按可见集过滤（全局模板 org_key NULL + 本机构模板）；
- * 机构 SECURITY_ADMIN 创建/修改/删除仅限本机构模板；全局 ADMIN/SECURITY_ADMIN 可管全局模板
- * 与各机构模板——模板域用 ?orgKey=（或 body.orgKey）指定，建全局模板 orgKey 传空=全局；
- * 机构用户显式请求别机构域=403（effectiveOrg 口径）。</p>
+ * <p>路线A数据域：列表/详情按可见集过滤（全局模板 tenant_key NULL + 本租户模板）；
+ * 租户 SECURITY_ADMIN 创建/修改/删除仅限本租户模板；全局 ADMIN/SECURITY_ADMIN 可管全局模板
+ * 与各租户模板——模板域用 ?tenantKey=（或 body.tenantKey）指定，建全局模板 tenantKey 传空=全局；
+ * 租户用户显式请求别租户域=403（effectiveTenant 口径）。</p>
  */
 @RestController
 @RequestMapping("/admin/templates")
@@ -37,38 +37,38 @@ public class CertTemplateController {
 
     private final CertTemplateService templateService;
 
-    /** 模板列表（分页 + 关键字；机构用户=全局+本机构可见集，全局用户 orgKey 缺省=全量总览） */
+    /** 模板列表（分页 + 关键字；租户用户=全局+本租户可见集，全局用户 tenantKey 缺省=全量总览） */
     @GetMapping
     public Result<Page<CertTemplate>> page(@Valid TemplatePageQueryDTO query,
                                            HttpServletRequest request) {
         return Result.success("查询成功", templateService.page(query.getPageNo(), query.getPageSize(), query.getKeyword(),
-                OrgScope.readOrgScope(UserUtils.requireLoginUser().getOrgKey(), query.getOrgKey())));
+                TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantKey(), query.getTenantKey())));
     }
 
-    /** 模板详情（按可见集过滤：机构用户访问他机构模板按不存在处理） */
+    /** 模板详情（按可见集过滤：租户用户访问他租户模板按不存在处理） */
     @GetMapping("/{id}")
     public Result<CertTemplate> detail(@PathVariable Long id, HttpServletRequest request) {
-        return Result.success("查询成功", templateService.detailVisible(id, UserUtils.requireLoginUser().getOrgKey()));
+        return Result.success("查询成功", templateService.detailVisible(id, UserUtils.requireLoginUser().getTenantKey()));
     }
 
     /**
      * 创建模板（仅安全管理员/系统管理员；变更落审计）。
-     * 全局操作者：body.orgKey 空=建全局模板，非空=为指定机构建模板；机构操作者：锁本机构，越域 403。
+     * 全局操作者：body.tenantKey 空=建全局模板，非空=为指定租户建模板；租户操作者：锁本租户，越域 403。
      */
     @PreAuthorize("hasAuthority('template:create')")
     @PostMapping
     public Result<CertTemplate> create(@Valid @RequestBody TemplateCreateDTO body, HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String myOrg = loginUser.getOrgKey();
-        String reqOrg = body.getOrgKey();
-        String tplOrg = myOrg != null && !myOrg.isBlank()
-                ? OrgScope.effectiveOrg(myOrg, reqOrg)
-                : (reqOrg == null || reqOrg.isBlank() ? null : reqOrg.trim());
+        String myTenant = loginUser.getTenantKey();
+        String reqTenant = body.getTenantKey();
+        String tplTenant = myTenant != null && !myTenant.isBlank()
+                ? TenantScope.effectiveTenant(myTenant, reqTenant)
+                : (reqTenant == null || reqTenant.isBlank() ? null : reqTenant.trim());
         return Result.success("模板创建成功",
-                templateService.create(body, loginUser.getUsername(), clientIp(request), tplOrg, myOrg));
+                templateService.create(body, loginUser.getUsername(), clientIp(request), tplTenant, myTenant));
     }
 
-    /** 更新模板（仅安全管理员/系统管理员；变更落审计；机构操作者仅限本机构模板） */
+    /** 更新模板（仅安全管理员/系统管理员；变更落审计；租户操作者仅限本租户模板） */
     @PreAuthorize("hasAuthority('template:update')")
     @PostMapping("/{id}")
     public Result<CertTemplate> update(@PathVariable Long id, @Valid @RequestBody TemplateUpdateDTO body,
@@ -76,16 +76,16 @@ public class CertTemplateController {
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("模板更新成功",
                 templateService.update(id, body, loginUser.getUsername(), clientIp(request),
-                        loginUser.getOrgKey()));
+                        loginUser.getTenantKey()));
     }
 
-    /** 删除模板（仅安全管理员/系统管理员；内置模板不可删；变更落审计；机构操作者仅限本机构模板） */
+    /** 删除模板（仅安全管理员/系统管理员；内置模板不可删；变更落审计；租户操作者仅限本租户模板） */
     @PreAuthorize("hasAuthority('template:delete')")
     @PostMapping("/{id}/delete")
     public Result<Void> delete(@PathVariable Long id, HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         templateService.delete(id, loginUser.getUsername(), clientIp(request),
-                loginUser.getOrgKey());
+                loginUser.getTenantKey());
         return Result.success("模板已删除", null);
     }
 
