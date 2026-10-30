@@ -11,9 +11,13 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class AuditPageQueryDTODTO extends PageParam {
 
-    /** 操作类型精确过滤 */
+    /**
+     * 操作类型精确过滤
+     */
     private String action;
 
-    /** 机构数据域过滤 */
+    /**
+     * 机构数据域过滤
+     */
     private String orgKey;
 }

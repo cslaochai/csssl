@@ -10,12 +10,12 @@ import com.csssl.dto.ChainVerifyQueryDTO;
 import com.csssl.vo.ChainVerifyVO;
 import com.csssl.entity.AuditLog;
 import com.csssl.service.AuditService;
-import com.csssl.service.PermissionService;
-import com.csssl.util.PermissionCatalog;
-import com.csssl.util.RoleCode;
+import com.csssl.util.OrgScope;
+import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -39,29 +39,28 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuditController {
 
     private final AuditService auditService;
-    private final PermissionService permissionService;
 
     /** 审计日志分页查询（仅审计员；机构用户强制本机构，全局用户 orgKey 缺省=全量只读） */
+    @PreAuthorize("hasAuthority('audit:view')")
     @GetMapping
     public Result<Page<AuditLog>> page(@Valid AuditPageQueryDTODTO query, HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.AUDIT_VIEW);
         return Result.success("查询成功", auditService.page(query.getPageNo(), query.getPageSize(), query.getAction(),
-                RoleCode.readOrgScope(request, query.getOrgKey())));
+                OrgScope.readOrgScope(UserUtils.requireLoginUser().getOrgKey(), query.getOrgKey())));
     }
 
     /**
      * 验签：校验某条审计记录未被篡改（改动任何字段都会失败；仅审计员）。
      * 机构用户仅可验本机构记录（行级数据域校验，越域 403）；全局用户跨机构放行（只读监督职能）。
      */
+    @PreAuthorize("hasAuthority('audit:verify')")
     @PostMapping("/verify")
     public Result<AuditVerifyVO> verify(@Valid @RequestBody AuditVerifyDTO body, HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.AUDIT_VERIFY);
         Long id = body.getId();
         if (id == null) {
             throw new IllegalArgumentException("参数 id 不能为空");
         }
         AuditLog row = auditService.load(id);
-        RoleCode.requireRowVisible(request, AuditService.orgOf(row));
+        OrgScope.requireRowVisible(UserUtils.requireLoginUser().getOrgKey(), AuditService.orgOf(row));
         return Result.success("验签完成", auditService.verifyLog(id));
     }
 
@@ -69,11 +68,11 @@ public class AuditController {
      * 审计归档导出（≥5年留存材料）：CSV（UTF-8 BOM）+ 审计报告 SM2 签名，归档文件完整性可验签（仅审计员）。
      * 机构用户强制导出本机构；全局用户 orgKey 缺省=跨机构全量导出（只读放行，合规设计）。
      */
+    @PreAuthorize("hasAuthority('audit:export')")
     @GetMapping("/export")
     public Result<AuditExportVO> export(@RequestParam(required = false) String orgKey,
                                         HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.AUDIT_EXPORT);
-        return Result.success("导出完成", auditService.exportCsv(RoleCode.readOrgScope(request, orgKey)));
+        return Result.success("导出完成", auditService.exportCsv(OrgScope.readOrgScope(UserUtils.requireLoginUser().getOrgKey(), orgKey)));
     }
 
     /**
@@ -84,10 +83,10 @@ public class AuditController {
      * 链构造与对账都不按机构分段——分段会把跨机构相邻行的 prev 引用误判断链，反而不可审计。
      * 机构数据域过滤只作用于"查"（分页/验签/导出），对账结果仅暴露断链 id 与原因，不含记录内容。</p>
      */
+    @PreAuthorize("hasAuthority('audit:chain')")
     @GetMapping("/chain-verify")
     public Result<ChainVerifyVO> chainVerify(@Valid ChainVerifyQueryDTO query,
                                              HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.AUDIT_CHAIN);
         return Result.success("链对账完成", auditService.verifyChain(query.getFromId(), query.getToId()));
     }
 }

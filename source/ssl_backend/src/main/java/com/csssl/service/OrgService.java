@@ -4,11 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
-import com.csssl.vo.CaStatusVO;
-import com.csssl.vo.OrgVO;
 import com.csssl.entity.CaOrg;
 import com.csssl.mapper.CaOrgMapper;
 import com.csssl.util.CertUtil;
+import com.csssl.vo.CaStatusVO;
+import com.csssl.vo.OrgVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,18 +29,20 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class OrgService {
 
-    /** 机构标识格式：小写字母数字（同时兜住路径穿越——orgKey 直接参与 store-dir/orgs/{orgKey} 拼路） */
-    private static final Pattern ORG_KEY = Pattern.compile("^[a-z0-9]{1,32}$");
-
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_SUSPENDED = "SUSPENDED";
     public static final String STATUS_CLOSED = "CLOSED";
-
+    /**
+     * 机构标识格式：小写字母数字（同时兜住路径穿越——orgKey 直接参与 store-dir/orgs/{orgKey} 拼路）
+     */
+    private static final Pattern ORG_KEY = Pattern.compile("^[a-z0-9]{1,32}$");
     private final CaOrgMapper orgMapper;
     private final CaService caService;
     private final CssslProperties props;
 
-    /** 机构列表（含各机构根CA根状态摘要，管理页一屏看全根池拓扑） */
+    /**
+     * 机构列表（含各机构根CA根状态摘要，管理页一屏看全根池拓扑）
+     */
     public List<OrgVO> overview() {
         List<OrgVO> rows = new ArrayList<>();
         for (CaOrg org : list()) {
@@ -49,7 +51,9 @@ public class OrgService {
         return rows;
     }
 
-    /** 机构分页查询（管理页：关键字命中 标识/名称/主体O，状态精确匹配；根状态仅对当前页计算） */
+    /**
+     * 机构分页查询（管理页：关键字命中 标识/名称/主体O，状态精确匹配；根状态仅对当前页计算）
+     */
     public Page<OrgVO> page(String keyword, String status, long pageNo, long pageSize) {
         LambdaQueryWrapper<CaOrg> qw = new LambdaQueryWrapper<>();
         if (status != null && !status.isBlank()) {
@@ -64,7 +68,9 @@ public class OrgService {
         return (Page<OrgVO>) page.convert(this::buildRow);
     }
 
-    /** 单机构状态摘要（详情/创建回执用） */
+    /**
+     * 单机构状态摘要（详情/创建回执用）
+     */
     public OrgVO overviewOf(String orgKey) {
         return buildRow(get(orgKey));
     }
@@ -94,18 +100,24 @@ public class OrgService {
         return vo;
     }
 
-    /** 机构原始记录列表 */
+    /**
+     * 机构原始记录列表
+     */
     public List<CaOrg> list() {
         return orgMapper.selectList(new LambdaQueryWrapper<CaOrg>().orderByAsc(CaOrg::getId));
     }
 
-    /** 按 orgKey 查询（不存在返回 null） */
+    /**
+     * 按 orgKey 查询（不存在返回 null）
+     */
     public CaOrg findByKey(String orgKey) {
         KeyVaultConfig.OrgVaultResolver.checkOrgKey(orgKey);
         return orgMapper.selectOne(new LambdaQueryWrapper<CaOrg>().eq(CaOrg::getOrgKey, orgKey));
     }
 
-    /** 按 orgKey 查询（不存在抛异常） */
+    /**
+     * 按 orgKey 查询（不存在抛异常）
+     */
     public CaOrg get(String orgKey) {
         CaOrg org = findByKey(orgKey);
         if (org == null) {
@@ -114,7 +126,9 @@ public class OrgService {
         return org;
     }
 
-    /** 校验机构存在且 ACTIVE（根CA管理写操作前置；default 域存量语义不受机构表约束） */
+    /**
+     * 校验机构存在且 ACTIVE（根CA管理写操作前置；default 域存量语义不受机构表约束）
+     */
     public void requireActive(String orgKey) {
         CaOrg org = get(orgKey);
         if (!STATUS_ACTIVE.equals(org.getStatus())) {
@@ -173,17 +187,23 @@ public class OrgService {
         return org;
     }
 
-    /** 暂停机构（ACTIVE → SUSPENDED） */
+    /**
+     * 暂停机构（ACTIVE → SUSPENDED）
+     */
     public CaOrg suspend(String orgKey) {
         return updateStatus(orgKey, STATUS_SUSPENDED, List.of(STATUS_ACTIVE));
     }
 
-    /** 恢复机构（SUSPENDED → ACTIVE） */
+    /**
+     * 恢复机构（SUSPENDED → ACTIVE）
+     */
     public CaOrg resume(String orgKey) {
         return updateStatus(orgKey, STATUS_ACTIVE, List.of(STATUS_SUSPENDED));
     }
 
-    /** 关闭机构（SUSPENDED → CLOSED；CLOSED 为终态，密钥清理由后续波次处置） */
+    /**
+     * 关闭机构（SUSPENDED → CLOSED；CLOSED 为终态，密钥清理由后续波次处置）
+     */
     public CaOrg close(String orgKey) {
         return updateStatus(orgKey, STATUS_CLOSED, List.of(STATUS_ACTIVE, STATUS_SUSPENDED));
     }

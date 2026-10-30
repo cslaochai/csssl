@@ -9,11 +9,15 @@ import lombok.Data;
 @Data
 public class LoginDTO {
 
-    /** 登录账号 */
+    /**
+     * 登录账号
+     */
     @NotBlank(message = "用户名不能为空")
     private String username;
 
-    /** 口令密文：前端 sm-crypto 加密后的十六进制（不带 04 前缀，C1C3C2 模式） */
+    /**
+     * 口令密文：前端 sm-crypto 加密后的十六进制（不带 04 前缀，C1C3C2 模式）
+     */
     @NotBlank(message = "登录密码不能为空")
     private String passwordCipher;
 }

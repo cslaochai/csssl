@@ -10,16 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
-import org.bouncycastle.cert.ocsp.BasicOCSPResp;
-import org.bouncycastle.cert.ocsp.BasicOCSPRespBuilder;
-import org.bouncycastle.cert.ocsp.CertificateID;
-import org.bouncycastle.cert.ocsp.CertificateStatus;
-import org.bouncycastle.cert.ocsp.OCSPReq;
-import org.bouncycastle.cert.ocsp.OCSPResp;
-import org.bouncycastle.cert.ocsp.OCSPRespBuilder;
-import org.bouncycastle.cert.ocsp.Req;
-import org.bouncycastle.cert.ocsp.RevokedStatus;
-import org.bouncycastle.cert.ocsp.UnknownStatus;
+import org.bouncycastle.cert.ocsp.*;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
@@ -53,12 +44,16 @@ public class OcspService {
     private final CaService caService;
     private final CssslProperties props;
 
-    /** 响应 OCSP 请求（DER 输入 → DER 输出，兼容入口=default 机构域） */
+    /**
+     * 响应 OCSP 请求（DER 输入 → DER 输出，兼容入口=default 机构域）
+     */
     public byte[] respond(byte[] requestDer) {
         return respond(CaOrg.PRIMARY_ORG_KEY, requestDer);
     }
 
-    /** 机构域 responder：按 orgKey 定位机构域查询吊销状态，用该机构 SUB_CA 密钥签响应 */
+    /**
+     * 机构域 responder：按 orgKey 定位机构域查询吊销状态，用该机构 SUB_CA 密钥签响应
+     */
     public byte[] respond(String orgKey, byte[] requestDer) {
         try {
             OCSPReq req = new OCSPReq(requestDer);

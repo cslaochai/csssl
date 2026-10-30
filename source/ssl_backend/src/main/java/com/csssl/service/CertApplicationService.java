@@ -4,12 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.dto.ApplicationSubmitDTO;
 import com.csssl.dto.PublicKeyIssueDTO;
-import com.csssl.vo.CertVO;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.CertTemplate;
+import com.csssl.enums.RoleCodeEnum;
 import com.csssl.mapper.CertApplicationMapper;
-import com.csssl.util.RoleCode;
+import com.csssl.util.OrgScope;
+import com.csssl.vo.CertVO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -56,12 +57,27 @@ public class CertApplicationService {
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
-    /** 分页查询申请单（兼容入口=跨机构全量，仅全局用户经控制器到达） */
+    /**
+     * 数据域强制：申请单归属机构必须等于操作者有效域（机构用户越域 403；全局用户须显式传对 orgKey）
+     */
+    private static void requireOrgMatch(CertApplication app, String effOrg) {
+        String appOrg = app.getOrgKey() == null || app.getOrgKey().isBlank()
+                ? CaOrg.PRIMARY_ORG_KEY : app.getOrgKey();
+        if (!appOrg.equals(effOrg)) {
+            throw new SecurityException("权限不足：申请单归属机构 " + appOrg + "，与当前操作域 " + effOrg + " 不一致");
+        }
+    }
+
+    /**
+     * 分页查询申请单（兼容入口=跨机构全量，仅全局用户经控制器到达）
+     */
     public Page<CertApplication> page(long pageNo, long pageSize, String status, String keyword) {
         return page(pageNo, pageSize, status, keyword, null);
     }
 
-    /** 分页查询申请单（机构域版：orgScope 非空=仅该机构；null=全量只读，由控制器按数据域收敛） */
+    /**
+     * 分页查询申请单（机构域版：orgScope 非空=仅该机构；null=全量只读，由控制器按数据域收敛）
+     */
     public Page<CertApplication> page(long pageNo, long pageSize, String status, String keyword, String orgScope) {
         LambdaQueryWrapper<CertApplication> qw = new LambdaQueryWrapper<>();
         if (status != null && !status.isBlank()) {
@@ -78,7 +94,9 @@ public class CertApplicationService {
         return applicationMapper.selectPage(new Page<>(pageNo, pageSize), qw);
     }
 
-    /** 申请单详情 */
+    /**
+     * 申请单详情
+     */
     public CertApplication detail(Long id) {
         CertApplication app = applicationMapper.selectById(id);
         if (app == null) {
@@ -87,15 +105,19 @@ public class CertApplicationService {
         return app;
     }
 
-    /** 申请单详情（数据域版：机构用户访问他机构申请单按不存在处理，不泄露存在性） */
+    /**
+     * 申请单详情（数据域版：机构用户访问他机构申请单按不存在处理，不泄露存在性）
+     */
     public CertApplication detailVisible(Long id, String operatorOrg) {
         CertApplication app = detail(id);
-        RoleCode.requireRowVisible(operatorOrg, app.getOrgKey());
+        OrgScope.requireRowVisible(operatorOrg, app.getOrgKey());
         return app;
     }
 
-    /** 提交申请（录入员代录：医生/机构提供材料，操作员录入系统）；org=控制器按 effectiveOrg 归一后的受理域 */
-    public CertApplication submit(ApplicationSubmitDTO body, String username, String ip, String org) {
+    /**
+     * 提交申请（录入员代录：医生/机构提供材料，操作员录入系统）；org=控制器按 effectiveOrg 归一后的受理域
+     */
+    public CertApplication submit(ApplicationSubmitDTO body, String username, String realName, String ip, String org) {
         String applicantType = body.getApplicantType();
         if (!"INSTITUTION".equals(applicantType) && !"PERSON".equals(applicantType)) {
             throw new IllegalArgumentException("申请人类别仅支持 INSTITUTION-机构 / PERSON-个人");
@@ -128,6 +150,7 @@ public class CertApplicationService {
         app.setDescription(blankToNull(body.getDescription()));
         app.setStatus(ST_PENDING);
         app.setAppliedBy(username);
+        app.setAppliedByName(realNameOrAccount(realName, username));
         app.setAppliedAt(LocalDateTime.now());
         app.setCreatedAt(LocalDateTime.now());
         applicationMapper.insert(app);
@@ -143,7 +166,7 @@ public class CertApplicationService {
      * 数据域：操作者域（effOrg，effectiveOrg 归一）必须与申请单归属机构一致，跨机构 403。
      */
     @Transactional(rollbackFor = Exception.class)
-    public CertApplication approve(Long id, String comment, String username, String ip, String effOrg) {
+    public CertApplication approve(Long id, String comment, String username, String realName, String ip, String effOrg) {
         CertApplication app = checkPending(id);
         requireOrgMatch(app, effOrg);
         checkReviewerDiff(app, username);
@@ -151,6 +174,7 @@ public class CertApplicationService {
         app.setTemplateSnapshot(snapshotJson(tpl));
         app.setStatus(ST_APPROVED);
         app.setReviewedBy(username);
+        app.setReviewedByName(realNameOrAccount(realName, username));
         app.setReviewedAt(LocalDateTime.now());
         app.setReviewComment(blankToNull(comment));
         applicationMapper.updateById(app);
@@ -159,8 +183,10 @@ public class CertApplicationService {
         return app;
     }
 
-    /** 审核驳回（审核员；不得与提交人同一人；申请单必须落在操作者域） */
-    public CertApplication reject(Long id, String comment, String username, String ip, String effOrg) {
+    /**
+     * 审核驳回（审核员；不得与提交人同一人；申请单必须落在操作者域）
+     */
+    public CertApplication reject(Long id, String comment, String username, String realName, String ip, String effOrg) {
         CertApplication app = checkPending(id);
         requireOrgMatch(app, effOrg);
         checkReviewerDiff(app, username);
@@ -169,6 +195,7 @@ public class CertApplicationService {
         }
         app.setStatus(ST_REJECTED);
         app.setReviewedBy(username);
+        app.setReviewedByName(realNameOrAccount(realName, username));
         app.setReviewedAt(LocalDateTime.now());
         app.setReviewComment(comment.trim());
         applicationMapper.updateById(app);
@@ -223,7 +250,7 @@ public class CertApplicationService {
             throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
         }
         requireOrgMatch(app, effOrg);
-        if (!RoleCode.ADMIN.equals(role) && !java.util.Objects.equals(app.getAppliedBy(), username)) {
+        if (!RoleCodeEnum.ADMIN.name().equals(role) && !java.util.Objects.equals(app.getAppliedBy(), username)) {
             throw new SecurityException("仅申请提交人本人或系统管理员可撤销申请（当前操作人：" + username + "）");
         }
         if (!ST_PENDING.equals(app.getStatus()) && !ST_APPROVED.equals(app.getStatus())) {
@@ -234,15 +261,6 @@ public class CertApplicationService {
         auditService.record(username, "RA_CANCEL", app.getApplyNo(),
                 "撤销证书申请：" + app.getApplicantName(), ip, app.getOrgKey());
         return app;
-    }
-
-    /** 数据域强制：申请单归属机构必须等于操作者有效域（机构用户越域 403；全局用户须显式传对 orgKey） */
-    private static void requireOrgMatch(CertApplication app, String effOrg) {
-        String appOrg = app.getOrgKey() == null || app.getOrgKey().isBlank()
-                ? CaOrg.PRIMARY_ORG_KEY : app.getOrgKey();
-        if (!appOrg.equals(effOrg)) {
-            throw new SecurityException("权限不足：申请单归属机构 " + appOrg + "，与当前操作域 " + effOrg + " 不一致");
-        }
     }
 
     /**
@@ -290,14 +308,18 @@ public class CertApplicationService {
         return app;
     }
 
-    /** 录入与审核分离：审核人不得为提交人本人（GM/T 0034 §10.1g 硬要求） */
+    /**
+     * 录入与审核分离：审核人不得为提交人本人（GM/T 0034 §10.1g 硬要求）
+     */
     private void checkReviewerDiff(CertApplication app, String username) {
         if (username != null && username.equals(app.getAppliedBy())) {
             throw new SecurityException("违反分权制衡：审核人不得与申请提交人为同一人（GM/T 0034 §10.1g）");
         }
     }
 
-    /** 批准时固化模板策略为 JSON 快照（有序字段，便于人工核对与审计比对） */
+    /**
+     * 批准时固化模板策略为 JSON 快照（有序字段，便于人工核对与审计比对）
+     */
     private String snapshotJson(CertTemplate tpl) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("certType", tpl.getCertType());
@@ -353,5 +375,12 @@ public class CertApplicationService {
 
     private String blankToNull(String v) {
         return v == null || v.isBlank() ? null : v.trim();
+    }
+
+    /**
+     * 优先用令牌中的真实姓名；为空（旧令牌未带姓名）时回退登录账号，保证展示不为空
+     */
+    private String realNameOrAccount(String realName, String username) {
+        return realName != null && !realName.isBlank() ? realName : (username == null ? null : username);
     }
 }

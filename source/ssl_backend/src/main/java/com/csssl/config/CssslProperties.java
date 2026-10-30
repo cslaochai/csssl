@@ -13,7 +13,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "csssl")
 public class CssslProperties {
 
-    /** 证书与私钥落盘目录（私钥加密后落盘，不进数据库） */
+    /**
+     * 证书与私钥落盘目录（私钥加密后落盘，不进数据库）
+     */
     private String storeDir = "./data/certs";
 
     private RootCa rootCa = new RootCa();
@@ -24,10 +26,14 @@ public class CssslProperties {
 
     private KeyVault keyVault = new KeyVault();
 
-    /** 对外公开基础地址（用于证书 CDP/AIA 扩展、OCSP URL 生成），如 http://his-ca.example.com/ssl */
+    /**
+     * 对外公开基础地址（用于证书 CDP/AIA 扩展、OCSP URL 生成），如 http://his-ca.example.com/ssl
+     */
     private String publicBaseUrl = "http://localhost:8092/ssl";
 
-    /** 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭 */
+    /**
+     * 私钥下载开关：开发期允许管理后台下载私钥，生产建议关闭
+     */
     private boolean allowPrivateKeyDownload = true;
 
     /**
@@ -40,27 +46,41 @@ public class CssslProperties {
 
     @Data
     public static class RootCa {
-        /** 根CA证书CN */
+        /**
+         * 根CA证书CN
+         */
         private String cn = "CSSSL Root CA";
-        /** 根CA算法：RSA2048 / SM2（国密） */
+        /**
+         * 根CA算法：RSA2048 / SM2（国密）
+         */
         private String algorithm = "RSA2048";
-        /** 根证书有效期（天） */
+        /**
+         * 根证书有效期（天）
+         */
         private int validityDays = 3650;
     }
 
     @Data
     public static class Issue {
-        /** 签发默认有效期（天） */
+        /**
+         * 签发默认有效期（天）
+         */
         private int defaultValidityDays = 365;
     }
 
     @Data
     public static class SubCa {
-        /** 服务签发二级CA的CN */
+        /**
+         * 服务签发二级CA的CN
+         */
         private String cn = "CSSSL SubCA - Server Signing";
-        /** 二级CA有效期（天） */
+        /**
+         * 二级CA有效期（天）
+         */
         private int validityDays = 730;
-        /** 二级CA到期前多少天自动轮换（用根签新SUB_CA） */
+        /**
+         * 二级CA到期前多少天自动轮换（用根签新SUB_CA）
+         */
         private int renewBeforeDays = 30;
     }
 
@@ -82,17 +102,25 @@ public class CssslProperties {
 
     @Data
     public static class Sm2 {
-        /** 16进制SM2私钥（64 hex字符）；留空则启动时临时生成一对（重启失效） */
+        /**
+         * 16进制SM2私钥（64 hex字符）；留空则启动时临时生成一对（重启失效）
+         */
         private String privateKey = "";
-        /** 16进制SM2公钥（含04前缀，130 hex字符）；留空则从私钥推导 */
+        /**
+         * 16进制SM2公钥（含04前缀，130 hex字符）；留空则从私钥推导
+         */
         private String publicKey = "";
     }
 
     @Data
     public static class Jwt {
-        /** JWT签名密钥 */
+        /**
+         * JWT签名密钥
+         */
         private String secret = "csssl-ca-jwt-secret-change-me-in-prod-2026";
-        /** 会话有效期（毫秒），默认24小时 */
+        /**
+         * 会话有效期（毫秒），默认24小时
+         */
         private long expiration = 86400000L;
     }
 }

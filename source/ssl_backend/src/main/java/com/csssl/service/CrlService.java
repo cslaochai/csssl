@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
-import com.csssl.vo.CertVO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.CrlState;
@@ -12,6 +11,7 @@ import com.csssl.mapper.CaCertMapper;
 import com.csssl.mapper.CrlStateMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
+import com.csssl.vo.CertVO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -32,11 +32,7 @@ import java.security.cert.X509CRL;
 import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -61,6 +57,18 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CrlService {
 
+    /**
+     * 全量 CRL 发布周期（天，行业 CRL 24h~7天发布为标配，此处沿用现有 30 天缓存窗口）
+     */
+    private static final int FULL_CRL_NEXT_UPDATE_DAYS = 30;
+    /**
+     * 增量 CRL 发布周期（天）：增量比全量更频，依赖方按此缓存增量
+     */
+    private static final int DELTA_CRL_NEXT_UPDATE_DAYS = 1;
+    /**
+     * 全量 CRL 续期窗口（天）：nextUpdate 距当前不足此值时主动重签，避免依赖方拉到临界过期 CRL
+     */
+    private static final int REPUBLISH_AHEAD_DAYS = 7;
     private final CaCertMapper certMapper;
     private final CrlStateMapper crlStateMapper;
     private final CaService caService;
@@ -68,17 +76,35 @@ public class CrlService {
     private final CssslProperties props;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
-    /** 机构目录解析：default → store-dir；其他 → store-dir/orgs/{orgKey}（与 CaService 约定同源） */
+    /**
+     * 机构目录解析：default → store-dir；其他 → store-dir/orgs/{orgKey}（与 CaService 约定同源）
+     */
     private final KeyVaultConfig.OrgVaultResolver orgVaults;
 
-    /** 全量 CRL 发布周期（天，行业 CRL 24h~7天发布为标配，此处沿用现有 30 天缓存窗口） */
-    private static final int FULL_CRL_NEXT_UPDATE_DAYS = 30;
-    /** 增量 CRL 发布周期（天）：增量比全量更频，依赖方按此缓存增量 */
-    private static final int DELTA_CRL_NEXT_UPDATE_DAYS = 1;
-    /** 全量 CRL 续期窗口（天）：nextUpdate 距当前不足此值时主动重签，避免依赖方拉到临界过期 CRL */
-    private static final int REPUBLISH_AHEAD_DAYS = 7;
+    /**
+     * 判重指纹：序列集合（去重升序）SHA-256。只取序列不含原因码——原因变更随到期续发自然带出
+     */
+    private static String fingerprintOf(List<CaCert> revoked) {
+        String joined = revoked.stream()
+                .map(c -> c.getSerialHex().toLowerCase(Locale.ROOT))
+                .distinct()
+                .sorted()
+                .collect(Collectors.joining("\n"));
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(joined.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException("CRL 指纹计算失败: " + e.getMessage(), e);
+        }
+    }
 
-    /** 应纳入主机构 CRL 的证书（兼容入口） */
+    private static LocalDateTime toLocal(Date date) {
+        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+    }
+
+    /**
+     * 应纳入主机构 CRL 的证书（兼容入口）
+     */
     public List<CaCert> revokedList() {
         return revokedList(CaOrg.PRIMARY_ORG_KEY);
     }
@@ -131,7 +157,9 @@ public class CrlService {
         return publishIfNeeded(CaOrg.PRIMARY_ORG_KEY);
     }
 
-    /** 判重发布入口（机构版）：以该机构 SUB_CA（signingCert(orgKey)）签名，落到该机构 CRL 域 */
+    /**
+     * 判重发布入口（机构版）：以该机构 SUB_CA（signingCert(orgKey)）签名，落到该机构 CRL 域
+     */
     public synchronized CrlInfo publishIfNeeded(String orgKey) {
         List<CaCert> revoked = revokedList(orgKey);
         String fingerprint = fingerprintOf(revoked);
@@ -158,7 +186,9 @@ public class CrlService {
         }
     }
 
-    /** 定时发布目标：default 恒含 + 机构表全部 ACTIVE 机构（存量单根环境仅有 default，行为与旧版一致） */
+    /**
+     * 定时发布目标：default 恒含 + 机构表全部 ACTIVE 机构（存量单根环境仅有 default，行为与旧版一致）
+     */
     private List<String> refreshTargets() {
         List<String> keys = new ArrayList<>();
         keys.add(CaOrg.PRIMARY_ORG_KEY);
@@ -175,12 +205,16 @@ public class CrlService {
         return keys;
     }
 
-    /** 生成增量 CRL（dCRL，兼容入口=default 机构） */
+    /**
+     * 生成增量 CRL（dCRL，兼容入口=default 机构）
+     */
     public DeltaCrlInfo buildDeltaCrl() {
         return buildDeltaCrl(CaOrg.PRIMARY_ORG_KEY);
     }
 
-    /** 生成该机构域增量 CRL：自该域最近全量发布以来新增的吊销/挂起条目；无全量基础时返回空增量 */
+    /**
+     * 生成该机构域增量 CRL：自该域最近全量发布以来新增的吊销/挂起条目；无全量基础时返回空增量
+     */
     public synchronized DeltaCrlInfo buildDeltaCrl(String orgKey) {
         CrlState state = crlStateMapper.selectByOrg(orgKey);
         long baseNumber = state == null || state.getCrlNumber() == null ? 0L : state.getCrlNumber();
@@ -204,7 +238,9 @@ public class CrlService {
         return info;
     }
 
-    /** 行锁事务内发布决策：判重复用 or 重签推进（本机构域独立状态行/独立文件/独立签名CA） */
+    /**
+     * 行锁事务内发布决策：判重复用 or 重签推进（本机构域独立状态行/独立文件/独立签名CA）
+     */
     private CrlInfo doPublish(String orgKey, List<CaCert> revoked, String fingerprint) {
         CrlState state = ensureStateRowLocked(orgKey);
         long current = state.getCrlNumber() == null ? 0L : state.getCrlNumber();
@@ -273,13 +309,17 @@ public class CrlService {
         throw new IllegalStateException("CRL 状态行创建失败（orgKey=" + orgKey + "），请检查 ssl_crl_state 表约束与并发发布日志");
     }
 
-    /** 新状态行 id：max(id)+1；空表回落历史约定 id=1（default 存量行） */
+    /**
+     * 新状态行 id：max(id)+1；空表回落历史约定 id=1（default 存量行）
+     */
     private long nextRowId() {
         CrlState top = crlStateMapper.selectTopByIdDesc();
         return top == null || top.getId() == null ? CrlState.SINGLE_ROW_ID : top.getId() + 1;
     }
 
-    /** 旧 JSON 状态迁移（一次性，仅 default 域）：读 crlNumber/lastFullCrlTime 字段；失败按初始状态处理 */
+    /**
+     * 旧 JSON 状态迁移（一次性，仅 default 域）：读 crlNumber/lastFullCrlTime 字段；失败按初始状态处理
+     */
     private LegacyState readLegacyState() {
         Path f = Path.of(props.getStoreDir()).resolve("crl-state.json");
         if (!Files.exists(f)) {
@@ -298,22 +338,9 @@ public class CrlService {
         }
     }
 
-    /** 判重指纹：序列集合（去重升序）SHA-256。只取序列不含原因码——原因变更随到期续发自然带出 */
-    private static String fingerprintOf(List<CaCert> revoked) {
-        String joined = revoked.stream()
-                .map(c -> c.getSerialHex().toLowerCase(Locale.ROOT))
-                .distinct()
-                .sorted()
-                .collect(Collectors.joining("\n"));
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(md.digest(joined.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception e) {
-            throw new IllegalStateException("CRL 指纹计算失败: " + e.getMessage(), e);
-        }
-    }
-
-    /** 回读已发布 CRL（指纹未变即复用，不重签）；文件缺失/读失败返回 null 降级重签 */
+    /**
+     * 回读已发布 CRL（指纹未变即复用，不重签）；文件缺失/读失败返回 null 降级重签
+     */
     private CrlInfo readCurrentPem(String orgKey, CrlState state, int entries, long crlNumber) {
         try {
             Path f = currentPemFile(orgKey);
@@ -329,12 +356,16 @@ public class CrlService {
         }
     }
 
-    /** CRL 文件路径：default=store-dir/crl/current.pem（存量不变）；其他=store-dir/orgs/{orgKey}/crl/current.pem */
+    /**
+     * CRL 文件路径：default=store-dir/crl/current.pem（存量不变）；其他=store-dir/orgs/{orgKey}/crl/current.pem
+     */
     private Path currentPemFile(String orgKey) {
         return orgVaults.orgStoreDir(orgKey).resolve("crl").resolve("current.pem");
     }
 
-    /** 已发布 CRL 落盘：临时文件 + 原子移动，杜绝并发下载端点读到半写 PEM */
+    /**
+     * 已发布 CRL 落盘：临时文件 + 原子移动，杜绝并发下载端点读到半写 PEM
+     */
     private void writeCurrentPem(String orgKey, String pem) {
         try {
             Path f = currentPemFile(orgKey);
@@ -358,20 +389,22 @@ public class CrlService {
         return entries;
     }
 
-    private static LocalDateTime toLocal(Date date) {
-        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
-    }
-
-    /** 旧 crl-state.json 的迁移字段 */
+    /**
+     * 旧 crl-state.json 的迁移字段
+     */
     private record LegacyState(long crlNumber, LocalDateTime lastFullCrlTime) {
     }
 
-    /** CRL 详情（PEM + 生效/下次更新时间 + 条目数 + 签发者 + CRLNumber + 增量基础编号） */
+    /**
+     * CRL 详情（PEM + 生效/下次更新时间 + 条目数 + 签发者 + CRLNumber + 增量基础编号）
+     */
     public record CrlInfo(String pem, LocalDateTime thisUpdate, LocalDateTime nextUpdate,
                           int entries, String issuerCn, long crlNumber, Long deltaBase) {
     }
 
-    /** 增量 CRL 详情（PEM + 更新时间 + 条目数 + 增量编号 + 基础全量编号） */
+    /**
+     * 增量 CRL 详情（PEM + 更新时间 + 条目数 + 增量编号 + 基础全量编号）
+     */
     public record DeltaCrlInfo(String pem, LocalDateTime thisUpdate, LocalDateTime nextUpdate,
                                int entries, long crlNumber, long baseCrlNumber) {
     }

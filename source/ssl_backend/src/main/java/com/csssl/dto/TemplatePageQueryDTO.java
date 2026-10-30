@@ -11,9 +11,13 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class TemplatePageQueryDTO extends PageParam {
 
-    /** 关键字（命中 模板编码/名称） */
+    /**
+     * 关键字（命中 模板编码/名称）
+     */
     private String keyword;
 
-    /** 机构数据域过滤 */
+    /**
+     * 机构数据域过滤
+     */
     private String orgKey;
 }

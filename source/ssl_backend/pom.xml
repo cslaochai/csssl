@@ -38,6 +38,12 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- 接口鉴权：过滤器链 + @PreAuthorize 方法级权限（配合 TokenAuthFilter 桥接 JWT） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
         <!-- 参数校验（DTO 上 jakarta.validation 注解 + 控制器 @Valid） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

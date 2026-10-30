@@ -11,12 +11,18 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class ApplicationPageQueryDTO extends PageParam {
 
-    /** 申请单状态精确过滤（PENDING/APPROVED/REJECTED/ISSUED/CANCELLED） */
+    /**
+     * 申请单状态精确过滤（PENDING/APPROVED/REJECTED/ISSUED/CANCELLED）
+     */
     private String status;
 
-    /** 关键字（命中 申请人/主体DN/申请编号） */
+    /**
+     * 关键字（命中 申请人/主体DN/申请编号）
+     */
     private String keyword;
 
-    /** 机构数据域过滤 */
+    /**
+     * 机构数据域过滤
+     */
     private String orgKey;
 }

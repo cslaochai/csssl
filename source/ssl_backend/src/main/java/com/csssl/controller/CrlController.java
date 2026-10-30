@@ -11,6 +11,7 @@ import com.csssl.entity.CaOrg;
 import com.csssl.service.AuditService;
 import com.csssl.service.CrlService;
 import com.csssl.service.OrgService;
+import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -66,7 +67,7 @@ public class CrlController {
     @GetMapping("/download")
     public String download(@RequestParam(required = false) String orgKey, HttpServletRequest request) {
         String org = resolveOrg(orgKey);
-        String username = (String) request.getAttribute("ssl.username");
+        String username = UserUtils.requireLoginUser().getUsername();
         String crlPem = crlService.publishIfNeeded(org).pem();
         auditService.record(username, "CRL_DOWNLOAD", null,
                 "下载CRL吊销列表" + (CaOrg.LEGACY_ORG_KEY.equals(org) ? "" : "（机构 " + org + "）"), clientIp(request));

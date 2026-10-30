@@ -1,27 +1,33 @@
 package com.csssl.util;
 
-import java.util.*;
+import com.csssl.enums.RoleCodeEnum;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
- * 权限点目录与六类法定角色的授权上限（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡）。
+ * 权限点目录与权限点类型（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡）。
  *
  * <p>设计原则：</p>
  * <ul>
  *   <li><b>权限点由代码定义、随代码发布</b>：目录与接口一一对应，不落库，避免配置漂移产生"幽灵权限"；</li>
- *   <li><b>角色法定上限内置</b>：每类角色可授范围在此固化，角色配置页只能在上限内收窄；
+ *   <li><b>角色法定上限内置</b>：预置角色的可授范围在 {@link RoleCodeEnum} 枚举中固化，角色配置页只能在上限内收窄；
  *       保存与读取都做"配置 ∩ 上限"，即使直接改库也不能越权（如给审核员勾签发）；</li>
  *   <li><b>两类权限点</b>：MENU 控制侧栏/路由进入，ACTION 控制按钮显隐与接口校验。</li>
+ *   <li><b>自定义角色</b>：预置角色为默认（见 {@link RoleCodeEnum}），管理员可在后台自建角色，
+ *       自定义角色的授权上限为全量权限目录（管理员自行组合，责任在配置方）。</li>
  * </ul>
  */
 public final class PermissionCatalog {
 
-    /**
-     * 权限点类型：页面菜单
-     */
+    /** 权限点类型：页面菜单 */
     public static final String TYPE_MENU = "MENU";
-    /**
-     * 权限点类型：操作按钮/接口
-     */
+    /** 权限点类型：操作按钮/接口 */
     public static final String TYPE_ACTION = "ACTION";
 
     // ===== 菜单权限点（与前端路由 meta.perm 一一对应） =====
@@ -88,15 +94,12 @@ public final class PermissionCatalog {
     public static final String AUDIT_CHAIN = "audit:chain";
     public static final String AUDIT_EXPORT = "audit:export";
 
-    /**
-     * 权限点定义（顺序即前端权限树展示顺序）
-     */
+    /** 权限点定义（顺序即前端权限树展示顺序） */
     public record PermDef(String code, String name, String type, String group, String note) {
     }
 
     private static final List<PermDef> ALL = new ArrayList<>();
     private static final Map<String, PermDef> BY_CODE = new LinkedHashMap<>();
-    private static final Map<String, Set<String>> MAX = new LinkedHashMap<>();
 
     static {
         // ---------- 页面菜单 ----------
@@ -167,41 +170,6 @@ public final class PermissionCatalog {
         action("审计", AUDIT_VERIFY, "单条验签", "SM3withSM2 防篡改校验");
         action("审计", AUDIT_CHAIN, "哈希链对账", "检出删改/分叉/空洞");
         action("审计", AUDIT_EXPORT, "审计归档导出", "≥5 年留存材料，报告附签名");
-
-        // ========== 六类法定角色的授权上限 ==========
-        // ADMIN：除审计（审计独立）外的全部权限
-        Set<String> admin = new LinkedHashSet<>();
-        for (PermDef d : ALL) {
-            if (!d.code().startsWith("audit:") && !MENU_AUDIT.equals(d.code())) {
-                admin.add(d.code());
-            }
-        }
-        MAX.put(RoleCode.ADMIN, Collections.unmodifiableSet(admin));
-
-        MAX.put(RoleCode.OPERATOR, setOf(
-                MENU_DASHBOARD, MENU_APPLICATIONS, MENU_CERTS, MENU_CRL, MENU_OCSP, MENU_TSA,
-                APP_SUBMIT, APP_ISSUE, APP_CANCEL,
-                CERT_LIST, CERT_ISSUE, CERT_REVOKE, CERT_SUSPEND, CERT_RENEW, CERT_REKEY,
-                CERT_DOWNLOAD, CRL_DOWNLOAD));
-
-        MAX.put(RoleCode.APPROVER, setOf(
-                MENU_DASHBOARD, MENU_APPLICATIONS, MENU_CRL, MENU_OCSP, MENU_TSA,
-                APP_APPROVE, APP_REJECT));
-
-        MAX.put(RoleCode.AUDITOR, setOf(
-                MENU_DASHBOARD, MENU_CRL, MENU_OCSP, MENU_TSA, MENU_AUDIT,
-                AUDIT_VIEW, AUDIT_VERIFY, AUDIT_CHAIN, AUDIT_EXPORT));
-
-        MAX.put(RoleCode.SECURITY_ADMIN, setOf(
-                MENU_DASHBOARD, MENU_TEMPLATES, MENU_CRL, MENU_OCSP, MENU_TSA,
-                TEMPLATE_CREATE, TEMPLATE_UPDATE, TEMPLATE_DELETE));
-
-        MAX.put(RoleCode.KEY_ADMIN, setOf(
-                MENU_DASHBOARD, MENU_CERTS, MENU_ROOT_CA, MENU_CRL, MENU_OCSP, MENU_TSA,
-                CERT_LIST, CERT_KEY_DOWNLOAD, CERT_EXPORT,
-                CA_INIT, CA_SEAL, CA_UNSEAL, CA_SHARE_VIEW, CA_SHARE_DOWNLOAD,
-                CA_SHARE_MIGRATE, CA_SHARE_UNSEAL, CA_ROOT_DOWNLOAD, CA_SUBCA_DOWNLOAD,
-                CRL_DOWNLOAD));
     }
 
     private PermissionCatalog() {
@@ -220,51 +188,66 @@ public final class PermissionCatalog {
         BY_CODE.put(def.code(), def);
     }
 
-    private static Set<String> setOf(String... codes) {
-        Set<String> set = new LinkedHashSet<>();
-        for (String c : codes) {
-            set.add(c);
-        }
-        return Collections.unmodifiableSet(set);
-    }
-
-    /**
-     * 全部权限点（前端权限树顺序）
-     */
+    /** 全部权限点（前端权限树顺序） */
     public static List<PermDef> all() {
         return Collections.unmodifiableList(ALL);
     }
 
-    /**
-     * 按编码取权限点定义（未知返回 null）
-     */
+    /** 按编码取权限点定义（未知返回 null） */
     public static PermDef get(String code) {
         return code == null ? null : BY_CODE.get(code.trim());
     }
 
+    /** 是否菜单类权限点 */
+    public static boolean isMenu(String code) {
+        PermDef def = get(code);
+        return def != null && TYPE_MENU.equals(def.type());
+    }
+
+    /** 全量权限目录中除审计组与审计菜单外的权限点（系统管理员法定上限：具备除审计外的全部） */
+    public static Set<String> allButAudit() {
+        Set<String> s = new LinkedHashSet<>();
+        for (PermDef d : ALL) {
+            if (TYPE_ACTION.equals(d.type()) && d.code().startsWith("audit:")) {
+                continue;
+            }
+            if (MENU_AUDIT.equals(d.code())) {
+                continue;
+            }
+            s.add(d.code());
+        }
+        return Collections.unmodifiableSet(s);
+    }
+
     /**
-     * 某角色可授权的法定上限（未知角色返回空集合=fail-closed）
+     * 角色授权法定上限：预置角色取 {@link RoleCodeEnum} 枚举的 {@link RoleCodeEnum#defaultMax()}
+     * （不可越界收窄/扩权）；自定义角色（编码不在枚举内、builtin=0）授权上限为全量权限目录，
+     * 由配置方自行组合（责任在配置方）。
      */
     public static Set<String> statutoryMax(String roleCode) {
         if (roleCode == null || roleCode.isBlank()) {
             return Collections.emptySet();
         }
-        Set<String> max = MAX.get(roleCode.trim().toUpperCase());
-        return max == null ? Collections.emptySet() : max;
+        RoleCodeEnum rc = RoleCodeEnum.fromCode(roleCode);
+        if (rc != null) {
+            return rc.defaultMax();
+        }
+        // 自定义角色：上限 = 全量权限目录（管理员自行组合）
+        Set<String> all = new LinkedHashSet<>();
+        for (PermDef d : ALL) {
+            all.add(d.code());
+        }
+        return Collections.unmodifiableSet(all);
     }
 
     /**
-     * 权限点是否属于该角色法定职责范围
+     * 权限点是否在该角色法定授权边界内（供角色配置页置灰渲染；越界项不可勾选）。
+     * 自定义角色默认全量目录内均可授权。
      */
-    public static boolean allowedFor(String roleCode, String code) {
-        return code != null && statutoryMax(roleCode).contains(code.trim());
-    }
-
-    /**
-     * 是否菜单类权限点
-     */
-    public static boolean isMenu(String code) {
-        PermDef def = get(code);
-        return def != null && TYPE_MENU.equals(def.type());
+    public static boolean allowedFor(String roleCode, String permCode) {
+        if (permCode == null) {
+            return false;
+        }
+        return statutoryMax(roleCode).contains(permCode.trim());
     }
 }

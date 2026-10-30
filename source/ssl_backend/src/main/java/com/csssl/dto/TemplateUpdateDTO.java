@@ -8,24 +8,38 @@ import lombok.Data;
 @Data
 public class TemplateUpdateDTO {
 
-    /** 模板名称（null=不改） */
+    /**
+     * 模板名称（null=不改）
+     */
     private String templateName;
 
-    /** 算法（null=不改） */
+    /**
+     * 算法（null=不改）
+     */
     private String algorithm;
 
-    /** 有效期天数（null=不改） */
+    /**
+     * 有效期天数（null=不改）
+     */
     private Integer validityDays;
 
-    /** KeyUsage（null=不改） */
+    /**
+     * KeyUsage（null=不改）
+     */
     private String keyUsage;
 
-    /** EKU（null=不改；""=清除） */
+    /**
+     * EKU（null=不改；""=清除）
+     */
     private String extKeyUsage;
 
-    /** 策略 OID（null=不改；""=清除） */
+    /**
+     * 策略 OID（null=不改；""=清除）
+     */
     private String policyOid;
 
-    /** 说明（null=不改；""=清除） */
+    /**
+     * 说明（null=不改；""=清除）
+     */
     private String description;
 }

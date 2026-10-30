@@ -10,6 +10,8 @@ import java.util.List;
 @Data
 public class RolePermsSaveDTO {
 
-    /** 权限点列表（如 ["menu:certs","cert:issue"]） */
+    /**
+     * 权限点列表（如 ["menu:certs","cert:issue"]）
+     */
     private List<String> perms;
 }

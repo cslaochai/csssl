@@ -10,12 +10,11 @@ import com.csssl.vo.OrgVO;
 import com.csssl.entity.CaOrg;
 import com.csssl.service.AuditService;
 import com.csssl.service.OrgService;
-import com.csssl.service.PermissionService;
-import com.csssl.util.PermissionCatalog;
-import com.csssl.util.RoleCode;
+import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,7 +35,6 @@ public class OrgController {
 
     private final OrgService orgService;
     private final AuditService auditService;
-    private final PermissionService permissionService;
 
     /** 机构列表（附各机构根状态：有无根/SUB_CA 有效期/密钥形态 ONLINE/SEALED/SHARES） */
     @GetMapping
@@ -61,10 +59,10 @@ public class OrgController {
     }
 
     /** 新建机构（仅 ADMIN）：登记后立即为该机构生成独立根CA+SUB_CA+Shamir(3,5) 门限份额 */
+    @PreAuthorize("hasAuthority('org:create')")
     @PostMapping
     public Result<OrgCreateVO> create(@Valid @RequestBody OrgUpsertDTO body, HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.ORG_CREATE);
-        String username = RoleCode.currentUser(request);
+        String username = UserUtils.requireLoginUser().getUsername();
         CaOrg org = orgService.create(body.getOrgKey(), body.getOrgName(), body.getSubjectO(),
                 body.getAlgorithm(), body.getContact(), body.getDescription());
         auditService.record(username, "ORG_CREATE", org.getOrgKey(),
@@ -77,30 +75,30 @@ public class OrgController {
     }
 
     /** 暂停机构（仅 ADMIN；停止对外签发由后续波次在签发链路 enforce，本波落状态） */
+    @PreAuthorize("hasAuthority('org:suspend')")
     @PostMapping("/{orgKey}/suspend")
     public Result<CaOrg> suspend(@PathVariable String orgKey, HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.ORG_SUSPEND);
-        String username = RoleCode.currentUser(request);
+        String username = UserUtils.requireLoginUser().getUsername();
         CaOrg org = orgService.suspend(orgKey);
         auditService.record(username, "ORG_SUSPEND", orgKey, "暂停机构 " + org.getOrgName(), clientIp(request));
         return Result.success("机构已暂停", org);
     }
 
     /** 恢复机构（仅 ADMIN） */
+    @PreAuthorize("hasAuthority('org:resume')")
     @PostMapping("/{orgKey}/resume")
     public Result<CaOrg> resume(@PathVariable String orgKey, HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.ORG_RESUME);
-        String username = RoleCode.currentUser(request);
+        String username = UserUtils.requireLoginUser().getUsername();
         CaOrg org = orgService.resume(orgKey);
         auditService.record(username, "ORG_RESUME", orgKey, "恢复机构 " + org.getOrgName(), clientIp(request));
         return Result.success("机构已恢复", org);
     }
 
     /** 关闭机构（仅 ADMIN；CLOSED 终态） */
+    @PreAuthorize("hasAuthority('org:close')")
     @PostMapping("/{orgKey}/close")
     public Result<CaOrg> close(@PathVariable String orgKey, HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.ORG_CLOSE);
-        String username = RoleCode.currentUser(request);
+        String username = UserUtils.requireLoginUser().getUsername();
         CaOrg org = orgService.close(orgKey);
         auditService.record(username, "ORG_CLOSE", orgKey, "关闭机构 " + org.getOrgName(), clientIp(request));
         return Result.success("机构已关闭", org);

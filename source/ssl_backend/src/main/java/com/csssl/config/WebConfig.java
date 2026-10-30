@@ -1,24 +1,16 @@
 package com.csssl.config;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Web 配置：管理接口拦截 /admin/**；开发期放开跨域（前端 vite 代理同源时无需 CORS）。
+ * Web 配置：登录态拦截与 /admin/** 鉴权已迁移到 Spring Security
+ * （见 SecurityConfig / TokenAuthFilter）；此处仅保留跨域配置
+ * （开发期放开，前端 vite 代理同源时无需 CORS）。
  */
 @Configuration
-@RequiredArgsConstructor
 public class WebConfig implements WebMvcConfigurer {
-
-    private final AuthInterceptor authInterceptor;
-
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(authInterceptor).addPathPatterns("/admin/**");
-    }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {

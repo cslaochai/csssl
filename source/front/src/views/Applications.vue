@@ -47,7 +47,9 @@
           <template #default="{ row }">{{ templateName(row.templateId) }}</template>
         </el-table-column>
         <el-table-column prop="subjectDn" label="主体DN" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="appliedBy" label="提交人" width="100" />
+        <el-table-column label="提交人" width="120">
+          <template #default="{ row }">{{ row.appliedByName || row.appliedBy }}</template>
+        </el-table-column>
         <el-table-column prop="reviewedBy" label="审核人" width="100">
           <template #default="{ row }">{{ row.reviewedBy || '-' }}</template>
         </el-table-column>
@@ -153,8 +155,8 @@
         <el-descriptions-item label="主体DN">{{ detail?.subjectDn }}</el-descriptions-item>
         <el-descriptions-item label="SAN">{{ detail?.san || '-' }}</el-descriptions-item>
         <el-descriptions-item label="用途说明">{{ detail?.description || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="提交人/时间">{{ detail?.appliedBy }} / {{ detail?.appliedAt }}</el-descriptions-item>
-        <el-descriptions-item label="审核人/时间">{{ detail?.reviewedBy || '-' }} / {{ detail?.reviewedAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="提交人/时间">{{ detail ? nameLabel(detail.appliedBy, detail.appliedByName) : '' }} / {{ detail?.appliedAt }}</el-descriptions-item>
+        <el-descriptions-item label="审核人/时间">{{ detail ? nameLabel(detail.reviewedBy, detail.reviewedByName) : '-' }} / {{ detail?.reviewedAt || '-' }}</el-descriptions-item>
         <el-descriptions-item label="审核意见">{{ detail?.reviewComment || '-' }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
@@ -211,6 +213,13 @@ function statusText(s) {
 }
 function statusTag(s) {
   return { PENDING: 'warning', APPROVED: '', REJECTED: 'danger', ISSUED: 'success', CANCELLED: 'info' }[s] || ''
+}
+
+// 展示「真实姓名（登录账号）」；历史数据无真实姓名时回退为登录账号；都缺则 -
+function nameLabel(by, byName) {
+  if (!by && !byName) return '-'
+  if (byName && by && byName !== by) return `${byName}（${by}）`
+  return byName || by
 }
 
 async function loadTemplates() {

@@ -1,13 +1,11 @@
 package com.csssl.entity;
 
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
-
-import com.fasterxml.jackson.annotation.JsonFormat;
-
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -23,17 +21,23 @@ import java.time.LocalDateTime;
 @TableName("ssl_role_perm")
 public class RolePerm {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 角色编码 */
+    /**
+     * 角色编码
+     */
     private String roleCode;
 
-    /** 权限点编码（如 menu:certs / cert:issue） */
+    /**
+     * 权限点编码（如 menu:certs / cert:issue）
+     */
     private String permCode;
 
-    /** 创建时间 */
+    /**
+     * 创建时间
+     */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;
 }

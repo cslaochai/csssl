@@ -8,6 +8,8 @@ import lombok.Data;
 @Data
 public class ApplicationAuditDTO {
 
-    /** 审核意见 */
+    /**
+     * 审核意见
+     */
     private String comment;
 }

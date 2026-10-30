@@ -24,17 +24,9 @@ import java.util.regex.Pattern;
 @Configuration
 public class KeyVaultConfig {
 
-    @Bean
-    public KeyVault keyVault(CssslProperties props) {
-        return new KeyVault(Path.of(props.getStoreDir()), resolveMasterKey(props));
-    }
-
-    @Bean
-    public OrgVaultResolver orgVaultResolver(CssslProperties props, KeyVault keyVault) {
-        return new OrgVaultResolver(props, keyVault);
-    }
-
-    /** 主密钥解析：优先配置/环境变量 SSL_MASTER_KEY，否则首启生成随机密钥落盘 store-dir/master.key */
+    /**
+     * 主密钥解析：优先配置/环境变量 SSL_MASTER_KEY，否则首启生成随机密钥落盘 store-dir/master.key
+     */
     private static String resolveMasterKey(CssslProperties props) {
         String configured = props.getKeyVault().getMasterKey();
         if (configured != null && !configured.isBlank()) {
@@ -55,6 +47,16 @@ public class KeyVaultConfig {
         }
     }
 
+    @Bean
+    public KeyVault keyVault(CssslProperties props) {
+        return new KeyVault(Path.of(props.getStoreDir()), resolveMasterKey(props));
+    }
+
+    @Bean
+    public OrgVaultResolver orgVaultResolver(CssslProperties props, KeyVault keyVault) {
+        return new OrgVaultResolver(props, keyVault);
+    }
+
     /**
      * 机构保险库解析器：存量单根（LEGACY_ORG_KEY）→ 现单例（store-dir + SSL_MASTER_KEY/master.key，兼容铁律）；
      * 其他机构 → store-dir/orgs/{orgKey} 为根的独立保险库，主密钥首启自动生成落盘
@@ -73,32 +75,18 @@ public class KeyVaultConfig {
             this.defaultVault = defaultVault;
         }
 
-        /** 机构落盘根目录：存量单根 → store-dir；其他 → store-dir/orgs/{orgKey} */
-        public Path orgStoreDir(String orgKey) {
-            checkOrgKey(orgKey);
-            return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
-                    ? Path.of(props.getStoreDir())
-                    : Path.of(props.getStoreDir(), "orgs", orgKey);
-        }
-
-        /** 取机构保险库（机构不存在时按需构建并缓存；存量单根恒返回共享单例） */
-        public KeyVault forOrg(String orgKey) {
-            if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
-                return defaultVault;
-            }
-            checkOrgKey(orgKey);
-            return pool.computeIfAbsent(orgKey,
-                    k -> new KeyVault(orgStoreDir(k), resolveOrgMasterKey(orgStoreDir(k))));
-        }
-
-        /** 机构标识格式校验（同时兜住路径穿越：仅小写字母数字） */
+        /**
+         * 机构标识格式校验（同时兜住路径穿越：仅小写字母数字）
+         */
         public static void checkOrgKey(String orgKey) {
             if (orgKey == null || !ORG_KEY_PATTERN.matcher(orgKey).matches()) {
                 throw new IllegalArgumentException("非法机构标识（仅允许1-32位小写字母数字）: " + orgKey);
             }
         }
 
-        /** 机构主密钥：仅文件形态（首启自动生成，语义同 default 域） */
+        /**
+         * 机构主密钥：仅文件形态（首启自动生成，语义同 default 域）
+         */
         private static String resolveOrgMasterKey(Path orgStoreDir) {
             Path mkFile = orgStoreDir.resolve("master.key");
             try {
@@ -113,6 +101,28 @@ public class KeyVaultConfig {
             } catch (IOException e) {
                 throw new IllegalStateException("机构主密钥初始化失败: " + e.getMessage(), e);
             }
+        }
+
+        /**
+         * 机构落盘根目录：存量单根 → store-dir；其他 → store-dir/orgs/{orgKey}
+         */
+        public Path orgStoreDir(String orgKey) {
+            checkOrgKey(orgKey);
+            return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
+                    ? Path.of(props.getStoreDir())
+                    : Path.of(props.getStoreDir(), "orgs", orgKey);
+        }
+
+        /**
+         * 取机构保险库（机构不存在时按需构建并缓存；存量单根恒返回共享单例）
+         */
+        public KeyVault forOrg(String orgKey) {
+            if (CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
+                return defaultVault;
+            }
+            checkOrgKey(orgKey);
+            return pool.computeIfAbsent(orgKey,
+                    k -> new KeyVault(orgStoreDir(k), resolveOrgMasterKey(orgStoreDir(k))));
         }
     }
 }

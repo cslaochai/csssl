@@ -2,12 +2,12 @@ package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.dto.VerifyQueryDTO;
-import com.csssl.vo.VerifyResultVO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaOrg;
 import com.csssl.mapper.CaCertMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
+import com.csssl.vo.VerifyResultVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -37,12 +37,54 @@ public class VerifyService {
     private final CaCertMapper certMapper;
     private final CaService caService;
 
-    /** 校验（兼容入口=default 机构域） */
+    /**
+     * EKU 扩展缺失时不拦截（根CA/二级CA证书），存在时必须包含目标用途
+     */
+    private static boolean hasEku(X509Certificate cert, KeyPurposeId purpose) {
+        List<String> ekus;
+        try {
+            ekus = cert.getExtendedKeyUsage();
+        } catch (Exception e) {
+            return true;
+        }
+        if (ekus == null || ekus.isEmpty()) {
+            return true;
+        }
+        return ekus.contains(purpose.getId());
+    }
+
+    /**
+     * 按 RDN 属性集合比较两个 DN（与顺序无关）
+     */
+    private static boolean sameDn(X500Name a, X500Name b) {
+        return rdnSet(a).equals(rdnSet(b));
+    }
+
+    private static java.util.Set<String> rdnSet(X500Name name) {
+        java.util.Set<String> set = new java.util.HashSet<>();
+        for (org.bouncycastle.asn1.x500.RDN rdn : name.getRDNs()) {
+            for (org.bouncycastle.asn1.x500.AttributeTypeAndValue av : rdn.getTypesAndValues()) {
+                set.add(av.getType().getId() + "=" + av.getValue().toString());
+            }
+        }
+        return set;
+    }
+
+    private static void fail(VerifyResultVO r, String message) {
+        r.setValid(false);
+        r.setMessage(message);
+    }
+
+    /**
+     * 校验（兼容入口=default 机构域）
+     */
     public VerifyResultVO verify(VerifyQueryDTO req) {
         return verify(req, CaOrg.PRIMARY_ORG_KEY);
     }
 
-    /** 校验（机构域版）：沿该机构 根CA ← SUB_CA ← 叶子 链验证 */
+    /**
+     * 校验（机构域版）：沿该机构 根CA ← SUB_CA ← 叶子 链验证
+     */
     public VerifyResultVO verify(VerifyQueryDTO req, String orgKey) {
         if (req.getCertPem() == null || req.getCertPem().isBlank()) {
             throw new IllegalArgumentException("待校验证书PEM不能为空");
@@ -125,7 +167,9 @@ public class VerifyService {
         return r;
     }
 
-    /** 验签：证书由签发者公钥签名（SM3withSM2 / SHA256withRSA 由 BC provider 处理） */
+    /**
+     * 验签：证书由签发者公钥签名（SM3withSM2 / SHA256withRSA 由 BC provider 处理）
+     */
     private boolean verifySignedBy(X509Certificate cert, X509Certificate issuer, VerifyResultVO r, String issuerLabel) {
         try {
             cert.verify(issuer.getPublicKey(), "BC");
@@ -137,7 +181,9 @@ public class VerifyService {
         }
     }
 
-    /** 按签发者 DN 查找指定机构域的 SUB_CA（按 RDN 集合匹配；机构间互不代验） */
+    /**
+     * 按签发者 DN 查找指定机构域的 SUB_CA（按 RDN 集合匹配；机构间互不代验）
+     */
     private CaCert findSubCaByIssuer(X500Name issuer, String orgKey) {
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, CaService.TYPE_SUB_CA)
@@ -150,39 +196,5 @@ public class VerifyService {
             }
         }
         return null;
-    }
-
-    /** EKU 扩展缺失时不拦截（根CA/二级CA证书），存在时必须包含目标用途 */
-    private static boolean hasEku(X509Certificate cert, KeyPurposeId purpose) {
-        List<String> ekus;
-        try {
-            ekus = cert.getExtendedKeyUsage();
-        } catch (Exception e) {
-            return true;
-        }
-        if (ekus == null || ekus.isEmpty()) {
-            return true;
-        }
-        return ekus.contains(purpose.getId());
-    }
-
-    /** 按 RDN 属性集合比较两个 DN（与顺序无关） */
-    private static boolean sameDn(X500Name a, X500Name b) {
-        return rdnSet(a).equals(rdnSet(b));
-    }
-
-    private static java.util.Set<String> rdnSet(X500Name name) {
-        java.util.Set<String> set = new java.util.HashSet<>();
-        for (org.bouncycastle.asn1.x500.RDN rdn : name.getRDNs()) {
-            for (org.bouncycastle.asn1.x500.AttributeTypeAndValue av : rdn.getTypesAndValues()) {
-                set.add(av.getType().getId() + "=" + av.getValue().toString());
-            }
-        }
-        return set;
-    }
-
-    private static void fail(VerifyResultVO r, String message) {
-        r.setValid(false);
-        r.setMessage(message);
     }
 }

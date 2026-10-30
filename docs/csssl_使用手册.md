@@ -36,7 +36,7 @@ npm run dev                  # http://localhost:5175
 
 可选环境变量：`SSL_DB_URL / SSL_DB_USERNAME / SSL_DB_PASSWORD / SSL_MASTER_KEY（32位hex，生产必设） / SSL_STORE_DIR / SSL_PUBLIC_BASE_URL`。
 
-> ⚠️ 若此前旧版本正在运行（如你测试中的 8092 进程），请先停止旧进程再启动新代码；数据库升级由 `schema.sql` 幂等完成（`CREATE TABLE IF NOT EXISTS` + `information_schema` 加列），重复启动安全。
+> ⚠️ 若此前旧版本正在运行（如你测试中的 8092 进程），请先停止旧进程再启动新代码；数据库升级**手工执行 `db/schema.sql`**（`CREATE TABLE IF NOT EXISTS` + `information_schema` 加列，幂等可重复跑），系统启动不执行任何 DDL。
 
 ---
 
@@ -229,7 +229,7 @@ HIS 病历签名流程：计算病历摘要 → 调 TSA 盖章 → 把 token 与
 
 | 问题 | 处理 |
 |---|---|
-| 启动后表没变？ | 确认用新代码启动（master `713efa8`），schema.sql 幂等自动执行 |
+| 启动后表没变？ | 正常现象：系统启动不执行 DDL；表结构变更需手工执行 `db/schema.sql`（幂等，可重复跑） |
 | 8092 被占用 | 旧进程未停；停掉后重启，或 `SSL_...` 环境变量临时换端口验证 |
 | 角色不符 403 | 403「权限不足」不再区分角色名：到 **角色配置** 页核对该角色是否勾选对应权限点（`cert:issue`、`app:approve` 等）；或看服务端日志 `[权限] 拒绝访问 ... 所需权限点=` |
 | 侧栏没有某个菜单 | 角色配置页的「页面菜单」权限点未勾选；保存后即时生效（当前账号刷新即用） |

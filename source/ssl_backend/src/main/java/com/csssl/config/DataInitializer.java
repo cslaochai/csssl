@@ -6,12 +6,12 @@ import com.csssl.entity.CertTemplate;
 import com.csssl.entity.RolePerm;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
+import com.csssl.enums.RoleCodeEnum;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.mapper.RolePermMapper;
 import com.csssl.mapper.SysRoleMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.CertService;
-import com.csssl.util.PermissionCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -36,16 +36,6 @@ public class DataInitializer implements ApplicationRunner {
     private final SysRoleMapper roleMapper;
     private final RolePermMapper rolePermMapper;
     private final CertService certService;
-
-    /** 六类法定角色初始档案（编码, 名称, 职责说明, 排序号）——编码与职责由 GM/T 0034 固化，不可增删 */
-    private static final String[][] BUILTIN_ROLES = {
-            {"ADMIN", "系统管理员", "用户/角色/机构与根CA维护，具备除审计外的全部业务操作权限", "10"},
-            {"OPERATOR", "CA操作员", "证书申请录入、签发、吊销/挂起/更新；签发与审核分离", "20"},
-            {"APPROVER", "审核员", "审核证书申请；不得与录入人同一人", "30"},
-            {"AUDITOR", "审计员", "审计日志查询/验签/归档；只读，不可签发/审核，独立于业务操作", "40"},
-            {"SECURITY_ADMIN", "安全管理员", "证书模板与证书策略（KeyUsage/EKU/策略OID）管理", "50"},
-            {"KEY_ADMIN", "密钥管理员", "根密钥门限分持/封存/解封与份额保管", "60"}
-    };
 
     @Override
     public void run(ApplicationArguments args) {
@@ -76,13 +66,15 @@ public class DataInitializer implements ApplicationRunner {
     }
 
     /**
-     * 六类法定角色初始化（幂等）：角色不存在则建档案，并按法定上限播种默认权限；
-     * 角色已存在则完全不动——管理员在角色配置页收窄过的授权不会被重启"复原"（幂等只补缺，不覆盖）。
+     * 预置角色初始化（幂等，唯一来源为 {@link RoleCodeEnum} 枚举）：
+     * 角色不存在则建档案并按其法定上限（defaultMax）播种默认权限；角色已存在则完全不动——
+     * 管理员在角色配置页收窄过的授权不会被重启"复原"（幂等只补缺，不覆盖）。
+     * 自定义角色（builtin=0）不在此处创建，由管理员在角色配置页后台自建。
      */
     private void initRoles() {
-        for (String[] def : BUILTIN_ROLES) {
-            String code = def[0];
-            Set<String> max = PermissionCatalog.statutoryMax(code);
+        for (RoleCodeEnum rc : RoleCodeEnum.values()) {
+            String code = rc.getCode();
+            Set<String> max = rc.defaultMax();
             Long exist = roleMapper.selectCount(new LambdaQueryWrapper<SysRole>()
                     .eq(SysRole::getRoleCode, code));
             if (exist != null && exist > 0) {
@@ -100,16 +92,16 @@ public class DataInitializer implements ApplicationRunner {
             }
             SysRole role = new SysRole();
             role.setRoleCode(code);
-            role.setRoleName(def[1]);
-            role.setRoleDesc(def[2]);
-            role.setSortOrder(Integer.parseInt(def[3]));
+            role.setRoleName(rc.getRoleName());
+            role.setRoleDesc(rc.getRoleDesc());
+            role.setSortOrder(rc.getSortOrder());
             role.setStatus(1);
-            role.setBuiltin(1);
+            role.setBuiltin(rc.isBuiltin() ? 1 : 0);
             role.setCreatedAt(LocalDateTime.now());
             role.setUpdatedAt(LocalDateTime.now());
             roleMapper.insert(role);
 
-            // 默认授权=法定上限，保证升级后行为与改造前一致（六类角色原有能力不减）
+            // 默认授权=法定上限，保证升级后行为与改造前一致（预置角色原有能力不减）
             for (String permCode : max) {
                 RolePerm row = new RolePerm();
                 row.setRoleCode(code);
@@ -117,12 +109,14 @@ public class DataInitializer implements ApplicationRunner {
                 row.setCreatedAt(LocalDateTime.now());
                 rolePermMapper.insert(row);
             }
-            log.info("[初始化] 已创建法定角色：{}（{}），默认授权 {} 项", code, def[1], max.size());
+            log.info("[初始化] 已创建预置角色：{}（{}），默认授权 {} 项", code, rc.getRoleName(), max.size());
         }
     }
 
-    /** 内置证书模板（编码唯一，重复启动幂等；KeyUsage/EKU/策略OID 锁定，签发按模板）。
-     *  内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：org_key=NULL，所有机构可见。 */
+    /**
+     * 内置证书模板（编码唯一，重复启动幂等；KeyUsage/EKU/策略OID 锁定，签发按模板）。
+     * 内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：org_key=NULL，所有机构可见。
+     */
     private void initTemplates() {
         insertIfAbsent("SERVER_COMM", "机构通信证书", "SERVER", "SM2", 730,
                 "digitalSignature,keyEncipherment", "serverAuth",

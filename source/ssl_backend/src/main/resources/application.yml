@@ -20,12 +20,7 @@ spring:
       maximum-pool-size: 10
       minimum-idle: 2
       connection-test-query: SELECT 1
-  sql:
-    init:
-      mode: always
-      schema-locations: classpath:db/schema.sql
-      encoding: UTF-8
-      continue-on-error: false
+  # 系统启动不允许执行 DDL/重建表结构：建库建表用 db/schema.sql 手工导入
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml

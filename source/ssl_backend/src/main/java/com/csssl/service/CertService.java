@@ -3,10 +3,8 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
-import com.csssl.dto.PublicKeyIssueDTO;
-import com.csssl.vo.CertOverviewVO;
-import com.csssl.vo.CertVO;
 import com.csssl.dto.IssueCertRequestDTO;
+import com.csssl.dto.PublicKeyIssueDTO;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaOrg;
 import com.csssl.entity.CertTemplate;
@@ -14,8 +12,14 @@ import com.csssl.mapper.CaCertMapper;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
+import com.csssl.vo.CertOverviewVO;
+import com.csssl.vo.CertVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
+import org.bouncycastle.asn1.x500.RDN;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x500.style.BCStyle;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -32,11 +36,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
-import org.bouncycastle.asn1.x500.RDN;
-import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.asn1.x500.style.BCStyle;
-
 /**
  * 证书签发与生命周期管理：在线签发（内部生成密钥对）/ CSR 签发 / 吊销 / 下载 / 概览统计。
  * 签发私钥只落盘（机构域 issued/{serial}），数据库只存证书与元信息。
@@ -52,15 +51,6 @@ public class CertService {
 
     private static final Set<String> TYPES = Set.of("SERVER", "CLIENT", "SUB_CA");
     private static final int MAX_VALIDITY_DAYS = 36500;
-
-    /**
-     * 签发策略快照：RA 批准时从模板固化（certType/algorithm/validityDays/keyUsage/extKeyUsage/policyOid），
-     * 签发按快照执行，杜绝批准后被改动的可变模板影响已批准申请（GM/T 0034 §5.3.4 策略固化）。
-     */
-    public record IssuePolicy(String certType, String algorithm, Integer validityDays,
-                              String keyUsage, String extKeyUsage, String policyOid) {
-    }
-
     private final CaCertMapper certMapper;
     private final CertTemplateMapper templateMapper;
     private final CaService caService;
@@ -68,7 +58,80 @@ public class CertService {
     private final CssslProperties props;
     private final AuditService auditService;
 
-    /** 分页查询证书列表 */
+    /**
+     * 证书行归属机构（A1 加列前的语义兜底：空=default，存量行由 DDL 默认值归位 default）
+     */
+    private static String orgOf(CaCert row) {
+        String k = row.getOrgKey();
+        return k == null || k.isBlank() ? CaOrg.PRIMARY_ORG_KEY : k;
+    }
+
+    /**
+     * renew/rekey 机构版前置：显式传入的 orgKey 必须与证书行归属一致（防跨机构更新/重签）
+     */
+    private static void requireOrgMatch(String orgKey, CaCert row) {
+        if (!orgOf(row).equals(orgKey)) {
+            throw new IllegalArgumentException("证书归属机构为 " + orgOf(row) + "，不能在机构 " + orgKey + " 域下更新/重签");
+        }
+    }
+
+    /**
+     * 主体 DN：default 域保持老口径 CN=xxx,O=CSSSL（逐字节兼容，不转义）；非 default 用 CN=xxx,O={机构subject_o}
+     */
+    private static X500Name leafSubject(String orgKey, CaOrg org, String cn) {
+        if (org == null || CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
+            return new X500Name("CN=" + cn + ",O=CSSSL");
+        }
+        return CertUtil.subjectDn(cn, org.getSubjectO());
+    }
+
+    /**
+     * 签发后主体校验（落盘/入库前执行，违规即拒签）：
+     * default 域不校验（老口径）；非 default 域 SUB_CA 证书 O 必须与机构受控 subject_o 一致，
+     * 其他证书申请方 DN 带 O 时同样必须一致（防跨机构冒名）。
+     */
+    private static void checkSubjectOrg(X509Certificate cert, CaOrg org, String type) {
+        if (org == null) {
+            return;
+        }
+        String o = organizationOf(cert);
+        boolean subCa = CaService.TYPE_SUB_CA.equalsIgnoreCase(type);
+        if (o == null || o.isBlank()) {
+            if (subCa) {
+                throw new IllegalArgumentException("机构域签发 SUB_CA 证书主体必须携带与机构一致的 O（机构受控O=" + org.getSubjectO() + "）");
+            }
+            return;
+        }
+        if (!o.equals(org.getSubjectO())) {
+            throw new IllegalArgumentException("证书主体O（" + o + "）与机构受控O（" + org.getSubjectO() + "）不一致，拒绝签发");
+        }
+    }
+
+    /**
+     * 从证书主体 DN 提取 O 属性值（无则 null）
+     */
+    private static String organizationOf(X509Certificate cert) {
+        X500Name name = X500Name.getInstance(cert.getSubjectX500Principal().getEncoded());
+        for (RDN rdn : name.getRDNs()) {
+            for (AttributeTypeAndValue tv : rdn.getTypesAndValues()) {
+                if (BCStyle.O.equals(tv.getType())) {
+                    return tv.getValue().toString();
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 审计文案机构后缀：default 返回空串（存量审计文本逐字节不变），其他机构标注归属域
+     */
+    private static String orgSuffix(String orgKey) {
+        return CaOrg.LEGACY_ORG_KEY.equals(orgKey) ? "" : "，机构 " + orgKey;
+    }
+
+    /**
+     * 分页查询证书列表
+     */
     public Page<CertVO> page(long pageNo, long pageSize, String certType, String status, String keyword) {
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<>();
         if (certType != null && !certType.isBlank()) {
@@ -85,17 +148,23 @@ public class CertService {
         return (Page<CertVO>) page.convert(CertVO::from);
     }
 
-    /** 证书详情 */
+    /**
+     * 证书详情
+     */
     public CertVO detail(Long id) {
         return CertVO.from(findById(id));
     }
 
-    /** 在线签发（兼容入口=平台主机构） */
+    /**
+     * 在线签发（兼容入口=平台主机构）
+     */
     public CertVO issue(IssueCertRequestDTO req, String username, String ip) {
         return issue(CaOrg.PRIMARY_ORG_KEY, req, username, ip);
     }
 
-    /** 在线签发（机构版）：内部生成密钥对，私钥落该机构域盘 */
+    /**
+     * 在线签发（机构版）：内部生成密钥对，私钥落该机构域盘
+     */
     public CertVO issue(String orgKey, IssueCertRequestDTO req, String username, String ip) {
         String cn = req.getSubjectCn() == null ? "" : req.getSubjectCn().trim();
         if (cn.isEmpty()) {
@@ -144,20 +213,26 @@ public class CertService {
         return CertVO.from(row);
     }
 
-    /** CSR 签发（兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
+    /**
+     * CSR 签发（兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘）
+     */
     public CertVO issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip) {
         return issueFromCsr(csrPem, certType, validityDays, san, description, username, ip, null);
     }
 
-    /** CSR 签发（支持模板，兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘） */
+    /**
+     * CSR 签发（支持模板，兼容入口=平台主机构）：主体与公钥取自 CSR（密钥由申请方自持，不落盘）
+     */
     public CertVO issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip, Long templateId) {
         return issueFromCsr(CaOrg.PRIMARY_ORG_KEY, csrPem, certType, validityDays,
                 san, description, username, ip, templateId);
     }
 
-    /** CSR 签发（机构版，支持模板）：主体与公钥取自 CSR，落到该机构域 */
+    /**
+     * CSR 签发（机构版，支持模板）：主体与公钥取自 CSR，落到该机构域
+     */
     public CertVO issueFromCsr(String orgKey, String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip, Long templateId) {
         if (csrPem == null || csrPem.isBlank()) {
@@ -177,10 +252,10 @@ public class CertService {
         // 证书签名算法跟随签发CA（SUB_CA）密钥类型（RSA SHA256withRSA / 国密 SM3withSM2）
         X509Certificate cert = tpl != null
                 ? CertUtil.issueFromCsrByTemplate(csrPem, caCert, caKey, type, days,
-                        effectiveSan, crlUrl(orgKey), ocspUrl(orgKey),
-                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                effectiveSan, crlUrl(orgKey), ocspUrl(orgKey),
+                tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
                 : CertUtil.issueFromCsr(csrPem, caCert, caKey, type, days,
-                        effectiveSan, crlUrl(orgKey), ocspUrl(orgKey));
+                effectiveSan, crlUrl(orgKey), ocspUrl(orgKey));
         // CSR 主体由申请方自定：非 default 域校验其 O 与机构受控 O 一致（SUB_CA 必须一致），不一致即拒签不落盘
         checkSubjectOrg(cert, org, type);
 
@@ -252,9 +327,9 @@ public class CertService {
         // SAN 透传：申请单/请求里带的 SAN 必须写进证书，此前模板分支写死 null 属丢弃申请内容
         X509Certificate cert = policy != null || tpl != null
                 ? CertUtil.issuePublicKeyByTemplate(dn, req.getPublicKeyPem(), caCert, caKey,
-                        type, days, req.getSan(), crlUrl(orgKey), ocspUrl(orgKey), keyUsage, extKeyUsage, policyOid)
+                type, days, req.getSan(), crlUrl(orgKey), ocspUrl(orgKey), keyUsage, extKeyUsage, policyOid)
                 : CertUtil.issuePublicKey(dn, req.getPublicKeyPem(), caCert, caKey,
-                        type, days, req.getSan(), crlUrl(orgKey), ocspUrl(orgKey));
+                type, days, req.getSan(), crlUrl(orgKey), ocspUrl(orgKey));
         checkSubjectOrg(cert, org, type);
 
         String serial = cert.getSerialNumber().toString(16);
@@ -274,7 +349,9 @@ public class CertService {
         return CertVO.from(row);
     }
 
-    /** 吊销证书 */
+    /**
+     * 吊销证书
+     */
     public CertVO revoke(Long id, String reason, String username, String ip) {
         CaCert row = findById(id);
         if (CaService.TYPE_ROOT.equals(row.getCertType())) {
@@ -312,7 +389,9 @@ public class CertService {
         return CertVO.from(row);
     }
 
-    /** 解除挂起（GM/T 0034 §12.7）：恢复有效，从 CRL 移除、OCSP 恢复 good */
+    /**
+     * 解除挂起（GM/T 0034 §12.7）：恢复有效，从 CRL 移除、OCSP 恢复 good
+     */
     public CertVO unsuspend(Long id, String username, String ip) {
         CaCert row = findById(id);
         if (!"FROZEN".equals(row.getStatus())) {
@@ -360,14 +439,14 @@ public class CertService {
         PrivateKey caKey = caService.signingKey(domain);
         X509Certificate cert = tpl != null
                 ? CertUtil.issueByTemplate(
-                        new X500Name(oldCert.getSubjectX500Principal().getName()),
-                        oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
-                        old.getSan(), crlUrl(domain), ocspUrl(domain),
-                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                new X500Name(oldCert.getSubjectX500Principal().getName()),
+                oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
+                old.getSan(), crlUrl(domain), ocspUrl(domain),
+                tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
                 : CertUtil.issue(
-                        new X500Name(oldCert.getSubjectX500Principal().getName()),
-                        oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
-                        old.getSan(), crlUrl(domain), ocspUrl(domain));
+                new X500Name(oldCert.getSubjectX500Principal().getName()),
+                oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
+                old.getSan(), crlUrl(domain), ocspUrl(domain));
         checkSubjectOrg(cert, org, old.getCertType());
 
         markRevoked(old, "SUPERSEDED", username);
@@ -421,14 +500,14 @@ public class CertService {
         PrivateKey caKey = caService.signingKey(domain);
         X509Certificate cert = tpl != null
                 ? CertUtil.issueByTemplate(
-                        new X500Name(oldCert.getSubjectX500Principal().getName()),
-                        kp.getPublic(), caCert, caKey, old.getCertType(), days,
-                        old.getSan(), crlUrl(domain), ocspUrl(domain),
-                        tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
+                new X500Name(oldCert.getSubjectX500Principal().getName()),
+                kp.getPublic(), caCert, caKey, old.getCertType(), days,
+                old.getSan(), crlUrl(domain), ocspUrl(domain),
+                tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
                 : CertUtil.issue(
-                        new X500Name(oldCert.getSubjectX500Principal().getName()),
-                        kp.getPublic(), caCert, caKey, old.getCertType(), days,
-                        old.getSan(), crlUrl(domain), ocspUrl(domain));
+                new X500Name(oldCert.getSubjectX500Principal().getName()),
+                kp.getPublic(), caCert, caKey, old.getCertType(), days,
+                old.getSan(), crlUrl(domain), ocspUrl(domain));
         checkSubjectOrg(cert, org, old.getCertType());
 
         markRevoked(old, "SUPERSEDED", username);
@@ -443,7 +522,9 @@ public class CertService {
         return CertVO.from(row);
     }
 
-    /** 吊销落库（供吊销/更新/重签共用，只改状态与原因，审计由调用方记录） */
+    /**
+     * 吊销落库（供吊销/更新/重签共用，只改状态与原因，审计由调用方记录）
+     */
     private void markRevoked(CaCert row, String reason, String username) {
         row.setStatus("REVOKED");
         row.setRevokeReason(reason == null || reason.isBlank() ? "UNSPECIFIED" : reason.trim());
@@ -451,7 +532,9 @@ public class CertService {
         certMapper.updateById(row);
     }
 
-    /** 过期归档扫描：把已超过有效期的有效证书标记 EXPIRED（幂等；签发记录与文件按策略长期留存） */
+    /**
+     * 过期归档扫描：把已超过有效期的有效证书标记 EXPIRED（幂等；签发记录与文件按策略长期留存）
+     */
     public int expireScan() {
         List<CaCert> expired = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getStatus, "VALID")
@@ -481,7 +564,9 @@ public class CertService {
         return chain.toString();
     }
 
-    /** 私钥 PEM（受 allow-private-key-download 开关控制，从证书归属机构的加密保险库解密读取） */
+    /**
+     * 私钥 PEM（受 allow-private-key-download 开关控制，从证书归属机构的加密保险库解密读取）
+     */
     public String keyPem(Long id) {
         if (!props.isAllowPrivateKeyDownload()) {
             throw new IllegalArgumentException("私钥下载已关闭（csssl.allow-private-key-download=false）");
@@ -501,7 +586,9 @@ public class CertService {
         return keyPem;
     }
 
-    /** 匹配叶子证书的签发 SUB_CA（限同机构域按 issuer 精确匹配，找不到时退回该机构当前 SUB_CA） */
+    /**
+     * 匹配叶子证书的签发 SUB_CA（限同机构域按 issuer 精确匹配，找不到时退回该机构当前 SUB_CA）
+     */
     private CaCert matchingSubCa(CaCert leaf) {
         String orgKey = orgOf(leaf);
         if (leaf.getIssuerCn() == null || leaf.getIssuerCn().isBlank()) {
@@ -561,7 +648,9 @@ public class CertService {
         }
     }
 
-    /** 概览统计：按机构域过滤（证书总量/状态分布/类型分布/30天内到期），供仪表盘渲染 */
+    /**
+     * 概览统计：按机构域过滤（证书总量/状态分布/类型分布/30天内到期），供仪表盘渲染
+     */
     public CertOverviewVO overview(String orgKey) {
         String org = orgKey == null || orgKey.isBlank() ? CaOrg.PRIMARY_ORG_KEY : orgKey;
         List<CaCert> all = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
@@ -575,13 +664,15 @@ public class CertService {
                 case "VALID" -> valid++;
                 case "REVOKED" -> revoked++;
                 case "EXPIRED" -> expired++;
-                default -> { }
+                default -> {
+                }
             }
             switch (c.getCertType()) {
                 case "SERVER" -> server++;
                 case "CLIENT" -> client++;
                 case "SUB_CA" -> subCa++;
-                default -> { }
+                default -> {
+                }
             }
             if ("VALID".equals(c.getStatus()) && c.getValidTo() != null
                     && c.getValidTo().isBefore(deadline)) {
@@ -601,7 +692,9 @@ public class CertService {
         return data;
     }
 
-    /** 按ID查询证书 */
+    /**
+     * 按ID查询证书
+     */
     public CaCert findById(Long id) {
         CaCert row = certMapper.selectById(id);
         if (row == null) {
@@ -618,15 +711,10 @@ public class CertService {
         return days;
     }
 
-    /** 证书行归属机构（A1 加列前的语义兜底：空=default，存量行由 DDL 默认值归位 default） */
-    private static String orgOf(CaCert row) {
-        String k = row.getOrgKey();
-        return k == null || k.isBlank() ? CaOrg.PRIMARY_ORG_KEY : k;
-    }
-
     /**
      * 签发入口机构门禁：default 域直接放行（存量语义不受机构表约束）；
      * 非 default 域要求机构存在且 ACTIVE——SUSPENDED/CLOSED 拒签（OrgService.requireActive，IAE 口径）。
+     *
      * @return default 域返回 null（老口径组装证书），其他机构返回注册表行（subject_o 受控来源）
      */
     private CaOrg checkIssueOrg(String orgKey) {
@@ -635,61 +723,6 @@ public class CertService {
         }
         orgService.requireActive(orgKey);
         return orgService.get(orgKey);
-    }
-
-    /** renew/rekey 机构版前置：显式传入的 orgKey 必须与证书行归属一致（防跨机构更新/重签） */
-    private static void requireOrgMatch(String orgKey, CaCert row) {
-        if (!orgOf(row).equals(orgKey)) {
-            throw new IllegalArgumentException("证书归属机构为 " + orgOf(row) + "，不能在机构 " + orgKey + " 域下更新/重签");
-        }
-    }
-
-    /** 主体 DN：default 域保持老口径 CN=xxx,O=CSSSL（逐字节兼容，不转义）；非 default 用 CN=xxx,O={机构subject_o} */
-    private static X500Name leafSubject(String orgKey, CaOrg org, String cn) {
-        if (org == null || CaOrg.LEGACY_ORG_KEY.equals(orgKey)) {
-            return new X500Name("CN=" + cn + ",O=CSSSL");
-        }
-        return CertUtil.subjectDn(cn, org.getSubjectO());
-    }
-
-    /**
-     * 签发后主体校验（落盘/入库前执行，违规即拒签）：
-     * default 域不校验（老口径）；非 default 域 SUB_CA 证书 O 必须与机构受控 subject_o 一致，
-     * 其他证书申请方 DN 带 O 时同样必须一致（防跨机构冒名）。
-     */
-    private static void checkSubjectOrg(X509Certificate cert, CaOrg org, String type) {
-        if (org == null) {
-            return;
-        }
-        String o = organizationOf(cert);
-        boolean subCa = CaService.TYPE_SUB_CA.equalsIgnoreCase(type);
-        if (o == null || o.isBlank()) {
-            if (subCa) {
-                throw new IllegalArgumentException("机构域签发 SUB_CA 证书主体必须携带与机构一致的 O（机构受控O=" + org.getSubjectO() + "）");
-            }
-            return;
-        }
-        if (!o.equals(org.getSubjectO())) {
-            throw new IllegalArgumentException("证书主体O（" + o + "）与机构受控O（" + org.getSubjectO() + "）不一致，拒绝签发");
-        }
-    }
-
-    /** 从证书主体 DN 提取 O 属性值（无则 null） */
-    private static String organizationOf(X509Certificate cert) {
-        X500Name name = X500Name.getInstance(cert.getSubjectX500Principal().getEncoded());
-        for (RDN rdn : name.getRDNs()) {
-            for (AttributeTypeAndValue tv : rdn.getTypesAndValues()) {
-                if (BCStyle.O.equals(tv.getType())) {
-                    return tv.getValue().toString();
-                }
-            }
-        }
-        return null;
-    }
-
-    /** 审计文案机构后缀：default 返回空串（存量审计文本逐字节不变），其他机构标注归属域 */
-    private static String orgSuffix(String orgKey) {
-        return CaOrg.LEGACY_ORG_KEY.equals(orgKey) ? "" : "，机构 " + orgKey;
     }
 
     private void persistFiles(String orgKey, String serial, String keyPem, String certPem) {
@@ -716,7 +749,9 @@ public class CertService {
                 : props.getPublicBaseUrl() + "/ca/public/" + orgKey + "/crl";
     }
 
-    /** OCSP 访问点 URL（写入证书 AIA 扩展）：default 现有端点不变，非 default 为 /ssl/ca/public/{orgKey}/ocsp */
+    /**
+     * OCSP 访问点 URL（写入证书 AIA 扩展）：default 现有端点不变，非 default 为 /ssl/ca/public/{orgKey}/ocsp
+     */
     private String ocspUrl(String orgKey) {
         return CaOrg.LEGACY_ORG_KEY.equals(orgKey)
                 ? props.getPublicBaseUrl() + "/ca/public/ocsp"
@@ -746,7 +781,9 @@ public class CertService {
         return row;
     }
 
-    /** 按ID解析证书模板；templateId 为空返回 null（兼容不走模板的直签） */
+    /**
+     * 按ID解析证书模板；templateId 为空返回 null（兼容不走模板的直签）
+     */
     private CertTemplate resolveTemplate(Long templateId) {
         if (templateId == null) {
             return null;
@@ -756,5 +793,13 @@ public class CertService {
             throw new IllegalArgumentException("证书模板不存在（id=" + templateId + "）");
         }
         return tpl;
+    }
+
+    /**
+     * 签发策略快照：RA 批准时从模板固化（certType/algorithm/validityDays/keyUsage/extKeyUsage/policyOid），
+     * 签发按快照执行，杜绝批准后被改动的可变模板影响已批准申请（GM/T 0034 §5.3.4 策略固化）。
+     */
+    public record IssuePolicy(String certType, String algorithm, Integer validityDays,
+                              String keyUsage, String extKeyUsage, String policyOid) {
     }
 }

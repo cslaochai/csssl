@@ -211,6 +211,19 @@ SET @c11 = (SELECT COUNT(*) FROM information_schema.columns
 SET @s11 = IF(@c11 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理机构（签发落到该机构根域）'' AFTER id', 'SELECT 1');
 PREPARE s11 FROM @s11; EXECUTE s11; DEALLOCATE PREPARE s11;
 
+-- 幂等加列：申请单提交人/审核人展示用真实姓名。登录账号仍保留在 applied_by/reviewed_by
+-- （用于「审核人不得与提交人同一人」「仅提交人本人可撤销」身份校验）；真实姓名在动作发生时落库，
+-- 符合 GM/T 0034 审计可追溯要求。历史数据该列为 NULL 时，前端回退显示登录账号。
+SET @c_name1 = (SELECT COUNT(*) FROM information_schema.columns
+               WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'applied_by_name');
+SET @s_name1 = IF(@c_name1 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN applied_by_name VARCHAR(64) NULL COMMENT ''提交人真实姓名（登录账号见 applied_by）'' AFTER applied_at', 'SELECT 1');
+PREPARE s_name1 FROM @s_name1; EXECUTE s_name1; DEALLOCATE PREPARE s_name1;
+
+SET @c_name2 = (SELECT COUNT(*) FROM information_schema.columns
+               WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'reviewed_by_name');
+SET @s_name2 = IF(@c_name2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN reviewed_by_name VARCHAR(64) NULL COMMENT ''审核人真实姓名（登录账号见 reviewed_by）'' AFTER reviewed_at', 'SELECT 1');
+PREPARE s_name2 FROM @s_name2; EXECUTE s_name2; DEALLOCATE PREPARE s_name2;
+
 SET @c12 = (SELECT COUNT(*) FROM information_schema.columns
             WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'org_key');
 SET @s12 = IF(@c12 = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN org_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''操作归属机构（全局操作记 default）'' AFTER username', 'SELECT 1');
@@ -256,23 +269,24 @@ PREPARE s19 FROM @s19; EXECUTE s19; DEALLOCATE PREPARE s19;
 
 -- =============================================================================
 -- ===== 角色配置（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡） =====
--- 六类法定角色固化：编码不可改、角色不可增删，仅可维护名称/职责/排序/启停；
--- 可授权权限点上限由代码内的 PermissionCatalog 固化（保存与读取双向收口），本表只存档案。
+-- EJBCA 式可配置：11 个预置角色由 RoleCode 枚举固化（builtin=1，编码不可改、不可删）；
+-- 支持后台自建自定义角色（builtin=0，可增删、授权上限=全量权限目录由管理员组合）；
+-- 预置角色的授权只能在法定上限内收窄（保存与读取双向收口），本表只存档案与授权结果。
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS ssl_sys_role (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
-    role_code   VARCHAR(32)  NOT NULL COMMENT '角色编码：ADMIN/OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN（法定，不可改）',
+    role_code   VARCHAR(32)  NOT NULL COMMENT '角色编码：预置角色为 ADMIN/OPERATOR/...（枚举固化不可改）；自定义角色由后台自建（builtin=0）',
     role_name   VARCHAR(64)  NOT NULL COMMENT '角色名称（可维护）',
     role_desc   VARCHAR(500) NULL COMMENT '职责说明（对应 GM/T 0034 分权职责）',
     sort_order  INT          NOT NULL DEFAULT 0 COMMENT '排序号（升序）',
     status      TINYINT      NOT NULL DEFAULT 1 COMMENT '1-启用 0-停用（停用后该角色账号不可登录）',
-    builtin     TINYINT      NOT NULL DEFAULT 1 COMMENT '1-法定内置角色（角色不可增删）',
+    builtin     TINYINT      NOT NULL DEFAULT 1 COMMENT '1-法定内置预置角色（不可删）0-自定义角色（可增删）',
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_role_code (role_code)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理角色档案（六类法定角色，不可增删）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理角色档案（预置角色不可删，自定义角色可增删）';
 
 CREATE TABLE IF NOT EXISTS ssl_role_perm (
     id          BIGINT       NOT NULL AUTO_INCREMENT,

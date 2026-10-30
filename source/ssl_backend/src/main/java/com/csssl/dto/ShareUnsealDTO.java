@@ -10,6 +10,8 @@ import java.util.List;
 @Data
 public class ShareUnsealDTO {
 
-    /** 份额 JSON 列表（至少 3 份，编号不同） */
+    /**
+     * 份额 JSON 列表（至少 3 份，编号不同）
+     */
     private List<String> shares;
 }

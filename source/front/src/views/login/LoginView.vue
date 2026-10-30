@@ -32,13 +32,13 @@
     </div>
 
     <!-- 登录凭证（演示环境测试账号一览：口令统一 123456，可复制账号或一键填入） -->
-    <el-dialog v-model="credVisible" title="登录凭证（演示账号）" width="850px" top="10vh">
+    <el-dialog v-model="credVisible" title="登录凭证（密码：123456）" width="850px" top="10vh">
       <div class="cred-body">
         <el-input
             v-model="credKeyword"
             class="cred-filter"
             clearable
-            placeholder="按角色 / 账号 / 姓名筛选（模糊匹配）"
+            placeholder="按角色 / 账号 / 姓名筛选"
             :prefix-icon="Search"
         />
         <el-table :data="sortedCredRows" border size="small" :span-method="credSpanMethod">
@@ -46,20 +46,12 @@
           <el-table-column label="账号（姓名）" min-width="180">
             <template #default="{row}">
               <span class="cred-login">{{ row.login }}</span>
+              <el-button link type="primary" size="small" @click="handleCopyAccount(row.login)">复制账号</el-button>
               <span class="cred-name">（{{ row.name }}）</span>
             </template>
           </el-table-column>
           <el-table-column label="能做什么" min-width="300" prop="ability"/>
-          <el-table-column label="操作" min-width="140" align="center">
-            <template #default="{row}">
-              <el-button link type="primary" size="small" @click="handleCopyAccount(row.login)">复制账号</el-button>
-              <el-button link type="success" size="small" @click="fillCredential(row)">填入</el-button>
-            </template>
-          </el-table-column>
         </el-table>
-      </div>
-      <div class="cred-tip">演示环境专用：口令已统一为 <b>123456</b>；审核人与录入人必须不同人，签发流程用
-        songqingran（操作员）录入、suwenwen（审核员）审批。
       </div>
     </el-dialog>
   </div>
@@ -168,18 +160,6 @@ const handleCopyAccount = async (login) => {
   } else {
     ElMessage.error('复制失败，请手动选择文本')
   }
-}
-
-// 口令统一为 123456：一键填入账号 + 口令，演示环境直接登录（停用账号拦截）
-const fillCredential = (row) => {
-  if (!row.enabled) {
-    ElMessage.warning(`${row.name}（${row.login}）当前已停用，无法登录`)
-    return
-  }
-  form.username = row.login
-  form.password = UNIFIED_PASSWORD
-  credVisible.value = false
-  ElMessage.success(`已填入 ${row.role}（${row.login}），口令 123456，点「登录」进入`)
 }
 
 const rules = {

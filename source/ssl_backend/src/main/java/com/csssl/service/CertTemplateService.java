@@ -38,7 +38,49 @@ public class CertTemplateService {
     private final OrgService orgService;
     private final AuditService auditService;
 
-    /** 分页查询模板（兼容入口=全量，仅全局用户经控制器到达） */
+    /**
+     * 模板对操作域是否可见：全局模板（org_key NULL）人人可见；机构模板仅归属机构可见；全局域（null）全可见
+     */
+    public static boolean visibleTo(CertTemplate tpl, String operatorOrg) {
+        if (operatorOrg == null || operatorOrg.isBlank()) {
+            return true;
+        }
+        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() || tpl.getOrgKey().equals(operatorOrg);
+    }
+
+    /**
+     * 模板行归属机构兜底（NULL=全局模板，审计归位用）
+     */
+    private static String rowOrg(CertTemplate tpl) {
+        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() ? CaOrg.PRIMARY_ORG_KEY : tpl.getOrgKey();
+    }
+
+    /**
+     * 管理权校验：机构操作者（org 非空）仅能管理"本机构"模板——全局模板（org_key NULL）与其他机构模板一律 403
+     */
+    private static void requireManaged(CertTemplate tpl, String operatorOrg) {
+        if (operatorOrg == null || operatorOrg.isBlank()) {
+            return;
+        }
+        if (tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() || !tpl.getOrgKey().equals(operatorOrg)) {
+            throw new SecurityException("权限不足：机构管理员仅能管理本机构模板");
+        }
+    }
+
+    private static void addChange(List<String> changes, String label, String before, String after) {
+        if (before == null ? after == null : before.equals(after)) {
+            return;
+        }
+        changes.add(label + "：" + nz(before) + "→" + nz(after));
+    }
+
+    private static String nz(String s) {
+        return s == null || s.isBlank() ? "空" : s;
+    }
+
+    /**
+     * 分页查询模板（兼容入口=全量，仅全局用户经控制器到达）
+     */
     public Page<CertTemplate> page(long pageNo, long pageSize, String keyword) {
         return page(pageNo, pageSize, keyword, null);
     }
@@ -60,7 +102,9 @@ public class CertTemplateService {
         return templateMapper.selectPage(new Page<>(pageNo, pageSize), qw);
     }
 
-    /** 按ID查询模板 */
+    /**
+     * 按ID查询模板
+     */
     public CertTemplate detail(Long id) {
         CertTemplate tpl = templateMapper.selectById(id);
         if (tpl == null) {
@@ -79,19 +123,6 @@ public class CertTemplateService {
             throw new IllegalArgumentException("证书模板不存在（id=" + id + "）");
         }
         return tpl;
-    }
-
-    /** 模板对操作域是否可见：全局模板（org_key NULL）人人可见；机构模板仅归属机构可见；全局域（null）全可见 */
-    public static boolean visibleTo(CertTemplate tpl, String operatorOrg) {
-        if (operatorOrg == null || operatorOrg.isBlank()) {
-            return true;
-        }
-        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() || tpl.getOrgKey().equals(operatorOrg);
-    }
-
-    /** 模板行归属机构兜底（NULL=全局模板，审计归位用） */
-    private static String rowOrg(CertTemplate tpl) {
-        return tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() ? CaOrg.PRIMARY_ORG_KEY : tpl.getOrgKey();
     }
 
     /**
@@ -221,27 +252,6 @@ public class CertTemplateService {
                 "删除证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
                         + "，类型=" + tpl.getCertType() + "，算法=" + tpl.getAlgorithm()
                         + "，有效期=" + tpl.getValidityDays() + "天", ip, rowOrg(tpl));
-    }
-
-    /** 管理权校验：机构操作者（org 非空）仅能管理"本机构"模板——全局模板（org_key NULL）与其他机构模板一律 403 */
-    private static void requireManaged(CertTemplate tpl, String operatorOrg) {
-        if (operatorOrg == null || operatorOrg.isBlank()) {
-            return;
-        }
-        if (tpl.getOrgKey() == null || tpl.getOrgKey().isBlank() || !tpl.getOrgKey().equals(operatorOrg)) {
-            throw new SecurityException("权限不足：机构管理员仅能管理本机构模板");
-        }
-    }
-
-    private static void addChange(List<String> changes, String label, String before, String after) {
-        if (before == null ? after == null : before.equals(after)) {
-            return;
-        }
-        changes.add(label + "：" + nz(before) + "→" + nz(after));
-    }
-
-    private static String nz(String s) {
-        return s == null || s.isBlank() ? "空" : s;
     }
 
     private String validateType(String type) {

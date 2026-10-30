@@ -23,10 +23,14 @@ import java.security.Signature;
 @Component
 public class AuditSigner {
 
-    /** 审计签名算法（GM/T 0034 国密体系） */
+    /**
+     * 审计签名算法（GM/T 0034 国密体系）
+     */
     public static final String SIGN_ALGO = "SM3withSM2";
 
-    /** 审计密钥相对目录（store-dir 下） */
+    /**
+     * 审计密钥相对目录（store-dir 下）
+     */
     private static final String KEY_REL = "audit-sign";
     private static final String KEY_NAME = "key";
     private static final String PUB_NAME = "pub";
@@ -39,7 +43,9 @@ public class AuditSigner {
         this.vault = vault;
     }
 
-    /** 确保审计签名密钥就绪（幂等）：首次生成 SM2 密钥对，私钥 SM4 加密落盘，公钥落盘 */
+    /**
+     * 确保审计签名密钥就绪（幂等）：首次生成 SM2 密钥对，私钥 SM4 加密落盘，公钥落盘
+     */
     private synchronized void ensureKey() {
         if (cachedPublicPem != null) {
             return;
@@ -53,13 +59,17 @@ public class AuditSigner {
         cachedPublicPem = vault.loadKey(KEY_REL, PUB_NAME);
     }
 
-    /** 审计签名公钥 PEM（供外部/管理端验签） */
+    /**
+     * 审计签名公钥 PEM（供外部/管理端验签）
+     */
     public String publicKeyPem() {
         ensureKey();
         return cachedPublicPem;
     }
 
-    /** 审计密钥是否已就绪（供状态展示） */
+    /**
+     * 审计密钥是否已就绪（供状态展示）
+     */
     public boolean ready() {
         try {
             ensureKey();
@@ -70,7 +80,9 @@ public class AuditSigner {
         }
     }
 
-    /** 对审计规范化串签名，返回 SM3withSM2 签名（十六进制） */
+    /**
+     * 对审计规范化串签名，返回 SM3withSM2 签名（十六进制）
+     */
     public String sign(String canonical) {
         try {
             ensureKey();
@@ -86,7 +98,9 @@ public class AuditSigner {
         }
     }
 
-    /** 验签：规范化串 + 签名值 → 是否由本审计密钥签发且内容未被篡改 */
+    /**
+     * 验签：规范化串 + 签名值 → 是否由本审计密钥签发且内容未被篡改
+     */
     public boolean verify(String canonical, String signHex) {
         try {
             ensureKey();

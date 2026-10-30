@@ -11,9 +11,13 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class UserPageQueryDTO extends PageParam {
 
-    /** 角色编码精确过滤 */
+    /**
+     * 角色编码精确过滤
+     */
     private String roleCode;
 
-    /** 机构数据域过滤 */
+    /**
+     * 机构数据域过滤
+     */
     private String orgKey;
 }

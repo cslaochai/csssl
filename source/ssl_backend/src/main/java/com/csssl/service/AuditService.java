@@ -4,11 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.entity.AuditLog;
 import com.csssl.entity.CaOrg;
+import com.csssl.mapper.AuditLogMapper;
 import com.csssl.vo.AuditExportVO;
 import com.csssl.vo.AuditVerifyVO;
 import com.csssl.vo.ChainBrokenVO;
 import com.csssl.vo.ChainVerifyVO;
-import com.csssl.mapper.AuditLogMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,19 +29,76 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AuditService {
 
-    /** 微秒精度：与 created_at DATETIME(6) 列严格对齐，避免毫秒四舍五入导致验签失败 */
+    /**
+     * 微秒精度：与 created_at DATETIME(6) 列严格对齐，避免毫秒四舍五入导致验签失败
+     */
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
-    /** 链对账分页扫描批大小（全量对账时控制内存占用） */
+    /**
+     * 链对账分页扫描批大小（全量对账时控制内存占用）
+     */
     private static final int CHAIN_SCAN_PAGE = 500;
 
-    /** detail 列宽（VARCHAR(500)）：超长先截断，避免严格模式下插入失败而丢留痕 */
+    /**
+     * detail 列宽（VARCHAR(500)）：超长先截断，避免严格模式下插入失败而丢留痕
+     */
     private static final int DETAIL_MAX_LEN = 500;
 
     private final AuditLogMapper auditLogMapper;
     private final AuditSigner auditSigner;
 
-    /** 记录一条审计日志（自动签名防篡改 + 哈希链；机构归属缺省=平台主机构/全局操作） */
+    /**
+     * 审计记录规范化串（签名与验签共用同一格式）
+     */
+    public static String canonical(AuditLog logRow) {
+        String base = String.join("|",
+                nz(logRow.getUsername()), nz(logRow.getAction()), nz(logRow.getTarget()),
+                nz(logRow.getDetail()), nz(logRow.getIp()),
+                logRow.getCreatedAt() == null ? "" : TS.format(logRow.getCreatedAt()));
+        return logRow.getPrevSign() == null || logRow.getPrevSign().isBlank()
+                ? base : base + "|" + logRow.getPrevSign();
+    }
+
+    private static ChainBrokenVO brokenItem(Long id, String reason) {
+        ChainBrokenVO vo = new ChainBrokenVO();
+        vo.setId(id);
+        vo.setReason(reason);
+        return vo;
+    }
+
+    /**
+     * 审计行归属机构（历史行为空按 default 归位，与列默认值语义一致）
+     */
+    public static String orgOf(AuditLog row) {
+        return row.getOrgKey() == null || row.getOrgKey().isBlank() ? CaOrg.PRIMARY_ORG_KEY : row.getOrgKey();
+    }
+
+    private static String csv(String s) {
+        if (s == null) {
+            return "";
+        }
+        String v = s.replace("\"", "\"\"");
+        return v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0 || v.indexOf('\r') >= 0
+                ? '"' + v + '"' : v;
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
+    }
+
+    /**
+     * 超长详情截断到列宽内（保留可读尾部标记，签名基于截断后的值，验签自洽）
+     */
+    private static String truncate(String detail) {
+        if (detail == null || detail.length() <= DETAIL_MAX_LEN) {
+            return detail;
+        }
+        return detail.substring(0, DETAIL_MAX_LEN - 1) + "…";
+    }
+
+    /**
+     * 记录一条审计日志（自动签名防篡改 + 哈希链；机构归属缺省=平台主机构/全局操作）
+     */
     @Transactional(rollbackFor = Exception.class)
     public void record(String username, String action, String target, String detail, String ip) {
         record(username, action, target, detail, ip, CaOrg.PRIMARY_ORG_KEY);
@@ -87,7 +144,9 @@ public class AuditService {
         auditLogMapper.insert(logRow);
     }
 
-    /** 取并锁定链头记录；加锁失败降级为非锁定读（审计留痕优先于严格串行） */
+    /**
+     * 取并锁定链头记录；加锁失败降级为非锁定读（审计留痕优先于严格串行）
+     */
     private AuditLog lockChainHead() {
         try {
             return auditLogMapper.selectOne(new LambdaQueryWrapper<AuditLog>()
@@ -104,17 +163,9 @@ public class AuditService {
         }
     }
 
-    /** 审计记录规范化串（签名与验签共用同一格式） */
-    public static String canonical(AuditLog logRow) {
-        String base = String.join("|",
-                nz(logRow.getUsername()), nz(logRow.getAction()), nz(logRow.getTarget()),
-                nz(logRow.getDetail()), nz(logRow.getIp()),
-                logRow.getCreatedAt() == null ? "" : TS.format(logRow.getCreatedAt()));
-        return logRow.getPrevSign() == null || logRow.getPrevSign().isBlank()
-                ? base : base + "|" + logRow.getPrevSign();
-    }
-
-    /** 兼容验签：优先新格式（含哈希链段），失败再按旧格式（无 prevSign 段）校验，保证 P0 老记录仍可验 */
+    /**
+     * 兼容验签：优先新格式（含哈希链段），失败再按旧格式（无 prevSign 段）校验，保证 P0 老记录仍可验
+     */
     private boolean verifyCompat(AuditLog logRow) {
         if (logRow.getSign() == null || logRow.getSign().isBlank()) {
             return false;
@@ -134,7 +185,9 @@ public class AuditService {
         return false;
     }
 
-    /** 验签：按 id 读取记录并校验签名（改过任一字段即失败） */
+    /**
+     * 验签：按 id 读取记录并校验签名（改过任一字段即失败）
+     */
     public AuditVerifyVO verifyLog(Long id) {
         AuditLog logRow = auditLogMapper.selectById(id);
         if (logRow == null) {
@@ -213,7 +266,9 @@ public class AuditService {
         return vo;
     }
 
-    /** 单条记录的对账判定（前驱信息尽量复用扫描序上一条，避免逐条回查） */
+    /**
+     * 单条记录的对账判定（前驱信息尽量复用扫描序上一条，避免逐条回查）
+     */
     private void checkChainRow(AuditLog row, AuditLog prevRow, List<ChainBrokenVO> broken) {
         Long id = row.getId();
         if (row.getSign() == null || row.getSign().isBlank()) {
@@ -246,25 +301,24 @@ public class AuditService {
         }
     }
 
-    /** 取 id 严格小于给定 id 的最近一条记录（区间起点的真实前驱） */
+    /**
+     * 取 id 严格小于给定 id 的最近一条记录（区间起点的真实前驱）
+     */
     private AuditLog loadPredecessor(Long id) {
         return auditLogMapper.selectOne(new LambdaQueryWrapper<AuditLog>()
                 .lt(AuditLog::getId, id).orderByDesc(AuditLog::getId).last("LIMIT 1"));
     }
 
-    private static ChainBrokenVO brokenItem(Long id, String reason) {
-        ChainBrokenVO vo = new ChainBrokenVO();
-        vo.setId(id);
-        vo.setReason(reason);
-        return vo;
-    }
-
-    /** 分页查询审计日志（orgKey 为空=跨机构全量；仅全局用户可达此口径，调用方已按数据域强制收敛） */
+    /**
+     * 分页查询审计日志（orgKey 为空=跨机构全量；仅全局用户可达此口径，调用方已按数据域强制收敛）
+     */
     public Page<AuditLog> page(long pageNo, long pageSize, String action) {
         return page(pageNo, pageSize, action, null);
     }
 
-    /** 分页查询审计日志（机构域版：orgKey 非空=仅该机构） */
+    /**
+     * 分页查询审计日志（机构域版：orgKey 非空=仅该机构）
+     */
     public Page<AuditLog> page(long pageNo, long pageSize, String action, String orgKey) {
         LambdaQueryWrapper<AuditLog> qw = new LambdaQueryWrapper<>();
         if (action != null && !action.isBlank()) {
@@ -277,7 +331,9 @@ public class AuditService {
         return auditLogMapper.selectPage(new Page<>(pageNo, pageSize), qw);
     }
 
-    /** 取审计原始行（控制器层数据域校验用；不存在抛异常） */
+    /**
+     * 取审计原始行（控制器层数据域校验用；不存在抛异常）
+     */
     public AuditLog load(Long id) {
         AuditLog row = auditLogMapper.selectById(id);
         if (row == null) {
@@ -286,12 +342,9 @@ public class AuditService {
         return row;
     }
 
-    /** 审计行归属机构（历史行为空按 default 归位，与列默认值语义一致） */
-    public static String orgOf(AuditLog row) {
-        return row.getOrgKey() == null || row.getOrgKey().isBlank() ? CaOrg.PRIMARY_ORG_KEY : row.getOrgKey();
-    }
-
-    /** 归档导出（兼容入口=跨机构全量，调用方按数据域收敛后传入 orgKey） */
+    /**
+     * 归档导出（兼容入口=跨机构全量，调用方按数据域收敛后传入 orgKey）
+     */
     public AuditExportVO exportCsv() {
         return exportCsv(null);
     }
@@ -337,26 +390,5 @@ public class AuditService {
         vo.setSign(sign);
         vo.setCount(logs.size());
         return vo;
-    }
-
-    private static String csv(String s) {
-        if (s == null) {
-            return "";
-        }
-        String v = s.replace("\"", "\"\"");
-        return v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0 || v.indexOf('\r') >= 0
-                ? '"' + v + '"' : v;
-    }
-
-    private static String nz(String s) {
-        return s == null ? "" : s;
-    }
-
-    /** 超长详情截断到列宽内（保留可读尾部标记，签名基于截断后的值，验签自洽） */
-    private static String truncate(String detail) {
-        if (detail == null || detail.length() <= DETAIL_MAX_LEN) {
-            return detail;
-        }
-        return detail.substring(0, DETAIL_MAX_LEN - 1) + "…";
     }
 }

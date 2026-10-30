@@ -1,20 +1,16 @@
 package com.csssl.service;
 
-import com.csssl.vo.TsaPublicKeyVO;
 import com.csssl.util.CertUtil;
 import com.csssl.util.KeyVault;
 import com.csssl.util.PemUtil;
+import com.csssl.vo.TsaPublicKeyVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bouncycastle.util.encoders.Hex;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
-import java.security.KeyPair;
-import java.security.MessageDigest;
-import java.security.PrivateKey;
-import java.security.PublicKey;
-import java.security.Signature;
+import java.security.*;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -35,7 +31,9 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class TsaService {
 
-    /** 令牌规范化串版本前缀（格式变更必须换版本号，否则历史令牌验不过） */
+    /**
+     * 令牌规范化串版本前缀（格式变更必须换版本号，否则历史令牌验不过）
+     */
     public static final String CANONICAL_PREFIX = "CSSSL-TSA-V1";
 
     public static final String SERIAL_PREFIX = "TSA";
@@ -49,18 +47,25 @@ public class TsaService {
     private static final Pattern DIGEST_HEX = Pattern.compile("^[0-9a-fA-F]{64}$");
 
     private final AuditService auditService;
-    /** 单例保险库 bean（KeyVaultConfig 提供），与 CaService 共用同一 store-dir 实例 */
+    /**
+     * 单例保险库 bean（KeyVaultConfig 提供），与 CaService 共用同一 store-dir 实例
+     */
     private final KeyVault vault;
 
     private final java.security.SecureRandom random = new java.security.SecureRandom();
 
     private volatile String cachedPublicPem;
 
-    /** 一次盖章结果（HIS 侧直接落台账的字段） */
-    public record Stamp(String serial, LocalDateTime tsaTime, String tokenValue, String algo) {
+    /**
+     * 令牌规范化串（与 HIS 验签共用同一格式，两处必须一致）
+     */
+    public static String canonical(String serial, String digestHex, LocalDateTime tsaTime) {
+        return CANONICAL_PREFIX + "|" + serial + "|" + digestHex.toLowerCase() + "|" + ISO.format(tsaTime);
     }
 
-    /** 确保 TSA 密钥就绪（幂等）：SM2 密钥对，私钥 SM4 加密落盘，公钥 PEM 一并缓存 */
+    /**
+     * 确保 TSA 密钥就绪（幂等）：SM2 密钥对，私钥 SM4 加密落盘，公钥 PEM 一并缓存
+     */
     private synchronized void ensureKey() {
         if (cachedPublicPem != null) {
             return;
@@ -74,13 +79,17 @@ public class TsaService {
         cachedPublicPem = vault.loadKey("tsa", "pub");
     }
 
-    /** TSA 公钥（PEM），供业务系统验签时间戳令牌 */
+    /**
+     * TSA 公钥（PEM），供业务系统验签时间戳令牌
+     */
     public String publicKeyPem() {
         ensureKey();
         return cachedPublicPem;
     }
 
-    /** TSA 公钥指纹（SM3，人工核对用） */
+    /**
+     * TSA 公钥指纹（SM3，人工核对用）
+     */
     public String publicKeyFingerprint() {
         ensureKey();
         try {
@@ -92,7 +101,9 @@ public class TsaService {
         }
     }
 
-    /** 对内容摘要盖一枚可信时间戳（令牌自证，无状态服务） */
+    /**
+     * 对内容摘要盖一枚可信时间戳（令牌自证，无状态服务）
+     */
     public Stamp stamp(String digestHex) {
         if (digestHex == null || !DIGEST_HEX.matcher(digestHex.trim()).matches()) {
             throw new IllegalArgumentException("摘要必须为 64 位十六进制（SHA-256/SM3 摘要）");
@@ -111,12 +122,9 @@ public class TsaService {
         return new Stamp(serial, tsaTime, token, TSA_SIGN_ALGO);
     }
 
-    /** 令牌规范化串（与 HIS 验签共用同一格式，两处必须一致） */
-    public static String canonical(String serial, String digestHex, LocalDateTime tsaTime) {
-        return CANONICAL_PREFIX + "|" + serial + "|" + digestHex.toLowerCase() + "|" + ISO.format(tsaTime);
-    }
-
-    /** 校验一枚令牌是否由本 TSA 签发且与摘要/时刻一致（管理端自验用；业务侧验签在 HIS 本地用公钥） */
+    /**
+     * 校验一枚令牌是否由本 TSA 签发且与摘要/时刻一致（管理端自验用；业务侧验签在 HIS 本地用公钥）
+     */
     public boolean verifyToken(String serial, String digestHex, LocalDateTime tsaTime, String tokenValue) {
         try {
             ensureKey();
@@ -143,7 +151,9 @@ public class TsaService {
         }
     }
 
-    /** 供管理端/探针展示 TSA 状态 */
+    /**
+     * 供管理端/探针展示 TSA 状态
+     */
     public TsaPublicKeyVO status() {
         ensureKey();
         TsaPublicKeyVO vo = new TsaPublicKeyVO();
@@ -155,7 +165,9 @@ public class TsaService {
         return vo;
     }
 
-    /** 审计留痕（盖章动作） */
+    /**
+     * 审计留痕（盖章动作）
+     */
     public void audit(String username, String serial, String digestPrefix, String ip) {
         try {
             auditService.record(username == null ? "ANON" : username, "TSA_STAMP",
@@ -163,5 +175,11 @@ public class TsaService {
         } catch (Exception e) {
             log.warn("[TSA] 审计记录失败（不影响盖章）: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 一次盖章结果（HIS 侧直接落台账的字段）
+     */
+    public record Stamp(String serial, LocalDateTime tsaTime, String tokenValue, String algo) {
     }
 }

@@ -7,13 +7,14 @@ import com.csssl.dto.ApplicationPageQueryDTO;
 import com.csssl.dto.ApplicationSubmitDTO;
 import com.csssl.vo.CertVO;
 import com.csssl.entity.CertApplication;
+import com.csssl.entity.LoginUser;
 import com.csssl.service.CertApplicationService;
-import com.csssl.service.PermissionService;
-import com.csssl.util.PermissionCatalog;
-import com.csssl.util.RoleCode;
+import com.csssl.util.OrgScope;
+import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -38,75 +39,79 @@ import org.springframework.web.bind.annotation.RestController;
 public class CertApplicationController {
 
     private final CertApplicationService applicationService;
-    private final PermissionService permissionService;
 
     /** 申请单分页查询（登录即可查看；机构用户强制本机构，全局用户可按 ?orgKey= 过滤，不传=全量只读） */
     @GetMapping
     public Result<Page<CertApplication>> page(@Valid ApplicationPageQueryDTO query,
                                               HttpServletRequest request) {
         return Result.success("查询成功", applicationService.page(query.getPageNo(), query.getPageSize(), query.getStatus(),
-                query.getKeyword(), RoleCode.readOrgScope(request, query.getOrgKey())));
+                query.getKeyword(), OrgScope.readOrgScope(UserUtils.requireLoginUser().getOrgKey(), query.getOrgKey())));
     }
 
     /** 申请单详情（机构用户访问他机构单按不存在处理，不泄露存在性） */
     @GetMapping("/{id}")
     public Result<CertApplication> detail(@PathVariable Long id, HttpServletRequest request) {
         return Result.success("查询成功",
-                applicationService.detailVisible(id, RoleCode.currentOrg(request)));
+                applicationService.detailVisible(id, UserUtils.requireLoginUser().getOrgKey()));
     }
 
     /** 提交证书申请（录入员代录；需 操作员/管理员；受理域=effectiveOrg，机构单校验主体 O 受控） */
+    @PreAuthorize("hasAuthority('app:submit')")
     @PostMapping
     public Result<CertApplication> submit(@Valid @RequestBody ApplicationSubmitDTO body,
                                           @RequestParam(required = false) String orgKey,
                                           HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.APP_SUBMIT);
-        String org = RoleCode.effectiveOrg(request, orgKey == null || orgKey.isBlank() ? body.getOrgKey() : orgKey);
+        LoginUser loginUser = UserUtils.requireLoginUser();
+        String org = OrgScope.requireExplicitOrg(loginUser.getOrgKey(), orgKey == null || orgKey.isBlank() ? body.getOrgKey() : orgKey);
         return Result.success("申请提交成功", applicationService.submit(body,
-                RoleCode.currentUser(request), clientIp(request), org));
+                loginUser.getUsername(), loginUser.getRealName(), clientIp(request), org));
     }
 
     /** 审核批准（需 审核员/管理员；不得与提交人同一人；申请单必须落在操作者域） */
+    @PreAuthorize("hasAuthority('app:approve')")
     @PostMapping("/{id}/approve")
     public Result<CertApplication> approve(@PathVariable Long id, @Valid @RequestBody(required = false) ApplicationAuditDTO body,
                                            @RequestParam(required = false) String orgKey,
                                            HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.APP_APPROVE);
+        LoginUser loginUser = UserUtils.requireLoginUser();
         String comment = body == null ? null : body.getComment();
         return Result.success("已批准", applicationService.approve(id, comment,
-                RoleCode.currentUser(request), clientIp(request),
-                RoleCode.effectiveOrg(request, orgKey)));
+                loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
+                OrgScope.requireExplicitOrg(loginUser.getOrgKey(), orgKey)));
     }
 
     /** 审核驳回（需 审核员/管理员；不得与提交人同一人；申请单必须落在操作者域） */
+    @PreAuthorize("hasAuthority('app:reject')")
     @PostMapping("/{id}/reject")
     public Result<CertApplication> reject(@PathVariable Long id, @Valid @RequestBody ApplicationAuditDTO body,
                                           @RequestParam(required = false) String orgKey,
                                           HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.APP_REJECT);
+        LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("已驳回", applicationService.reject(id, body.getComment(),
-                RoleCode.currentUser(request), clientIp(request),
-                RoleCode.effectiveOrg(request, orgKey)));
+                loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
+                OrgScope.requireExplicitOrg(loginUser.getOrgKey(), orgKey)));
     }
 
     /** 按申请签发证书（需 操作员/管理员；复用模板+公钥，私钥申请方自持；落到申请单受理机构域） */
+    @PreAuthorize("hasAuthority('app:issue')")
     @PostMapping("/{id}/issue")
     public Result<CertVO> issue(@PathVariable Long id, @RequestParam(required = false) String orgKey,
                                 HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.APP_ISSUE);
+        LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("签发成功", applicationService.issue(id,
-                RoleCode.currentUser(request), clientIp(request),
-                RoleCode.effectiveOrg(request, orgKey)));
+                loginUser.getUsername(), clientIp(request),
+                OrgScope.requireExplicitOrg(loginUser.getOrgKey(), orgKey)));
     }
 
     /** 撤销申请（需 操作员/管理员；仅提交人本人或系统管理员可撤销；申请单必须落在操作者域） */
+    @PreAuthorize("hasAuthority('app:cancel')")
     @PostMapping("/{id}/cancel")
     public Result<CertApplication> cancel(@PathVariable Long id, @RequestParam(required = false) String orgKey,
                                           HttpServletRequest request) {
-        permissionService.require(request, PermissionCatalog.APP_CANCEL);
+        LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("已撤销", applicationService.cancel(id,
-                RoleCode.currentUser(request), RoleCode.currentRole(request), clientIp(request),
-                RoleCode.effectiveOrg(request, orgKey)));
+                loginUser.getUsername(), loginUser.getRoleCode(), clientIp(request),
+                OrgScope.requireExplicitOrg(loginUser.getOrgKey(), orgKey)));
     }
 
     private String clientIp(HttpServletRequest request) {

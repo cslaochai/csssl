@@ -8,15 +8,23 @@ import lombok.Data;
 @Data
 public class UserUpdateDTO {
 
-    /** 姓名（null=不改） */
+    /**
+     * 姓名（null=不改）
+     */
     private String realName;
 
-    /** 角色编码（null=不改） */
+    /**
+     * 角色编码（null=不改）
+     */
     private String roleCode;
 
-    /** 状态："1" 启用 / "0" 停用（null=不改） */
+    /**
+     * 状态："1" 启用 / "0" 停用（null=不改）
+     */
     private String status;
 
-    /** 重置口令（null=不重置） */
+    /**
+     * 重置口令（null=不重置）
+     */
     private String password;
 }

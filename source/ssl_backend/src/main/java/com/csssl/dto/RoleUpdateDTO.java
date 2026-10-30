@@ -8,15 +8,23 @@ import lombok.Data;
 @Data
 public class RoleUpdateDTO {
 
-    /** 角色名称（null=不改） */
+    /**
+     * 角色名称（null=不改）
+     */
     private String roleName;
 
-    /** 职责说明（null=不改；""=清空） */
+    /**
+     * 职责说明（null=不改；""=清空）
+     */
     private String roleDesc;
 
-    /** 排序号（数字字符串，null=不改） */
+    /**
+     * 排序号（数字字符串，null=不改）
+     */
     private String sortOrder;
 
-    /** 状态："1" 启用 / "0" 停用（null=不改） */
+    /**
+     * 状态："1" 启用 / "0" 停用（null=不改）
+     */
     private String status;
 }

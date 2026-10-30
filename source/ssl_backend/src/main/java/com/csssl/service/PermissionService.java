@@ -1,10 +1,12 @@
 package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.csssl.entity.LoginUser;
 import com.csssl.entity.RolePerm;
+import com.csssl.enums.RoleCodeEnum;
 import com.csssl.mapper.RolePermMapper;
 import com.csssl.util.PermissionCatalog;
-import com.csssl.util.RoleCode;
+import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,14 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.StringJoiner;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -40,10 +35,14 @@ public class PermissionService {
     private final RolePermMapper permMapper;
     private final AuditService auditService;
 
-    /** 角色生效权限缓存（roleCode → 权限点集合；空的不可变集合表示无授权） */
+    /**
+     * 角色生效权限缓存（roleCode → 权限点集合；空的不可变集合表示无授权）
+     */
     private final Map<String, Set<String>> cache = new ConcurrentHashMap<>();
 
-    /** 某角色当前生效权限（配置 ∩ 法定上限） */
+    /**
+     * 某角色当前生效权限（配置 ∩ 法定上限）
+     */
     public Set<String> effective(String roleCode) {
         if (roleCode == null || roleCode.isBlank()) {
             return Collections.emptySet();
@@ -67,7 +66,9 @@ public class PermissionService {
         });
     }
 
-    /** 生效权限列表（按权限目录顺序，供登录下发/前端刷新） */
+    /**
+     * 生效权限列表（按权限目录顺序，供登录下发/前端刷新）
+     */
     public List<String> effectiveList(String roleCode) {
         Set<String> effective = effective(roleCode);
         List<String> ordered = new ArrayList<>();
@@ -87,12 +88,13 @@ public class PermissionService {
      * 接口权限校验：任一权限点命中即放行；未登录/无权限抛 {@link SecurityException}（全局 403）。
      */
     public void require(HttpServletRequest request, String... permCodes) {
-        String user = RoleCode.currentUser(request);
-        if (user == null || user.isBlank()) {
+        LoginUser loginUser = UserUtils.getLoginUser();
+        if (loginUser == null) {
             log.warn("[权限] 未登录访问受限接口 uri={}", request.getRequestURI());
             throw new SecurityException("未登录或登录已过期");
         }
-        String role = RoleCode.currentRole(request);
+        String user = loginUser.getUsername();
+        String role = loginUser.getRoleCode();
         if (permCodes == null || permCodes.length == 0) {
             return;
         }
@@ -107,7 +109,9 @@ public class PermissionService {
         throw new SecurityException("权限不足");
     }
 
-    /** 角色已配置的权限点（原始库值；仅供角色配置页回显） */
+    /**
+     * 角色已配置的权限点（原始库值；仅供角色配置页回显）
+     */
     public List<String> configured(String roleCode) {
         if (roleCode == null || roleCode.isBlank()) {
             return Collections.emptyList();
@@ -165,7 +169,7 @@ public class PermissionService {
                     + String.join("、", outOfBound));
         }
         // 3) 自锁保护：系统管理员至少保留角色配置入口，否则下次无人能改回来
-        if (RoleCode.ADMIN.equals(rc)) {
+        if (RoleCodeEnum.ADMIN.name().equals(rc)) {
             for (String must : new String[]{PermissionCatalog.MENU_ROLES,
                     PermissionCatalog.ROLE_PERM, PermissionCatalog.ROLE_UPDATE}) {
                 if (!target.contains(must)) {
@@ -189,7 +193,9 @@ public class PermissionService {
         log.info("[角色] {} 权限已更新：{} 项（操作人 {}）", rc, target.size(), operator);
     }
 
-    /** 权限变更审计文案：新增/移除明细（按目录顺序可读名） */
+    /**
+     * 权限变更审计文案：新增/移除明细（按目录顺序可读名）
+     */
     private String diffDetail(String roleCode, List<String> before, Set<String> after) {
         Set<String> beforeSet = new LinkedHashSet<>(before);
         StringJoiner added = new StringJoiner("、");
@@ -214,7 +220,9 @@ public class PermissionService {
         return sb.toString();
     }
 
-    /** 角色权限/状态变更后清缓存（配置保存、角色启停时调用） */
+    /**
+     * 角色权限/状态变更后清缓存（配置保存、角色启停时调用）
+     */
     public void invalidate(String roleCode) {
         if (roleCode != null && !roleCode.isBlank()) {
             cache.remove(roleCode.trim().toUpperCase());

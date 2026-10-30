@@ -11,15 +11,23 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class CrlRecordQueryDTODTO extends PageParam {
 
-    /** 机构数据域过滤 */
+    /**
+     * 机构数据域过滤
+     */
     private String orgKey;
 
-    /** 关键字（命中 主体CN/序列号） */
+    /**
+     * 关键字（命中 主体CN/序列号）
+     */
     private String keyword;
 
-    /** 状态精确过滤（REVOKED/FROZEN） */
+    /**
+     * 状态精确过滤（REVOKED/FROZEN）
+     */
     private String status;
 
-    /** 吊销原因过滤 */
+    /**
+     * 吊销原因过滤
+     */
     private String reason;
 }

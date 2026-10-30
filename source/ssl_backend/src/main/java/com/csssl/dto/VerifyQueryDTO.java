@@ -8,9 +8,13 @@ import lombok.Data;
 @Data
 public class VerifyQueryDTO {
 
-    /** 待校验证书 PEM */
+    /**
+     * 待校验证书 PEM
+     */
     private String certPem;
 
-    /** 用途：TLS-服务端/双向TLS SIGN-签名验证；留空则只做链与时效校验 */
+    /**
+     * 用途：TLS-服务端/双向TLS SIGN-签名验证；留空则只做链与时效校验
+     */
     private String purpose;
 }

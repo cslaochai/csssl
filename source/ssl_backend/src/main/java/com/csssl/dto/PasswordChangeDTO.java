@@ -9,11 +9,15 @@ import lombok.Data;
 @Data
 public class PasswordChangeDTO {
 
-    /** 原口令（SM2 密文） */
+    /**
+     * 原口令（SM2 密文）
+     */
     @NotBlank(message = "原口令不能为空")
     private String oldPassword;
 
-    /** 新口令（SM2 密文） */
+    /**
+     * 新口令（SM2 密文）
+     */
     @NotBlank(message = "新口令不能为空")
     private String newPassword;
 }

@@ -1,13 +1,11 @@
 package com.csssl.entity;
 
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
-
-import com.fasterxml.jackson.annotation.JsonFormat;
-
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -22,40 +20,56 @@ import java.time.LocalDateTime;
 public class CaOrg {
 
     /**
+     * 存量单根的密钥目录/DN 命名空间（路径兼容判断专用，不随主机构变化）
+     */
+    public static final String LEGACY_ORG_KEY = "default";
+    /**
      * 平台主机构标识：所有不带机构参数的兼容入口都落到它。
      * 缺省 default（存量单根部署）；启动时由 OrgScope 校准为唯一在营机构。
      */
     public static volatile String PRIMARY_ORG_KEY = "default";
-
-    /** 存量单根的密钥目录/DN 命名空间（路径兼容判断专用，不随主机构变化） */
-    public static final String LEGACY_ORG_KEY = "default";
-
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 机构标识（小写字母数字，如 his1） */
+    /**
+     * 机构标识（小写字母数字，如 his1）
+     */
     private String orgKey;
 
-    /** 机构名称（展示与新根CA CN用） */
+    /**
+     * 机构名称（展示与新根CA CN用）
+     */
     private String orgName;
 
-    /** 证书主体O（机构受控，根/子CA DN 的 O 字段，全局唯一） */
+    /**
+     * 证书主体O（机构受控，根/子CA DN 的 O 字段，全局唯一）
+     */
     private String subjectO;
 
-    /** 根CA算法：RSA2048 / SM2（建机构时定，SUB_CA 跟随根） */
+    /**
+     * 根CA算法：RSA2048 / SM2（建机构时定，SUB_CA 跟随根）
+     */
     private String algorithm;
 
-    /** 状态：ACTIVE-启用 SUSPENDED-暂停 CLOSED-关闭 */
+    /**
+     * 状态：ACTIVE-启用 SUSPENDED-暂停 CLOSED-关闭
+     */
     private String status;
 
-    /** 联系人/联系方式 */
+    /**
+     * 联系人/联系方式
+     */
     private String contact;
 
-    /** 备注 */
+    /**
+     * 备注
+     */
     private String description;
 
-    /** 创建时间 */
+    /**
+     * 创建时间
+     */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;
 }

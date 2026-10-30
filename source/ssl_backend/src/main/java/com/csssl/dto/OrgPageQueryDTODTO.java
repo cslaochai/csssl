@@ -11,9 +11,13 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class OrgPageQueryDTODTO extends PageParam {
 
-    /** 关键字（命中 机构标识/名称/主体O） */
+    /**
+     * 关键字（命中 机构标识/名称/主体O）
+     */
     private String keyword;
 
-    /** 机构状态精确过滤（ACTIVE/SUSPENDED/CLOSED） */
+    /**
+     * 机构状态精确过滤（ACTIVE/SUSPENDED/CLOSED）
+     */
     private String status;
 }

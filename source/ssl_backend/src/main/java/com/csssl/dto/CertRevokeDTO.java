@@ -8,6 +8,8 @@ import lombok.Data;
 @Data
 public class CertRevokeDTO {
 
-    /** 吊销/挂起原因 */
+    /**
+     * 吊销/挂起原因
+     */
     private String reason;
 }

@@ -8,6 +8,8 @@ import lombok.Data;
 @Data
 public class CertExportP12DTO {
 
-    /** P12 口令（缺省服务端生成） */
+    /**
+     * P12 口令（缺省服务端生成）
+     */
     private String password;
 }

@@ -9,7 +9,9 @@ import lombok.Data;
 @Data
 public class AuditVerifyDTO {
 
-    /** 待验签的审计日志ID */
+    /**
+     * 待验签的审计日志ID
+     */
     @NotNull(message = "参数 id 不能为空")
     private Long id;
 }

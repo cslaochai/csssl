@@ -8,6 +8,8 @@ import lombok.Data;
 @Data
 public class CertRenewDTO {
 
-    /** 有效期天数（缺省沿用原证书） */
+    /**
+     * 有效期天数（缺省沿用原证书）
+     */
     private Integer validityDays;
 }

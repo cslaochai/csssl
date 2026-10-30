@@ -52,6 +52,17 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.FORBIDDEN.value(), "权限不足"));
     }
 
+    /**
+     * @PreAuthorize 方法级鉴权拒绝：不落兜底 500，直接按权限不足 403 返回
+     * （拒绝细节日志由 SecurityConfig#forbidden 在过滤器层写，此处不再重复）。
+     */
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<Result<Void>> handleAccessDenied(org.springframework.security.access.AccessDeniedException e) {
+        log.warn("[权限拦截] 方法级权限不足：{}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Result.error(HttpStatus.FORBIDDEN.value(), "权限不足"));
+    }
+
     /** 兜底异常 */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleException(Exception e) {

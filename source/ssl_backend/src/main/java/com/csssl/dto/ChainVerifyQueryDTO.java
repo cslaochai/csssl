@@ -8,9 +8,13 @@ import lombok.Data;
 @Data
 public class ChainVerifyQueryDTO {
 
-    /** 起始日志ID（含） */
+    /**
+     * 起始日志ID（含）
+     */
     private Long fromId;
 
-    /** 结束日志ID（含） */
+    /**
+     * 结束日志ID（含）
+     */
     private Long toId;
 }

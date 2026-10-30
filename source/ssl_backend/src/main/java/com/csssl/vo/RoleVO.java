@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
  * 角色档案视图对象：角色配置页列表与账号页角色下拉共用。
  */
 @Data
-public class RoleVo {
+public class RoleVO {
 
     /**
      * 角色ID（JSON 输出为字符串，避免前端 Long 精度丢失）
@@ -20,7 +20,7 @@ public class RoleVo {
     private Long id;
 
     /**
-     * 角色编码（六类法定角色，不可改）
+     * 角色编码（预置角色见 RoleCode 枚举，不可改；自定义角色由后台自建）
      */
     private String roleCode;
 

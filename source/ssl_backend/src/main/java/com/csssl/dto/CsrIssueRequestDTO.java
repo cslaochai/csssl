@@ -8,21 +8,33 @@ import lombok.Data;
 @Data
 public class CsrIssueRequestDTO {
 
-    /** PKCS#10 证书请求 PEM（BEGIN CERTIFICATE REQUEST） */
+    /**
+     * PKCS#10 证书请求 PEM（BEGIN CERTIFICATE REQUEST）
+     */
     private String csrPem;
 
-    /** 证书类型：SERVER / CLIENT / SUB_CA，默认 SERVER */
+    /**
+     * 证书类型：SERVER / CLIENT / SUB_CA，默认 SERVER
+     */
     private String certType;
 
-    /** 有效期（天），留空用默认值 */
+    /**
+     * 有效期（天），留空用默认值
+     */
     private Integer validityDays;
 
-    /** SAN（逗号分隔）；CSR 自带 SAN 时优先用 CSR 的 */
+    /**
+     * SAN（逗号分隔）；CSR 自带 SAN 时优先用 CSR 的
+     */
     private String san;
 
-    /** 证书模板ID（非空则以模板锁定类型/有效期/KeyUsage/EKU/策略OID） */
+    /**
+     * 证书模板ID（非空则以模板锁定类型/有效期/KeyUsage/EKU/策略OID）
+     */
     private Long templateId;
 
-    /** 用途说明 */
+    /**
+     * 用途说明
+     */
     private String description;
 }
