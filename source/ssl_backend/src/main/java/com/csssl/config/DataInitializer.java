@@ -101,8 +101,16 @@ public class DataInitializer implements ApplicationRunner {
             role.setUpdatedAt(LocalDateTime.now());
             roleMapper.insert(role);
 
-            // 默认授权=法定上限，保证升级后行为与改造前一致（预置角色原有能力不减）
+            // 默认授权=法定上限，保证升级后行为与改造前一致（预置角色原有能力不减）。
+            // 逐项补缺：schema.sql 对存量库预置的授权可能已先于角色档案落库（新库手工执行脚本后首启），
+            // 直接整批 insert 会撞 uk_role_perm 唯一键导致启动失败
             for (String permCode : max) {
+                Long granted = rolePermMapper.selectCount(new LambdaQueryWrapper<RolePerm>()
+                        .eq(RolePerm::getRoleCode, code)
+                        .eq(RolePerm::getPermCode, permCode));
+                if (granted != null && granted > 0) {
+                    continue;
+                }
                 RolePerm row = new RolePerm();
                 row.setRoleCode(code);
                 row.setPermCode(permCode);

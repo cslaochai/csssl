@@ -8,11 +8,17 @@
  * 守卫与菜单回退到路由 meta.roles 的角色判断，按钮不隐藏；
  * 服务端接口仍逐项强校验，兼容不会造成越权。
  */
+import { ref } from 'vue'
+
 const PERMS_KEY = 'perms'
 const ROLE_NAME_KEY = 'roleName'
 
+/** 权限版本号：savePerms/clearPerms 时自增；渲染中调用 hasPerm 的组件随之重算按钮 */
+export const permVersion = ref(0)
+
 /** 读取权限点数组；未初始化（旧会话）返回 null，区别于"权限为空数组" */
 export function loadPerms() {
+  void permVersion.value
   const raw = localStorage.getItem(PERMS_KEY)
   if (raw === null) return null
   try {
@@ -25,11 +31,13 @@ export function loadPerms() {
 
 export function savePerms(list) {
   localStorage.setItem(PERMS_KEY, JSON.stringify(list || []))
+  permVersion.value++
 }
 
 export function clearPerms() {
   localStorage.removeItem(PERMS_KEY)
   localStorage.removeItem(ROLE_NAME_KEY)
+  permVersion.value++
 }
 
 export function saveRoleName(name) {

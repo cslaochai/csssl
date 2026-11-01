@@ -29,6 +29,7 @@
           </button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item v-if="!tenantOptions.length" disabled>暂无租户</el-dropdown-item>
               <el-dropdown-item
                 v-for="o in tenantOptions"
                 :key="o.tenantKey"
@@ -148,7 +149,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { logout, changePassword, listTenantsCached, getMyPerms } from '@/api/system'
@@ -210,9 +211,12 @@ const domain = ref(currentTenant())
 // 参与 router-view key：切换租户后当前页组件重建、数据重载
 const domainFlag = ref(currentTenant())
 const tenantOptions = ref([])
-const tenantName = ref('')
-const tenantDisplay = computed(() => tenantName.value || domain.value || '未配置租户')
-const tenantTitle = computed(() => domain.value ? `${tenantDisplay.value}（${domain.value}）` : '尚未登记租户')
+// 只展示租户表里真实存在的租户中文名；无租户/租户已不存在时留空，不回落裸标识
+const tenantDisplay = computed(() => {
+  if (!domain.value) return ''
+  const hit = tenantOptions.value.find(o => o.tenantKey === domain.value)
+  return hit ? hit.tenantName || hit.tenantKey : ''
+})
 
 /** 下拉切换工作租户：各页数据域请求按 currentTenant() 自动附带，router-view 以 path 重建不感知域 */
 function onDomainChange(v) {
@@ -220,29 +224,35 @@ function onDomainChange(v) {
   setDomain(v)
   domain.value = v
   domainFlag.value = v
-  tenantName.value = tenantOptions.value.find(o => o.tenantKey === v)?.tenantName || ''
-  ElMessage.success(`已切换到 ${tenantName.value || v}`)
+  ElMessage.success(`已切换到 ${tenantDisplay.value || v}`)
+}
+
+/** 拉取租户清单（缓存），全局用户顺带校正工作租户；租户用户仅用于展示本租户中文名 */
+async function loadTenantOptions() {
+  const tenants = await listTenantsCached()
+  tenantOptions.value = tenants
+  if (!isGlobal.value) return
+  // 旧会话自愈：补齐/清理 primaryTenant，并清掉租户表里已不存在的非法 caDomain
+  const healed = syncPrimaryTenant(tenants)
+  if (healed !== domain.value) {
+    domain.value = healed
+    domainFlag.value = healed
+  }
 }
 
 onMounted(async () => {
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
-  if (isGlobal.value) {
-    const tenants = await listTenantsCached()
-    tenantOptions.value = tenants
-    // 旧会话自愈：补齐 primaryTenant 并清掉租户表里已不存在的非法域（如已删除的 default）
-    const healed = syncPrimaryTenant(tenants)
-    if (healed && healed !== domain.value) {
-      domain.value = healed
-      domainFlag.value = healed
-      tenantName.value = tenants.find(o => o.tenantKey === healed)?.tenantName || ''
-    }
-  }
-  if (domain.value && !tenantName.value) {
-    tenantName.value = tenantOptions.value.find(o => o.tenantKey === domain.value)?.tenantName || ''
-  }
+  await loadTenantOptions()
   window.addEventListener('perms-updated', onPermsUpdated)
+  window.addEventListener('tenants-updated', loadTenantOptions)
   await refreshMyPerms()
+})
+
+// 后端权限随时可能调整（角色配置/角色法定边界升级）：每次切页静默刷新一次，
+// 避免SPA长期驻留时按重启前的旧权限继续显示操作按钮
+watch(() => route.path, () => {
+  if (localStorage.getItem('token')) refreshMyPerms()
 })
 
 /** 角色配置页保存后广播：侧栏与顶栏角色名即时重建，无需重新登录 */
@@ -267,6 +277,7 @@ async function refreshMyPerms() {
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
   window.removeEventListener('perms-updated', onPermsUpdated)
+  window.removeEventListener('tenants-updated', loadTenantOptions)
 })
 
 // ===== 菜单树：页面属性（标题/图标/角色）单一来源=路由 meta，此处只定义分组 =====

@@ -186,18 +186,39 @@ CREATE TABLE IF NOT EXISTS ssl_crl_state (
 -- 租户注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额）
 CREATE TABLE IF NOT EXISTS ssl_ca_tenant (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
-    tenant_key     VARCHAR(32)  NOT NULL COMMENT '租户标识（小写字母数字，如 his1；default=院内默认域/存量单根）',
+    tenant_key     VARCHAR(32)  NOT NULL COMMENT '租户标识（由统一社会信用代码小写派生，如 91430100ma4l5k2n3x；default=院内默认域/存量单根）',
+    uscc        VARCHAR(18)  NULL COMMENT '统一社会信用代码（GB 32100，新租户必填且唯一；存量行留空）',
     tenant_name    VARCHAR(64)  NOT NULL COMMENT '租户名称（展示与新根CA CN用）',
     subject_o   VARCHAR(128) NOT NULL COMMENT '证书主体O（租户受控，根/子CA DN 的 O 字段，全局唯一）',
     algorithm   VARCHAR(32)  NOT NULL DEFAULT 'SM2' COMMENT '根CA算法：RSA2048 / SM2（建租户时定，SUB_CA 跟随根）',
     status      VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE' COMMENT '状态：ACTIVE-启用 SUSPENDED-暂停 CLOSED-关闭',
-    contact     VARCHAR(64)  NULL COMMENT '联系人/联系方式',
-    description VARCHAR(500) NULL COMMENT '备注',
+    contact       VARCHAR(64)  NULL COMMENT '联系人姓名',
+    contact_phone VARCHAR(32)  NULL COMMENT '联系人手机号（前端展示做掩码）',
+    description   VARCHAR(500) NULL COMMENT '备注',
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_tenant_key (tenant_key),
+    UNIQUE KEY uk_uscc (uscc),
     UNIQUE KEY uk_subject_o (subject_o)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA租户注册表（多根CA域隔离）';
+
+-- 幂等加列：租户联系人手机号（列表/详情展示做掩码，存量行留空）
+SET @c_tel = (SELECT COUNT(*) FROM information_schema.columns
+              WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_tenant' AND column_name = 'contact_phone');
+SET @s_tel = IF(@c_tel = 0, 'ALTER TABLE ssl_ca_tenant ADD COLUMN contact_phone VARCHAR(32) NULL COMMENT ''联系人手机号（前端展示做掩码）'' AFTER contact', 'SELECT 1');
+PREPARE s_tel FROM @s_tel; EXECUTE s_tel; DEALLOCATE PREPARE s_tel;
+
+-- 幂等加列：租户统一社会信用代码（新租户唯一键，租户标识由它派生；存量行留空）
+SET @c_uscc = (SELECT COUNT(*) FROM information_schema.columns
+               WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_tenant' AND column_name = 'uscc');
+SET @s_uscc = IF(@c_uscc = 0, 'ALTER TABLE ssl_ca_tenant ADD COLUMN uscc VARCHAR(18) NULL COMMENT ''统一社会信用代码（GB 32100，新租户必填且唯一；存量行留空）'' AFTER tenant_key', 'SELECT 1');
+PREPARE s_uscc FROM @s_uscc; EXECUTE s_uscc; DEALLOCATE PREPARE s_uscc;
+
+-- 幂等唯一索引：同一统一社会信用代码只能登记一个租户（MySQL 唯一索引允许多个 NULL，存量不受影响）
+SET @i_uscc = (SELECT COUNT(*) FROM information_schema.statistics
+               WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_tenant' AND index_name = 'uk_uscc');
+SET @s_i_uscc = IF(@i_uscc = 0, 'ALTER TABLE ssl_ca_tenant ADD UNIQUE KEY uk_uscc (uscc)', 'SELECT 1');
+PREPARE s_i_uscc FROM @s_i_uscc; EXECUTE s_i_uscc; DEALLOCATE PREPARE s_i_uscc;
 
 -- 幂等加列：各业务表归属租户。存量行由 DEFAULT 'default' 自动归位院内默认域；
 -- 模板/用户用 NULL 表达"全局"语义（全局模板对所有租户可见、全局管理员不受限）
@@ -352,3 +373,81 @@ PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- ADMIN 已收口为档案/只读 21 项白名单，不含审批权）
 INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
     ('APPROVER', 'cert:op:approve');
+
+-- ===== HIS 等外部系统在线对接（APP 直连 API） =====
+
+-- 外部 API 客户端：tenant_key 由服务端绑定，请求路径不再携带租户标识；
+-- app_id/secret 均为随机不可猜串，secret 密文存 ssl_key_vault（api-clients/{app_id}），本表不落明文
+CREATE TABLE IF NOT EXISTS ssl_api_client (
+    id                 BIGINT       NOT NULL AUTO_INCREMENT,
+    app_id             VARCHAR(64)  NOT NULL COMMENT '随机客户端标识（app_+32位十六进制）',
+    tenant_key         VARCHAR(32)  NOT NULL COMMENT '绑定租户：请求租户域由此反查，不信任调用方',
+    client_name        VARCHAR(64)  NOT NULL COMMENT '客户端名称（审计展示，如 HIS生产前置）',
+    ip_allowlist       VARCHAR(500) NULL COMMENT '逗号分隔 IP/CIDR（IPv4 CIDR；空=不限来源）',
+    client_cert_sha256 VARCHAR(128) NULL COMMENT 'mTLS 客户端证书 SHA-256 指纹（空=不校验）',
+    secret_version     INT          NOT NULL DEFAULT 1 COMMENT 'secret 版本（轮换+1，旧 secret 立即失效）',
+    status             TINYINT      NOT NULL DEFAULT 1 COMMENT '1-启用 0-停用',
+    last_used_at       DATETIME     NULL COMMENT '最近一次认证通过时间',
+    created_by         VARCHAR(64)  NULL COMMENT '登记人',
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    rotated_at         DATETIME     NULL COMMENT 'secret 最近轮换时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_app_id (app_id),
+    KEY idx_client_tenant (tenant_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='外部系统 API 客户端（HIS 等；租户绑定+随机凭证）';
+
+-- 幂等补列：申请单外部对接字段（幂等键/对账/来源渠道）
+SET @c_ext1 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'external_system');
+SET @s_ext1 := IF(@c_ext1 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN external_system VARCHAR(64) NULL COMMENT ''外部系统标识（API 客户端 appId）'' AFTER description', 'SELECT 1');
+PREPARE s_ext1 FROM @s_ext1; EXECUTE s_ext1; DEALLOCATE PREPARE s_ext1;
+
+SET @c_ext2 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'external_request_id');
+SET @s_ext2 := IF(@c_ext2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN external_request_id VARCHAR(64) NULL COMMENT ''外部系统申请唯一ID（幂等键）'' AFTER external_system', 'SELECT 1');
+PREPARE s_ext2 FROM @s_ext2; EXECUTE s_ext2; DEALLOCATE PREPARE s_ext2;
+
+SET @c_ext3 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'external_request_hash');
+SET @s_ext3 := IF(@c_ext3 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN external_request_hash VARCHAR(64) NULL COMMENT ''幂等请求体指纹（SHA-256，同ID异体判冲突）'' AFTER external_request_id', 'SELECT 1');
+PREPARE s_ext3 FROM @s_ext3; EXECUTE s_ext3; DEALLOCATE PREPARE s_ext3;
+
+SET @c_ext4 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'external_employee_id');
+SET @s_ext4 := IF(@c_ext4 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN external_employee_id VARCHAR(64) NULL COMMENT ''外部员工主键（对账用）'' AFTER external_request_hash', 'SELECT 1');
+PREPARE s_ext4 FROM @s_ext4; EXECUTE s_ext4; DEALLOCATE PREPARE s_ext4;
+
+SET @c_ext5 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'external_employee_code');
+SET @s_ext5 := IF(@c_ext5 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN external_employee_code VARCHAR(64) NULL COMMENT ''外部门员工号'' AFTER external_employee_id', 'SELECT 1');
+PREPARE s_ext5 FROM @s_ext5; EXECUTE s_ext5; DEALLOCATE PREPARE s_ext5;
+
+SET @c_ext6 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'external_dept_name');
+SET @s_ext6 := IF(@c_ext6 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN external_dept_name VARCHAR(64) NULL COMMENT ''外部科室名称（展示用，不进DN）'' AFTER external_employee_code', 'SELECT 1');
+PREPARE s_ext6 FROM @s_ext6; EXECUTE s_ext6; DEALLOCATE PREPARE s_ext6;
+
+SET @c_ext7 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'channel');
+SET @s_ext7 := IF(@c_ext7 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT ''WEB'' COMMENT ''来源渠道：WEB-管理端录入 API-外部系统直连'' AFTER external_dept_name', 'SELECT 1');
+PREPARE s_ext7 FROM @s_ext7; EXECUTE s_ext7; DEALLOCATE PREPARE s_ext7;
+
+SET @idx_ext := (SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND INDEX_NAME = 'uk_ext_request');
+SET @s_ext8 := IF(@idx_ext = 0, 'ALTER TABLE ssl_cert_application ADD UNIQUE KEY uk_ext_request (tenant_key, external_system, external_request_id)', 'SELECT 1');
+PREPARE s_ext8 FROM @s_ext8; EXECUTE s_ext8; DEALLOCATE PREPARE s_ext8;
+
+-- 幂等播种：租户接入凭证重置权（tenant:credential）与 API 客户端管理权（apiclient:manage）归租户管理员；
+-- 租户生命周期/接入凭证等权限已从 ADMIN 法定上限移除（DataInitializer 启动时自动修剪库中超界授权）
+INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
+    ('TENANT_ADMIN', 'tenant:credential'),
+    ('TENANT_ADMIN', 'apiclient:manage');
+
+-- 幂等播种：ADMIN 全菜单只读巡检权限（存量库升级补授；新库由 DataInitializer 按法定上限播种）。
+-- 系统管理员保留账号建号（user:create/user:update），其余业务/租户/角色授权一律只读或不可见
+INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
+    ('ADMIN', 'menu:root-ca'),
+    ('ADMIN', 'menu:templates'),
+    ('ADMIN', 'menu:audit'),
+    ('ADMIN', 'audit:view'),
+    ('ADMIN', 'ca:share:view');

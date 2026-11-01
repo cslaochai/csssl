@@ -15,7 +15,7 @@
           {{ rootKeyLabel }}
         </el-tag>
         <el-tag type="primary" effect="dark" size="small" style="margin-left: 8px">
-          当前操作域：{{ tenant }}
+          当前操作域：{{ tenantLabel }}
         </el-tag>
       </div>
       <div>
@@ -47,7 +47,7 @@
 
     <el-alert
         v-if="isGlobal"
-        :title="`当前在租户域「${tenant}」上操作根CA（顶栏「租户域」切换）。各租户根独立、互不可信。`"
+        :title="`当前在租户域「${tenantLabel}」上操作根CA（顶栏「租户域」切换）。各租户根独立、互不可信。`"
         type="info"
         :closable="false"
         show-icon
@@ -177,6 +177,12 @@ import {listTenantsCached} from '@/api/system'
 // 当前操作域：租户用户=本租户；全局用户=平台主租户（登录下发，旧会话经 syncPrimaryTenant 自愈）
 const tenant = ref(currentTenant())
 const isGlobal = ref(isGlobalUser())
+// 域标识由统一社会信用代码派生、不可读，标签一律显示租户名称（未命中回落标识）
+const tenantLabel = ref(tenant.value)
+listTenantsCached().then(list => {
+  const hit = (list || []).find(t => t.tenantKey === tenant.value)
+  if (hit?.tenantName) tenantLabel.value = hit.tenantName
+})
 
 const root = ref({})
 const initLoading = ref(false)
@@ -222,8 +228,8 @@ async function loadShares() {
 
 async function onInit() {
   const confirmed = await ElMessageBox.confirm(
-      `将在租户域「${tenant.value}」上初始化独立根CA。若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？`,
-      `初始化根CA（${tenant.value}）`,
+      `将在租户域「${tenantLabel.value}」上初始化独立根CA。若旧根私钥丢失，重建会导致已签发证书与 SUB_CA 全部失效。新根生成后会自动切换为 Shamir(3,5) 门限分持。确定继续吗？`,
+      `初始化根CA（${tenantLabel.value}）`,
       {type: 'warning', confirmButtonText: '确定初始化', cancelButtonText: '取消'}
   ).catch(() => false)
   if (!confirmed) return

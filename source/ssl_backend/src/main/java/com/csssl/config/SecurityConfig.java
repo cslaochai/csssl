@@ -4,6 +4,7 @@ import com.csssl.common.Result;
 import com.csssl.entity.LoginUser;
 import com.csssl.mapper.SysRoleMapper;
 import com.csssl.mapper.SysUserMapper;
+import com.csssl.service.ApiClientService;
 import com.csssl.service.PermissionService;
 import com.csssl.util.JwtUtil;
 import com.csssl.util.UserUtils;
@@ -53,6 +54,8 @@ public class SecurityConfig {
     private final SysUserMapper userMapper;
     private final SysRoleMapper roleMapper;
     private final PermissionService permissionService;
+    private final ApiClientService apiClientService;
+    private final CssslProperties props;
 
     /**
      * 未登录/令牌失效（含令牌非法、账号停用、版本不符、角色停用——TokenAuthFilter 已提前 401，此处兜底缺令牌场景）
@@ -91,8 +94,17 @@ public class SecurityConfig {
         return new TokenAuthFilter(jwtUtil, userMapper, roleMapper, permissionService);
     }
 
+    /**
+     * 外部系统直连 API 鉴权（仅 /ca/api/**）：appId 反查租户 + HMAC 验签 + 防重放 + 限流
+     */
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, TokenAuthFilter tokenAuthFilter) throws Exception {
+    public CaApiAuthFilter caApiAuthFilter() {
+        return new CaApiAuthFilter(apiClientService, props);
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, TokenAuthFilter tokenAuthFilter,
+                                                   CaApiAuthFilter caApiAuthFilter) throws Exception {
         http
                 // CORS 与 WebConfig 的 MVC 跨域配置共用一套口径（预检请求由此放行）
                 .cors(Customizer.withDefaults())
@@ -105,6 +117,7 @@ public class SecurityConfig {
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(SecurityConfig::unauthorized)
                         .accessDeniedHandler(SecurityConfig::forbidden))
+                .addFilterBefore(caApiAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(tokenAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

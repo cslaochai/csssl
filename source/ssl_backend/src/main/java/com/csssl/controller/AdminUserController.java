@@ -101,7 +101,7 @@ public class AdminUserController {
                 ? RoleCodeEnum.OPERATOR.name() : body.getRoleCode().trim().toUpperCase();
         if (!isSupportedRole(role)) {
             throw new IllegalArgumentException("不支持的角色：" + role
-                    + "（仅支持 ADMIN / OPERATOR / APPROVER / AUDITOR / SECURITY_ADMIN / KEY_ADMIN）");
+                    + "（须为预置角色或已启用的自定义角色）");
         }
         requireAssignableRole(role);
         LoginUser loginUser = UserUtils.requireLoginUser();

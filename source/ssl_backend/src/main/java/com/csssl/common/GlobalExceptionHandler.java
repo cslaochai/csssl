@@ -28,6 +28,16 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.BAD_REQUEST.value(), message));
     }
 
+    /**
+     * 对外 API 契约异常（/ca/api/**）：按异常携带的状态码返回，消息为面向调用方的校验口径
+     */
+    @ExceptionHandler(ApiException.class)
+    public ResponseEntity<Result<Void>> handleApi(ApiException e) {
+        log.warn("[对外API] status={} {}", e.getStatus(), e.getMessage());
+        return ResponseEntity.status(e.getStatus())
+                .body(Result.error(e.getStatus(), e.getMessage()));
+    }
+
     /** 参数校验/业务规则不满足（面向入参，消息本身即校验口径，可回显） */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Result<Void>> handleIllegalArgument(IllegalArgumentException e) {

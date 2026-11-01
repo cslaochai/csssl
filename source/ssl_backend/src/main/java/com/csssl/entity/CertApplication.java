@@ -74,6 +74,41 @@ public class CertApplication {
     private String description;
 
     /**
+     * 外部系统标识（API 客户端 appId；管理端录入为空）
+     */
+    private String externalSystem;
+
+    /**
+     * 外部系统申请唯一ID（同租户同客户端内幂等）
+     */
+    private String externalRequestId;
+
+    /**
+     * 幂等请求体指纹（SHA-256；同ID不同体判冲突）
+     */
+    private String externalRequestHash;
+
+    /**
+     * 外部员工主键（对账用）
+     */
+    private String externalEmployeeId;
+
+    /**
+     * 外部门员工号
+     */
+    private String externalEmployeeCode;
+
+    /**
+     * 外部科室名称（展示用，不进 DN）
+     */
+    private String externalDeptName;
+
+    /**
+     * 来源渠道：WEB-管理端录入 API-外部系统直连
+     */
+    private String channel;
+
+    /**
      * 状态：PENDING-待审核 APPROVED-已批准 REJECTED-已驳回 ISSUED-已签发 CANCELLED-已撤销
      */
     private String status;

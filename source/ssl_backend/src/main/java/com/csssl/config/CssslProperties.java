@@ -45,6 +45,8 @@ public class CssslProperties {
 
     private Security security = new Security();
 
+    private Api api = new Api();
+
     @Data
     public static class RootCa {
         /**
@@ -99,6 +101,34 @@ public class CssslProperties {
     public static class Security {
         private Sm2 sm2 = new Sm2();
         private Jwt jwt = new Jwt();
+    }
+
+    /**
+     * 外部系统直连 API（/ca/api/v1）：HMAC 鉴权、防重放、请求体与限流约束。
+     * 租户由 appId 绑定关系反查，URL 不携带租户标识。
+     */
+    @Data
+    public static class Api {
+        /**
+         * 总开关：关闭时 /ca/api/** 一律 503
+         */
+        private boolean enabled = true;
+        /**
+         * 请求时间戳允许偏差（秒）
+         */
+        private int clockSkewSeconds = 300;
+        /**
+         * nonce 保留时长（秒），期间同 appId 重复即拒
+         */
+        private int nonceTtlSeconds = 600;
+        /**
+         * 请求体上限（字节）
+         */
+        private int maxBodyBytes = 262144;
+        /**
+         * 单客户端每分钟请求上限（≤0 关闭限流）
+         */
+        private int rateLimitPerMinute = 120;
     }
 
     @Data

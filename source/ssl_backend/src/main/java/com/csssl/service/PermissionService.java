@@ -168,12 +168,12 @@ public class PermissionService {
             throw new SecurityException("权限不足：以下权限点超出角色 " + rc + " 的法定职责边界，不能授予："
                     + String.join("、", outOfBound));
         }
-        // 3) 自锁保护：系统管理员至少保留角色配置入口，否则下次无人能改回来
-        if (RoleCodeEnum.ADMIN.name().equals(rc)) {
+        // 3) 自锁保护：角色配置的持有者（用户与角色管理员）必须保留配置入口，否则下次无人能改回来
+        if (RoleCodeEnum.USER_ADMIN.name().equals(rc)) {
             for (String must : new String[]{PermissionCatalog.MENU_ROLES,
                     PermissionCatalog.ROLE_PERM, PermissionCatalog.ROLE_UPDATE}) {
                 if (!target.contains(must)) {
-                    throw new IllegalArgumentException("系统管理员必须保留角色配置权限（menu:roles / role:perm / role:update），避免自锁");
+                    throw new IllegalArgumentException("用户与角色管理员必须保留角色配置权限（menu:roles / role:perm / role:update），避免自锁");
                 }
             }
         }

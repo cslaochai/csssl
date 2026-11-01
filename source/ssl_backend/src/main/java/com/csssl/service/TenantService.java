@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
+import com.csssl.entity.ApiClient;
 import com.csssl.entity.CaTenant;
+import com.csssl.mapper.ApiClientMapper;
 import com.csssl.mapper.CaTenantMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.vo.CaStatusVO;
@@ -16,7 +18,6 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * 租户域管理（路线A：每家医院=一套独立根CA，租户间互不信任）。
@@ -33,10 +34,12 @@ public class TenantService {
     public static final String STATUS_SUSPENDED = "SUSPENDED";
     public static final String STATUS_CLOSED = "CLOSED";
     /**
-     * 租户标识格式：小写字母数字（同时兜住路径穿越——tenantKey 直接参与 store-dir/tenants/{tenantKey} 拼路）
+     * 统一社会信用代码（GB 32100）字符集与加权因子：末位校验码 = 加权和 mod 31 映射
      */
-    private static final Pattern TENANT_KEY = Pattern.compile("^[a-z0-9]{1,32}$");
+    private static final String USCC_CHARSET = "0123456789ABCDEFGHJKLMNPQRTUWXY";
+    private static final int[] USCC_WEIGHTS = {1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28};
     private final CaTenantMapper tenantMapper;
+    private final ApiClientMapper apiClientMapper;
     private final CaService caService;
     private final CssslProperties props;
 
@@ -61,7 +64,8 @@ public class TenantService {
         }
         if (keyword != null && !keyword.isBlank()) {
             String kw = keyword.trim();
-            qw.and(w -> w.like(CaTenant::getTenantKey, kw).or().like(CaTenant::getTenantName, kw).or().like(CaTenant::getSubjectO, kw));
+            qw.and(w -> w.like(CaTenant::getTenantKey, kw).or().like(CaTenant::getTenantName, kw)
+                    .or().like(CaTenant::getSubjectO, kw).or().like(CaTenant::getUscc, kw));
         }
         qw.orderByAsc(CaTenant::getId);
         Page<CaTenant> page = tenantMapper.selectPage(new Page<>(pageNo, pageSize), qw);
@@ -96,6 +100,15 @@ public class TenantService {
             // 单租户状态异常不拖垮整个列表（如密钥文件损坏）
             vo.setHasRoot(false);
             vo.setStatusError(e.getMessage());
+        }
+        ApiClient client = apiClientMapper.selectOne(new LambdaQueryWrapper<ApiClient>()
+                .eq(ApiClient::getTenantKey, tenant.getTenantKey())
+                .orderByAsc(ApiClient::getId)
+                .last("LIMIT 1"));
+        if (client != null) {
+            vo.setApiClientId(client.getId());
+            vo.setApiAppId(client.getAppId());
+            vo.setApiClientStatus(client.getStatus());
         }
         return vo;
     }
@@ -139,9 +152,15 @@ public class TenantService {
     /**
      * 新建租户并立即初始化独立根CA+SUB_CA+门限份额。
      * 算法缺省取全局配置 csssl.root-ca.algorithm（新租户"开租户默认参数"约定）。
+     * 租户标识由统一社会信用代码小写派生（不再人工填写），唯一性由该代码保证。
      */
-    public CaTenant create(String tenantKey, String tenantName, String subjectO, String algorithm,
-                        String contact, String description) {
+    public CaTenant create(String uscc, String tenantName, String subjectO, String algorithm,
+                        String contact, String contactPhone, String description) {
+        String code = uscc == null ? "" : uscc.trim().toUpperCase();
+        if (!isValidUscc(code)) {
+            throw new IllegalArgumentException("统一社会信用代码校验不通过，请核对18位代码与末位校验码");
+        }
+        String tenantKey = code.toLowerCase();
         KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
         if (CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
             throw new IllegalArgumentException("default 为存量单根兼容标识，不可新建");
@@ -152,9 +171,19 @@ public class TenantService {
         if (subjectO == null || subjectO.isBlank() || subjectO.trim().length() > 128) {
             throw new IllegalArgumentException("证书主体O必填且不超过128字符");
         }
+        String phone = contactPhone == null || contactPhone.isBlank() ? null : contactPhone.trim();
+        if (phone != null && !phone.matches("^1[3-9]\\d{9}$")) {
+            throw new IllegalArgumentException("联系方式须为11位手机号");
+        }
         String alg = algorithm == null || algorithm.isBlank()
                 ? props.getRootCa().getAlgorithm() : algorithm.trim();
         CertUtil.checkAlgorithm(alg);
+        CaTenant sameCode = tenantMapper.selectOne(new LambdaQueryWrapper<CaTenant>()
+                .eq(CaTenant::getUscc, code));
+        if (sameCode != null) {
+            throw new IllegalArgumentException("该统一社会信用代码已登记租户：" + sameCode.getTenantName()
+                    + "（" + sameCode.getTenantKey() + "）");
+        }
         if (findByKey(tenantKey) != null) {
             throw new IllegalArgumentException("租户标识已存在: " + tenantKey);
         }
@@ -165,15 +194,18 @@ public class TenantService {
 
         CaTenant tenant = new CaTenant();
         tenant.setTenantKey(tenantKey);
+        tenant.setUscc(code);
         tenant.setTenantName(tenantName.trim());
         tenant.setSubjectO(subjectO.trim());
         tenant.setAlgorithm(alg);
         tenant.setStatus(STATUS_ACTIVE);
         tenant.setContact(contact);
+        tenant.setContactPhone(phone);
         tenant.setDescription(description);
         tenant.setCreatedAt(LocalDateTime.now());
         tenantMapper.insert(tenant);
-        log.info("[租户] 已登记租户 {}（{}，主体O={}，算法={}）", tenantKey, tenant.getTenantName(), tenant.getSubjectO(), alg);
+        log.info("[租户] 已登记租户 {}（{}，USCC={}，主体O={}，算法={}）", tenantKey, tenant.getTenantName(),
+                code, tenant.getSubjectO(), alg);
 
         // 开租户即建根：独立根CA → SUB_CA → 门限份额（复用带 tenantKey 的初始化路径，幂等）
         caService.initRoot(tenantKey);
@@ -217,5 +249,23 @@ public class TenantService {
         tenantMapper.updateById(tenant);
         log.info("[租户] {} 状态变更为 {}", tenantKey, target);
         return tenant;
+    }
+
+    /**
+     * 统一社会信用代码校验（GB 32100）：18 位、字符集合法、末位校验码 = (31 - 加权和 mod 31) mod 31
+     */
+    static boolean isValidUscc(String code) {
+        if (code == null || code.length() != 18) {
+            return false;
+        }
+        int sum = 0;
+        for (int i = 0; i < 17; i++) {
+            int idx = USCC_CHARSET.indexOf(code.charAt(i));
+            if (idx < 0) {
+                return false;
+            }
+            sum += idx * USCC_WEIGHTS[i];
+        }
+        return USCC_CHARSET.charAt((31 - sum % 31) % 31) == code.charAt(17);
     }
 }

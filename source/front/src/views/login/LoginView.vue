@@ -80,7 +80,7 @@ const form = reactive({
 })
 
 // ===== 演示账号凭据（与后端 ssl_sys_user 同步；口令已统一为 123456）=====
-// 数据来源：直读 ssl_ca.ssl_sys_user（2026-10-30）—— 8 个全局账号全部启用
+// 数据来源：直读 ssl_ca.ssl_sys_user（2026-11-01）—— 10 个全局账号全部启用
 const credVisible = ref(false)
 
 const credRows = [
@@ -88,19 +88,31 @@ const credRows = [
     role: '系统管理员',
     login: 'admin',
     name: '系统管理员',
-    ability: '用户/角色/租户档案维护，业务台账只读（签发/审核/吊销等业务操作一律不沾）',
+    ability: '全菜单只读巡检（列表/详情）；仅保留建号与账号档案维护（可建各角色账号、重置口令）；不签发/审核/吊销，不开租户，不改角色权限',
+  },
+  {
+    role: '租户管理员',
+    login: 'zhangshuhao',
+    name: '张书豪',
+    ability: '开租户（登记即建独立根CA与SUB_CA、发接入凭证）、租户暂停/恢复/关闭、重置接入密钥、API 客户端登记与轮换',
+  },
+  {
+    role: '用户与角色管理员',
+    login: 'liuyaqin',
+    name: '刘雅琴',
+    ability: '建号、改角色、启停账号、重置口令；角色权限配置（法定边界内增减授权）',
   },
   {
     role: '审计员',
     login: 'wanghao',
     name: '王浩',
-    ability: '仅可查看审计与证书，不可签发/审核/管理',
+    ability: '审计日志查询与验签、归档；证书与吊销信息只读，不可签发/审核/管理',
   },
   {
     role: '审计员',
     login: 'zhouziang',
     name: '周子昂',
-    ability: '仅可查看审计与证书，不可签发/审核/管理',
+    ability: '审计日志查询与验签、归档；证书与吊销信息只读，不可签发/审核/管理',
   },
   {
     role: 'CA操作员',

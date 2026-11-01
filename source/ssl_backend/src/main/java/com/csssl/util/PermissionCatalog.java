@@ -82,6 +82,7 @@ public final class PermissionCatalog {
     public static final String TENANT_SUSPEND = "tenant:suspend";
     public static final String TENANT_RESUME = "tenant:resume";
     public static final String TENANT_CLOSE = "tenant:close";
+    public static final String TENANT_CREDENTIAL = "tenant:credential";
 
     public static final String USER_LIST = "user:list";
     public static final String USER_CREATE = "user:create";
@@ -89,6 +90,7 @@ public final class PermissionCatalog {
 
     public static final String ROLE_UPDATE = "role:update";
     public static final String ROLE_PERM = "role:perm";
+    public static final String APICLIENT_MANAGE = "apiclient:manage";
 
     public static final String AUDIT_VIEW = "audit:view";
     public static final String AUDIT_VERIFY = "audit:verify";
@@ -110,7 +112,7 @@ public final class PermissionCatalog {
         menu(MENU_CRL, "CRL吊销", "吊销列表查看与下载");
         menu(MENU_OCSP, "OCSP查询", "证书状态在线查询");
         menu(MENU_TSA, "时间戳TSA", "可信时间戳服务");
-        menu(MENU_TENANTS, "租户管理", "多租户域注册与启停（仅全局系统管理员）");
+        menu(MENU_TENANTS, "租户管理", "多租户域注册与启停（租户管理员；系统管理员只读巡检）");
         menu(MENU_ROOT_CA, "根CA管理", "根CA初始化、密钥封存与门限分持");
         menu(MENU_TEMPLATES, "证书模板", "证书策略模板（KeyUsage/EKU/策略OID）");
         menu(MENU_USERS, "用户管理", "管理账号的建号、改角色、启停与重置口令");
@@ -159,6 +161,7 @@ public final class PermissionCatalog {
         action("租户管理", TENANT_SUSPEND, "暂停租户", "停止对外签发");
         action("租户管理", TENANT_RESUME, "恢复租户", "恢复签发");
         action("租户管理", TENANT_CLOSE, "关闭租户", "CLOSED 终态");
+        action("租户管理", TENANT_CREDENTIAL, "重置接入密钥", "HIS 接入凭证轮换，旧 secret 立即失效（仅展示一次）");
 
         // ---------- 用户与角色 ----------
         action("用户与角色", USER_LIST, "查看账号", "管理账号列表");
@@ -166,6 +169,7 @@ public final class PermissionCatalog {
         action("用户与角色", USER_UPDATE, "修改账号", "改角色/启停/重置口令");
         action("用户与角色", ROLE_UPDATE, "编辑角色档案", "名称/职责/排序/启停");
         action("用户与角色", ROLE_PERM, "配置角色权限", "菜单与按钮授权，不得越法定边界");
+        action("用户与角色", APICLIENT_MANAGE, "管理API客户端", "外部系统接入凭证登记、轮换与启停（secret 仅展示一次）");
 
         // ---------- 审计 ----------
         action("审计", AUDIT_VIEW, "查看审计日志", "审计独立，仅审计员可读");

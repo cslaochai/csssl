@@ -41,16 +41,20 @@ export function saveSessionTenant(tenantKey, tenantPrimary) {
 }
 
 /**
- * 旧会话自愈：primaryTenant 下发机制上线前的存量会话没有该键，按在营租户补齐；
+ * 旧会话自愈：primaryTenant 缺失或已不在租户表内（如开发期建过又清库）时，
+ * 按在营租户补齐；租户表为空则清掉该键，顶栏不展示任何租户。
  * 顺带清掉租户表里已不存在的非法 caDomain（如已删除的 default）。
  * 返回补齐/校正后的当前租户。
  */
 export function syncPrimaryTenant(tenants) {
-  if (!localStorage.getItem('primaryTenant')) {
-    const active = (tenants || []).find(o => o.status === 'ACTIVE') || (tenants || [])[0]
+  const list = tenants || []
+  const stored = localStorage.getItem('primaryTenant')
+  if (!stored || !list.some(o => o.tenantKey === stored)) {
+    const active = list.find(o => o.status === 'ACTIVE') || list[0]
     if (active?.tenantKey) localStorage.setItem('primaryTenant', active.tenantKey)
+    else localStorage.removeItem('primaryTenant')
   }
-  return resolveDomain(tenants)
+  return resolveDomain(list)
 }
 
 /** 校正 caDomain：不在租户清单内的存量值（如 default）清除并回落主租户 */

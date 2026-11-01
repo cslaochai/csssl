@@ -35,9 +35,14 @@ public class CaTenant {
     private Long id;
 
     /**
-     * 租户标识（小写字母数字，如 his1）
+     * 租户标识：由统一社会信用代码小写派生（路径/接口用），不再人工填写
      */
     private String tenantKey;
+
+    /**
+     * 统一社会信用代码（18位，登记唯一键）
+     */
+    private String uscc;
 
     /**
      * 租户名称（展示与新根CA CN用）
@@ -60,9 +65,14 @@ public class CaTenant {
     private String status;
 
     /**
-     * 联系人/联系方式
+     * 联系人姓名
      */
     private String contact;
+
+    /**
+     * 联系人手机号（前端展示做掩码，用于CA运维联络）
+     */
+    private String contactPhone;
 
     /**
      * 备注

@@ -65,6 +65,18 @@ csssl:
     jwt:
       # 会话有效期（毫秒），默认24小时；签名密钥属环境项，落 profile 文件
       expiration: 86400000
+  # ===== 外部系统直连 API（HIS 等；/ca/api/v1） =====
+  api:
+    # 总开关：关闭时对外 API 一律 503
+    enabled: ${SSL_API_ENABLED:true}
+    # 请求时间戳允许偏差（秒）
+    clock-skew-seconds: ${SSL_API_CLOCK_SKEW:300}
+    # nonce 保留时长（秒）
+    nonce-ttl-seconds: ${SSL_API_NONCE_TTL:600}
+    # 请求体上限（字节）
+    max-body-bytes: ${SSL_API_MAX_BODY:262144}
+    # 单客户端每分钟请求上限（≤0 关闭）
+    rate-limit-per-minute: ${SSL_API_RATE_LIMIT:120}
 
 # 业务日志级别两环境同值，声明一次；dev 要开 SQL 调试就在 application-dev.yml 里覆盖成 debug
 logging:

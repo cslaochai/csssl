@@ -379,7 +379,7 @@ import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 const role = localStorage.getItem('role') || ''
 const permLoaded = permReady()
 const canIssue = permLoaded ? hasPerm('cert:issue') : role === 'OPERATOR'
-const canDownloadCert = permLoaded ? hasPerm('cert:download') : ['ADMIN', 'OPERATOR'].includes(role)
+const canDownloadCert = permLoaded ? hasPerm('cert:download') : ['OPERATOR', 'CERT_OFFICER'].includes(role)
 const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : role === 'KEY_ADMIN'
 
 // 当前租户域：列表/签发/吊销等请求由 request 封装自动附带 tenantKey=currentTenant()

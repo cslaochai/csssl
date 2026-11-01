@@ -16,9 +16,14 @@ import java.time.LocalDateTime;
 public class TenantVO {
 
     /**
-     * 租户标识
+     * 租户标识（由统一社会信用代码派生）
      */
     private String tenantKey;
+
+    /**
+     * 统一社会信用代码（存量租户可能为空）
+     */
+    private String uscc;
 
     /**
      * 租户名称
@@ -41,9 +46,14 @@ public class TenantVO {
     private String status;
 
     /**
-     * 联系人
+     * 联系人姓名
      */
     private String contact;
+
+    /**
+     * 联系人手机号（列表/详情展示做掩码）
+     */
+    private String contactPhone;
 
     /**
      * 说明
@@ -121,16 +131,33 @@ public class TenantVO {
     private String statusError;
 
     /**
+     * 该租户默认接入客户端的记录 ID（无则 null）
+     */
+    private Long apiClientId;
+
+    /**
+     * 接入 ID（App ID）：外部系统配置后随请求头 X-App-Id 发送，CA 据此反查租户
+     */
+    private String apiAppId;
+
+    /**
+     * 接入状态：1-启用 0-停用（无接入凭证时省略）
+     */
+    private Integer apiClientStatus;
+
+    /**
      * 租户档案部分（根CA状态字段由服务层按租户实时状态填充）
      */
     public static TenantVO from(CaTenant tenant) {
         TenantVO vo = new TenantVO();
         vo.setTenantKey(tenant.getTenantKey());
+        vo.setUscc(tenant.getUscc());
         vo.setTenantName(tenant.getTenantName());
         vo.setSubjectO(tenant.getSubjectO());
         vo.setAlgorithm(tenant.getAlgorithm());
         vo.setStatus(tenant.getStatus());
         vo.setContact(tenant.getContact());
+        vo.setContactPhone(tenant.getContactPhone());
         vo.setDescription(tenant.getDescription());
         vo.setCreatedAt(tenant.getCreatedAt());
         return vo;

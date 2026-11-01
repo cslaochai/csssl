@@ -168,6 +168,7 @@ public class CaRootController {
     }
 
     /** 导出根证书 PEM（供各子系统信任链配置） */
+    @PreAuthorize("hasAuthority('ca:root:download')")
     @GetMapping("/root/download")
     public String downloadRoot(@RequestParam(required = false) String tenantKey,
                                HttpServletRequest request) {
@@ -180,6 +181,7 @@ public class CaRootController {
     }
 
     /** 导出当前 SUB_CA 证书 PEM（中间CA链配置） */
+    @PreAuthorize("hasAuthority('ca:subca:download')")
     @GetMapping("/subca/download")
     public String downloadSubCa(@RequestParam(required = false) String tenantKey,
                                 HttpServletRequest request) {

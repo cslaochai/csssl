@@ -66,11 +66,11 @@ const routes = [
         path: 'tenants',
         name: 'tenants',
         component: () => import('@/views/Tenants.vue'),
-        // 租户管理仅全局 ADMIN：租户用户（tenantKey 非空）由 globalOnly 拦截
+        // 租户管理：全局账号可见；启停/凭证归租户管理员，系统管理员只读巡检
         meta: {
           title: '租户管理',
           perm: 'menu:tenants',
-          roles: ['ADMIN'],
+          roles: ['ADMIN', 'TENANT_ADMIN'],
           globalOnly: true,
           group: 'platform',
           icon: 'OfficeBuilding'
@@ -92,17 +92,17 @@ const routes = [
         path: 'users',
         name: 'users',
         component: () => import('@/views/Users.vue'),
-        meta: { title: '用户管理', perm: 'menu:users', roles: ['ADMIN'], group: 'platform', icon: 'User' }
+        meta: { title: '用户管理', perm: 'menu:users', roles: ['ADMIN', 'USER_ADMIN'], group: 'platform', icon: 'User' }
       },
       {
         path: 'roles',
         name: 'roles',
         component: () => import('@/views/Roles.vue'),
-        // 角色配置属全局管理动作：租户管理员由 globalOnly 拦截，服务端另做数据域校验
+        // 角色配置属全局管理动作：角色档案/授权归用户与角色管理员，系统管理员只读查看
         meta: {
           title: '角色配置',
           perm: 'menu:roles',
-          roles: ['ADMIN'],
+          roles: ['ADMIN', 'USER_ADMIN'],
           globalOnly: true,
           group: 'platform',
           icon: 'Avatar'
@@ -112,7 +112,7 @@ const routes = [
         path: 'audit',
         name: 'audit',
         component: () => import('@/views/Audit.vue'),
-        meta: { title: '审计日志', perm: 'menu:audit', roles: ['AUDITOR'], group: 'bottom', icon: 'Memo' }
+        meta: { title: '审计日志', perm: 'menu:audit', roles: ['AUDITOR', 'ADMIN'], group: 'bottom', icon: 'Memo' }
       }
     ]
   },

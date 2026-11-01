@@ -15,9 +15,14 @@ import java.time.LocalDateTime;
 public class TenantDetailVO {
 
     /**
-     * 租户标识
+     * 租户标识（由统一社会信用代码派生）
      */
     private String tenantKey;
+
+    /**
+     * 统一社会信用代码（存量租户可能为空）
+     */
+    private String uscc;
 
     /**
      * 租户名称
@@ -40,9 +45,14 @@ public class TenantDetailVO {
     private String status;
 
     /**
-     * 联系人
+     * 联系人姓名
      */
     private String contact;
+
+    /**
+     * 联系人手机号（列表/详情展示做掩码）
+     */
+    private String contactPhone;
 
     /**
      * 说明
@@ -66,11 +76,13 @@ public class TenantDetailVO {
     public static TenantDetailVO from(CaTenant tenant) {
         TenantDetailVO vo = new TenantDetailVO();
         vo.setTenantKey(tenant.getTenantKey());
+        vo.setUscc(tenant.getUscc());
         vo.setTenantName(tenant.getTenantName());
         vo.setSubjectO(tenant.getSubjectO());
         vo.setAlgorithm(tenant.getAlgorithm());
         vo.setStatus(tenant.getStatus());
         vo.setContact(tenant.getContact());
+        vo.setContactPhone(tenant.getContactPhone());
         vo.setDescription(tenant.getDescription());
         vo.setCreatedAt(tenant.getCreatedAt());
         return vo;

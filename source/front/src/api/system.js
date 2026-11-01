@@ -46,6 +46,10 @@ export function resumeTenant(tenantKey) {
 export function closeTenant(tenantKey) {
   return request.post(`/admin/tenants/${tenantKey}/close`)
 }
+/** 生成/重置租户接入凭证（App ID + 密钥；已有则轮换，旧密钥立即失效，secret 仅返回一次） */
+export function resetTenantApiCredential(tenantKey) {
+  return request.post(`/admin/tenants/${tenantKey}/api-credential/reset`)
+}
 
 /** 租户列表模块级缓存（顶栏/各页租户下拉共用；失败返回空数组不阻断页面） */
 let tenantsCache = null

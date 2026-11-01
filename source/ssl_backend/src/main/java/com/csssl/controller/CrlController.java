@@ -15,6 +15,7 @@ import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -64,6 +65,7 @@ public class CrlController {
     }
 
     /** 下载 CRL PEM（判重发布：内容未变直接复用已发布 CRL，不自增编号；?tenantKey= 切租户域） */
+    @PreAuthorize("hasAuthority('crl:download')")
     @GetMapping("/download")
     public String download(@RequestParam(required = false) String tenantKey, HttpServletRequest request) {
         String tenant = resolveTenant(tenantKey);

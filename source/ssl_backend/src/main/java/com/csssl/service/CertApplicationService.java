@@ -117,6 +117,40 @@ public class CertApplicationService {
      * 提交申请（录入员代录：医生/租户提供材料，操作员录入系统）；tenant=控制器按 effectiveTenant 归一后的受理域
      */
     public CertApplication submit(ApplicationSubmitDTO body, String username, String realName, String ip, String tenant) {
+        CertApplication app = create(body, username, realName, tenant);
+        auditService.record(username, "RA_SUBMIT", app.getApplyNo(),
+                "提交证书申请：" + app.getApplicantName() + "（" + app.getApplicantType() + "，模板 "
+                        + templateCodeOf(app.getTemplateId()) + "）", ip, tenant);
+        return app;
+    }
+
+    /**
+     * 外部系统直连提交（HIS 等 API）：复用同一套校验与落库，另记外部系统/幂等键/渠道，
+     * 审计主体为 API 客户端（不伪装成自然人）。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public CertApplication submitExternal(ApplicationSubmitDTO body, String externalSystem, String externalRequestId,
+                                          String requestHash, String employeeId, String employeeCode, String deptName,
+                                          String username, String displayName, String ip, String tenant) {
+        CertApplication app = create(body, username, displayName, tenant);
+        app.setChannel("API");
+        app.setExternalSystem(externalSystem);
+        app.setExternalRequestId(externalRequestId);
+        app.setExternalRequestHash(requestHash);
+        app.setExternalEmployeeId(blankToNull(employeeId));
+        app.setExternalEmployeeCode(blankToNull(employeeCode));
+        app.setExternalDeptName(blankToNull(deptName));
+        applicationMapper.updateById(app);
+        auditService.record(username, "RA_API_SUBMIT", app.getApplyNo(),
+                "外部系统提交证书申请：" + app.getApplicantName() + "（客户端 " + displayName
+                        + "，externalRequestId=" + externalRequestId + "）", ip, tenant);
+        return app;
+    }
+
+    /**
+     * 校验并落一条 PENDING 申请单（submit / submitExternal 共用，不写审计）
+     */
+    private CertApplication create(ApplicationSubmitDTO body, String username, String realName, String tenant) {
         String applicantType = body.getApplicantType();
         if (!"INSTITUTION".equals(applicantType) && !"PERSON".equals(applicantType)) {
             throw new IllegalArgumentException("申请人类别仅支持 INSTITUTION-单位 / PERSON-个人");
@@ -148,14 +182,24 @@ public class CertApplicationService {
         app.setPublicKeyPem(publicKeyPem.trim());
         app.setDescription(blankToNull(body.getDescription()));
         app.setStatus(ST_PENDING);
+        app.setChannel("WEB");
         app.setAppliedBy(username);
         app.setAppliedByName(realNameOrAccount(realName, username));
         app.setAppliedAt(LocalDateTime.now());
         app.setCreatedAt(LocalDateTime.now());
         applicationMapper.insert(app);
-        auditService.record(username, "RA_SUBMIT", app.getApplyNo(),
-                "提交证书申请：" + applicantName + "（" + applicantType + "，模板 " + tpl.getTemplateCode() + "）", ip, tenant);
         return app;
+    }
+
+    /**
+     * 模板编码（审计文案用；模板已删除时回退 ID）
+     */
+    private String templateCodeOf(Long templateId) {
+        try {
+            return templateService.detail(templateId).getTemplateCode();
+        } catch (Exception e) {
+            return String.valueOf(templateId);
+        }
     }
 
     /**
@@ -243,6 +287,13 @@ public class CertApplicationService {
      * 数据域：申请单归属租户必须等于操作者域（租户用户跨租户 403；全局用户缺省域=default）。
      */
     public CertApplication cancel(Long id, String username, String role, String ip, String effTenant) {
+        return cancel(id, username, role, ip, effTenant, null);
+    }
+
+    /**
+     * 撤销申请（可附原因，供外部 API 记账）
+     */
+    public CertApplication cancel(Long id, String username, String role, String ip, String effTenant, String reason) {
         CertApplication app = applicationMapper.selectById(id);
         if (app == null) {
             throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
@@ -257,7 +308,9 @@ public class CertApplicationService {
         app.setStatus(ST_CANCELLED);
         applicationMapper.updateById(app);
         auditService.record(username, "RA_CANCEL", app.getApplyNo(),
-                "撤销证书申请：" + app.getApplicantName(), ip, app.getTenantKey());
+                "撤销证书申请：" + app.getApplicantName()
+                        + (reason == null || reason.isBlank() ? "" : "（原因：" + reason.trim() + "）"),
+                ip, app.getTenantKey());
         return app;
     }
 
