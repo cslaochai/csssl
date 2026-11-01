@@ -31,3 +31,6 @@ data-smoke/
 
 # 提交信息临时文件（git commit -F 用，勿入库）
 .commit-msg.txt
+
+# 智能体运行态数据目录（记忆/自动化等内部状态，非项目代码，不入库）
+.workbuddy/
