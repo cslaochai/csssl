@@ -41,6 +41,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * 证书签发与生命周期管理：在线签发（内部生成密钥对）/ CSR 签发 / 吊销 / 下载 / 概览统计。
@@ -595,6 +597,29 @@ public class CertService {
             }
         }
         return chain.toString();
+    }
+
+    /**
+     * 证书压缩包（ZIP，<b>不加密</b>）：内含一条证书链 PEM（叶子 + 签发SUB_CA）。
+     *
+     * <p>线下导入场景用：HIS 等外部系统直接上传该 zip 回填证书，包内证书自带 notBefore/notAfter，
+     * 有效期真值由证书本身给出，不依赖任何额外清单文件。ZIP 不设口令——口令需线下另行传递，
+     * 反而增加导入门槛，故按约定明文打包。
+     */
+    public byte[] certZipBytes(Long id) {
+        CaCert row = findById(id);
+        String pem = certPem(id);
+        String serial = row.getSerialHex() == null || row.getSerialHex().isBlank() ? String.valueOf(id) : row.getSerialHex();
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (ZipOutputStream zos = new ZipOutputStream(bos)) {
+            // 条目名强制 ASCII：zip 条目名编码在跨库（JDK/jzip4j）读取时易踩字符集坑，序列号足够溯源
+            zos.putNextEntry(new ZipEntry("cert-" + serial + ".pem"));
+            zos.write(pem.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+        } catch (IOException e) {
+            throw new IllegalStateException("生成证书压缩包失败：" + e.getMessage(), e);
+        }
+        return bos.toByteArray();
     }
 
     /**

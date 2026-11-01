@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.common.ApiException;
 import com.csssl.config.CssslProperties;
 import com.csssl.dto.ApiApplicationSubmitDTO;
+import com.csssl.dto.ApiCertRevokeDTO;
 import com.csssl.dto.ApplicationSubmitDTO;
 import com.csssl.entity.*;
 import com.csssl.enums.CertApplicationStatusEnum;
@@ -238,14 +239,45 @@ public class CaApiService {
      * 按序列号查询证书状态（本租户域内；实时性要求高时以 OCSP 为准）
      */
     public ApiCertStatusVO certStatus(ApiClient client, String serialHex) {
+        CaCert cert = requireCertBySerial(client.getTenantUscc(), serialHex);
+        return statusVo(cert);
+    }
+
+    /**
+     * 吊销证书（外部系统主动推送吊销）：序列号与原因都在请求体内，已吊销按幂等返回。
+     */
+    public ApiCertStatusVO revoke(ApiClient client, ApiCertRevokeDTO body, String ip) {
+        CaCert cert = requireCertBySerial(client.getTenantUscc(), body.getSerialHex());
+        if ("REVOKED".equals(cert.getStatus())) {
+            log.info("[对外API][{}] 吊销幂等命中 appId={}, serial={}",
+                    client.getTenantUscc(), client.getAppId(), cert.getSerialHex());
+            return statusVo(cert);
+        }
+        String reason = body.getReason() == null || body.getReason().isBlank()
+                ? "外部系统推送吊销" : body.getReason().trim();
+        certService.revoke(cert.getId(), reason, apiUsername(client), ip);
+        ApiCertStatusVO vo = statusVo(certService.findById(cert.getId()));
+        log.info("[对外API][{}] 吊销证书 appId={}, serial={}, reason={}",
+                client.getTenantUscc(), client.getAppId(), cert.getSerialHex(), reason);
+        return vo;
+    }
+
+    /**
+     * 按序列号定位本租户证书（外部 API 的吊销与状态查询共用域校验）
+     */
+    private CaCert requireCertBySerial(String tenant, String serialHex) {
         String serial = normalizeSerial(serialHex);
         CaCert cert = certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getTenantUscc, client.getTenantUscc())
+                .eq(CaCert::getTenantUscc, tenant)
                 .eq(CaCert::getSerialHex, serial)
                 .last("LIMIT 1"));
         if (cert == null) {
             throw new ApiException(404, "证书不存在（serialHex=" + serialHex + "）");
         }
+        return cert;
+    }
+
+    private ApiCertStatusVO statusVo(CaCert cert) {
         ApiCertStatusVO vo = new ApiCertStatusVO();
         vo.setSerialHex(cert.getSerialHex());
         vo.setStatus(cert.getStatus());

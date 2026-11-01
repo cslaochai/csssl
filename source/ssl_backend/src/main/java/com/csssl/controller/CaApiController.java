@@ -4,6 +4,7 @@ import com.csssl.common.Result;
 import com.csssl.config.CaApiAuthFilter;
 import com.csssl.dto.ApiApplicationSubmitDTO;
 import com.csssl.dto.ApiCancelDTO;
+import com.csssl.dto.ApiCertRevokeDTO;
 import com.csssl.entity.ApiClient;
 import com.csssl.service.CaApiService;
 import com.csssl.vo.ApiApplicationVO;
@@ -114,16 +115,26 @@ public class CaApiController {
     }
 
     /**
-     * 撤销申请（仅提交方；PENDING/APPROVED 可撤，已撤销幂等返回）
+     * 撤销申请（仅提交方；PENDING/APPROVED 可撤，已撤销幂等返回）。申请单号放在请求体内，URL 不暴露参数。
      */
-    @PostMapping("/applications/{applyNo}/cancel")
+    @PostMapping("/applications/cancel")
     public Result<ApiApplicationVO> cancel(
             @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
-            @PathVariable String applyNo,
-            @Valid @RequestBody(required = false) ApiCancelDTO body,
+            @Valid @RequestBody ApiCancelDTO body,
             HttpServletRequest request) {
-        String reason = body == null ? null : body.getReason();
-        return Result.success("已撤销", apiService.cancel(client, applyNo, reason, clientIp(request)));
+        return Result.success("已撤销", apiService.cancel(client, body.getApplyNo(), body.getReason(),
+                clientIp(request)));
+    }
+
+    /**
+     * 吊销已签发证书（序列号与原因放在请求体内）：外部系统吊销后同步 CA，避免 CA 侧证书仍有效。
+     */
+    @PostMapping("/certificates/revoke")
+    public Result<ApiCertStatusVO> revoke(
+            @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
+            @Valid @RequestBody ApiCertRevokeDTO body,
+            HttpServletRequest request) {
+        return Result.success("已吊销", apiService.revoke(client, body, clientIp(request)));
     }
 
     /**

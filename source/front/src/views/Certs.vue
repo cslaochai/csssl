@@ -47,8 +47,6 @@
         <div class="query-actions">
           <template v-if="canIssue">
             <el-button v-perm="'cert:issue'" type="primary" @click="openIssue">签发证书</el-button>
-            <el-button v-perm="'cert:issue'" @click="openCsr">CSR签发</el-button>
-            <el-button v-perm="'cert:issue'" @click="openPubKey">公钥直签</el-button>
           </template>
         </div>
       </div>
@@ -166,104 +164,6 @@
         <div class="dialog-footer">
           <el-button @click="issueVisible = false">取消</el-button>
           <el-button type="primary" :loading="submitting" @click="onIssue">签发</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- CSR 签发 -->
-    <el-dialog v-model="csrVisible" title="证书请求签发（CSR）" width="680px" :close-on-click-modal="false">
-      <el-form :model="csrForm" label-width="150px">
-        <el-form-item label="目标租户" required>
-          <el-select v-model="csrForm.tenantUscc" placeholder="选择租户" style="width: 100%">
-            <el-option
-              v-for="o in tenantOptions"
-              :key="o.uscc"
-              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
-              :value="o.uscc"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="证书请求内容（CSR）" required>
-          <el-input
-            v-model="csrForm.csrPem"
-            type="textarea"
-            :rows="8"
-            placeholder="-----BEGIN CERTIFICATE REQUEST----- ..."
-          />
-        </el-form-item>
-        <el-form-item label="证书类型">
-          <el-radio-group v-model="csrForm.certType">
-            <el-radio-button value="SERVER">服务端</el-radio-button>
-            <el-radio-button value="CLIENT">客户端</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="有效期(天)">
-          <el-input-number v-model="csrForm.validityDays" :min="1" :max="36500" />
-        </el-form-item>
-        <el-form-item label="主体别名（SAN）">
-          <el-input v-model="csrForm.san" placeholder="CSR自带SAN时优先使用CSR的" />
-        </el-form-item>
-        <el-form-item label="用途说明">
-          <el-input v-model="csrForm.description" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="csrVisible = false">取消</el-button>
-          <el-button type="primary" :loading="submitting" @click="onCsrIssue">CSR签发</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- 公钥直签（RA 场景：申请方自持私钥） -->
-    <el-dialog v-model="pubKeyVisible" title="公钥直签（申请方自持私钥，仅提交公钥）" width="680px" :close-on-click-modal="false">
-      <el-form :model="pubKeyForm" label-width="150px">
-        <el-form-item label="目标租户" required>
-          <el-select v-model="pubKeyForm.tenantUscc" placeholder="选择租户" style="width: 100%">
-            <el-option
-              v-for="o in tenantOptions"
-              :key="o.uscc"
-              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
-              :value="o.uscc"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="公钥PEM" required>
-          <el-input
-            v-model="pubKeyForm.publicKeyPem"
-            type="textarea"
-            :rows="7"
-            placeholder="-----BEGIN PUBLIC KEY----- ...（SPKI 格式，RSA2048 或 SM2 均可）"
-          />
-        </el-form-item>
-        <el-form-item label="证书模板">
-          <el-select v-model="pubKeyForm.templateId" clearable placeholder="不选则按下发参数签发" style="width: 100%">
-            <el-option v-for="t in templates" :key="t.id" :label="`${t.name}（${t.algorithm || '-'}）`" :value="t.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="主体CN" required>
-          <el-input v-model="pubKeyForm.subjectCn" placeholder="如 his.cslk.local / 张三" />
-        </el-form-item>
-        <el-form-item label="证书类型">
-          <el-radio-group v-model="pubKeyForm.certType">
-            <el-radio-button value="SERVER">服务端</el-radio-button>
-            <el-radio-button value="CLIENT">客户端</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="有效期(天)">
-          <el-input-number v-model="pubKeyForm.validityDays" :min="1" :max="36500" />
-        </el-form-item>
-        <el-form-item label="主体别名（SAN）">
-          <el-input v-model="pubKeyForm.san" placeholder="逗号分隔：DNS或IP（模板锁定SAN时以模板为准）" />
-        </el-form-item>
-        <el-form-item label="用途说明">
-          <el-input v-model="pubKeyForm.description" type="textarea" :rows="2" placeholder="颁发给哪个子系统/服务" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="pubKeyVisible = false">取消</el-button>
-          <el-button type="primary" :loading="submitting" @click="onPubKeyIssue">签发</el-button>
         </div>
       </template>
     </el-dialog>
@@ -386,16 +286,14 @@ import { Refresh, Search, ArrowDown } from '@element-plus/icons-vue'
 import {
   pageCerts,
   issueCert,
-  issueCertByCsr,
-  issueCertByPublicKey,
-  pageTemplates,
   submitCertOp,
   exportCertP12,
   downloadCertPem,
+  downloadCertZip,
   downloadKeyPem,
   listTenantsCached
 } from '@/api/system'
-import { downloadText } from '@/lib/download'
+import { downloadText, downloadBlob } from '@/lib/download'
 import { hasPerm, permReady } from '@/lib/perm'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
@@ -422,7 +320,6 @@ const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, tenantUscc: '',
 const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 
 const issueVisible = ref(false)
-const csrVisible = ref(false)
 const revokeVisible = ref(false)
 const revokeTarget = ref(null)
 const revokeReason = ref('KEY_COMPROMISE')
@@ -442,33 +339,11 @@ const detail = ref(null)
 
 const defaultDays = 365
 
-const pubKeyVisible = ref(false)
-const templates = ref([])
-const pubKeyForm = reactive({
-  tenantUscc: '',
-  publicKeyPem: '',
-  templateId: null,
-  subjectCn: '',
-  certType: 'SERVER',
-  validityDays: defaultDays,
-  san: '',
-  description: ''
-})
-
 const issueForm = reactive({
   tenantUscc: '',
   subjectCn: '',
   certType: 'SERVER',
   algorithm: 'RSA2048',
-  validityDays: defaultDays,
-  san: '',
-  description: ''
-})
-
-const csrForm = reactive({
-  tenantUscc: '',
-  csrPem: '',
-  certType: 'SERVER',
   validityDays: defaultDays,
   san: '',
   description: ''
@@ -498,7 +373,9 @@ const ACTION_VISIBLE = 3
 function certActions(row) {
   const acts = [{ label: '详情', run: () => onRowDetail(row) }]
   if (canDownloadCert) acts.push({ label: '下载证书', run: () => onDownloadCert(row) })
-  // 私钥类操作只对 CA 侧落了私钥的证书开放（CSR/公钥直签的私钥由申请方自持，CA 无钥可下载）
+  // 导出 ZIP：线下场景给 HIS 等外部系统导入（不加密，内含证书链 PEM）
+  if (canDownloadCert) acts.push({ label: '导出ZIP', run: () => onDownloadZip(row) })
+  // 私钥类操作只对 CA 侧落了私钥的证书开放（走 RA 申请签发的证书私钥由申请人自持，CA 无钥可下载）
   if (canDownloadKey && row.keyHeld) acts.push({ label: '下载私钥', run: () => onDownloadKey(row) })
   if (canDownloadKey && row.keyHeld && ['SERVER', 'CLIENT'].includes(row.certType)) {
     acts.push({ label: '导出P12', run: () => openExportP12(row) })
@@ -610,93 +487,6 @@ async function onIssue() {
   }
 }
 
-function openCsr() {
-  Object.assign(csrForm, {
-    tenantUscc: query.tenantUscc || defaultTenant(),
-    csrPem: '',
-    certType: 'SERVER',
-    validityDays: defaultDays,
-    san: '',
-    description: ''
-  })
-  csrVisible.value = true
-}
-
-async function onCsrIssue() {
-  if (!csrForm.tenantUscc) {
-    ElMessage.warning('请选择目标租户')
-    return
-  }
-  if (!csrForm.csrPem.trim()) {
-    ElMessage.warning('请粘贴 CSR 内容')
-    return
-  }
-  submitting.value = true
-  try {
-    const { tenantUscc, ...body } = csrForm
-    await issueCertByCsr({ ...body, validityDays: csrForm.validityDays || defaultDays }, tenantUscc)
-    ElMessage.success('CSR签发成功（私钥由申请方自持）')
-    csrVisible.value = false
-    load()
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function openPubKey() {
-  Object.assign(pubKeyForm, {
-    tenantUscc: query.tenantUscc || defaultTenant(),
-    publicKeyPem: '',
-    templateId: null,
-    subjectCn: '',
-    certType: 'SERVER',
-    validityDays: defaultDays,
-    san: '',
-    description: ''
-  })
-  pubKeyVisible.value = true
-  if (templates.value.length === 0) {
-    try {
-      const res = await pageTemplates({ pageNo: 1, pageSize: 100 })
-      templates.value = res.data.records || []
-    } catch (e) {
-      // 模板加载失败不阻断手填签发参数
-    }
-  }
-}
-
-async function onPubKeyIssue() {
-  if (!pubKeyForm.tenantUscc) {
-    ElMessage.warning('请选择目标租户')
-    return
-  }
-  if (!pubKeyForm.publicKeyPem.trim()) {
-    ElMessage.warning('请粘贴公钥 PEM')
-    return
-  }
-  if (!pubKeyForm.subjectCn.trim()) {
-    ElMessage.warning('请填写主体CN')
-    return
-  }
-  submitting.value = true
-  try {
-    await issueCertByPublicKey({
-      subjectDn: `CN=${pubKeyForm.subjectCn.trim()}`,
-      publicKeyPem: pubKeyForm.publicKeyPem,
-      certType: pubKeyForm.certType,
-      validityDays: pubKeyForm.validityDays || defaultDays,
-      templateId: pubKeyForm.templateId || undefined,
-      san: pubKeyForm.san || undefined,
-      description: pubKeyForm.description || undefined
-    }, pubKeyForm.tenantUscc)
-    ElMessage.success('公钥直签成功（私钥由申请方自持，CA 不留存）')
-    pubKeyVisible.value = false
-    load()
-  } finally {
-    submitting.value = false
-  }
-}
-
 function onRevoke(row) {
   revokeTarget.value = row
   revokeReason.value = 'KEY_COMPROMISE'
@@ -797,6 +587,17 @@ async function onDownloadCert(row) {
   const pem = await downloadCertPem(row.id)
   downloadText(pem, `${row.subjectCn}-cert.pem`)
   ElMessage.success('证书已下载')
+}
+
+// 导出 ZIP（不加密，内含证书链 PEM）：线下场景给 HIS 等外部系统「上传 zip 回填」用
+async function onDownloadZip(row) {
+  try {
+    const blob = await downloadCertZip(row.id)
+    downloadBlob(blob, `${row.subjectCn}-cert.zip`)
+    ElMessage.success('证书压缩包已导出（未加密，内含证书链 PEM）')
+  } catch (e) {
+    // 错误由拦截器提示
+  }
 }
 
 async function onDownloadKey(row) {

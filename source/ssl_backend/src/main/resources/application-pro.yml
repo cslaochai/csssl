@@ -13,6 +13,11 @@ csssl:
     master-key: ${SSL_MASTER_KEY:}
   # 私钥下载开关：生产默认关闭，需要时在 .env 显式打开
   allow-private-key-download: ${SSL_ALLOW_KEY_DOWNLOAD:false}
+  # 申请单状态变更推送 HIS：132 部署时 HIS 后端映射到宿主 8009（容器内 8080）
+  his-push:
+    enabled: ${SSL_HIS_PUSH_ENABLED:true}
+    callback-url: ${SSL_HIS_PUSH_URL:http://host.docker.internal:8009/api/emr/signCert/caCallback}
+    timeout-ms: ${SSL_HIS_PUSH_TIMEOUT_MS:5000}
   security:
     sm2:
       # 登录口令传输加密 SM2 私钥/公钥（16进制）：私钥写死固定值，重启不失效；公钥留空由私钥推导

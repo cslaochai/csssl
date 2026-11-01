@@ -127,6 +127,29 @@ public class CertController {
     }
 
     /**
+     * 导出证书压缩包（ZIP，不加密）：内含证书链 PEM，供 HIS 等外部系统「上传 zip 回填证书」导入。
+     *
+     * <p>与 cert.pem 同一数据域与审计口径；不设口令（口令需线下传递反而抬高导入门槛），
+     * 私钥不出 CA，包内仅公钥证书链。
+     */
+    @PreAuthorize("hasAuthority('cert:download')")
+    @GetMapping("/certs/{id}/export/zip")
+    public ResponseEntity<byte[]> exportCertZip(@PathVariable Long id, HttpServletRequest request) {
+        CaCert row = certService.findById(id);
+        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantUscc(), row.getTenantUscc());
+        byte[] zip = certService.certZipBytes(id);
+        String username = UserUtils.requireLoginUser().getUsername();
+        auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
+                "导出证书压缩包(ZIP)：" + row.getSubjectCn(), clientIp(request),
+                TenantScope.tenantOfRow(row.getTenantUscc()));
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"cert-" + row.getSerialHex() + ".zip\"")
+                .body(zip);
+    }
+
+    /**
      * 下载私钥 PEM（需 管理员/密钥管理员；受 allow-private-key-download 开关控制，落审计；行级读按数据域收敛）
      */
     @PreAuthorize("hasAuthority('cert:key:download')")

@@ -143,6 +143,10 @@ export function downloadCertPem(id) {
 export function downloadKeyPem(id) {
   return request.get(`/admin/certs/${id}/key.pem`)
 }
+/** 导出证书压缩包（ZIP，不加密）：内含证书链 PEM，供 HIS 等外部系统上传 zip 回填 */
+export function downloadCertZip(id) {
+  return request.get(`/admin/certs/${id}/export/zip`, { responseType: 'blob' })
+}
 /** 证书概览（按租户域）；不传 tenantUscc 时后端按平台主租户兜底 */
 export function getOverview(tenantUscc) {
   return request.get('/admin/overview', { params: { tenantUscc } })

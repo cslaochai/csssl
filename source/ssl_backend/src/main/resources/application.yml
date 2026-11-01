@@ -77,6 +77,14 @@ csssl:
     max-body-bytes: ${SSL_API_MAX_BODY:262144}
     # 单客户端每分钟请求上限（≤0 关闭）
     rate-limit-per-minute: ${SSL_API_RATE_LIMIT:120}
+  # ===== 申请单状态变更主动推送（外部系统只保留提交与吊销两个出站能力） =====
+  his-push:
+    # 总开关：关闭时不推送，外部系统只能等人工核对
+    enabled: ${SSL_HIS_PUSH_ENABLED:true}
+    # 回调地址（HIS 后端 context-path=/api）：dev 本机 8080；132 部署经 host.docker.internal 走宿主 8009
+    callback-url: ${SSL_HIS_PUSH_URL:http://localhost:8080/api/emr/signCert/caCallback}
+    # 单次推送超时（毫秒）
+    timeout-ms: ${SSL_HIS_PUSH_TIMEOUT_MS:5000}
 
 # 业务日志级别两环境同值，声明一次；dev 要开 SQL 调试就在 application-dev.yml 里覆盖成 debug
 logging:

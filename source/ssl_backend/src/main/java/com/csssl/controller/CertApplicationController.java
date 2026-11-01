@@ -9,6 +9,7 @@ import com.csssl.vo.CertVO;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.LoginUser;
 import com.csssl.service.CertApplicationService;
+import com.csssl.service.HisPushService;
 import com.csssl.util.TenantScope;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,6 +40,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class CertApplicationController {
 
     private final CertApplicationService applicationService;
+
+    private final HisPushService hisPushService;
 
     /** 申请单分页查询（登录即可查看；租户用户强制本租户，全局用户可按 ?tenantUscc= 过滤，不传=全量只读） */
     @GetMapping
@@ -75,9 +78,11 @@ public class CertApplicationController {
                                            HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         String comment = body == null ? null : body.getComment();
-        return Result.success("已批准", applicationService.approve(id, comment,
+        CertApplication app = applicationService.approve(id, comment,
                 loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc)));
+                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+        hisPushService.pushApplication(app);
+        return Result.success("已批准", app);
     }
 
     /** 审核驳回（需 审核员/管理员；不得与提交人同一人；申请单必须落在操作者域） */
@@ -87,9 +92,11 @@ public class CertApplicationController {
                                           @RequestParam(required = false) String tenantUscc,
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        return Result.success("已驳回", applicationService.reject(id, body.getComment(),
+        CertApplication app = applicationService.reject(id, body.getComment(),
                 loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc)));
+                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+        hisPushService.pushApplication(app);
+        return Result.success("已驳回", app);
     }
 
     /** 按申请签发证书（需 操作员/管理员；复用模板+公钥，私钥申请方自持；落到申请单受理租户域） */
@@ -98,9 +105,12 @@ public class CertApplicationController {
     public Result<CertVO> issue(@PathVariable Long id, @RequestParam(required = false) String tenantUscc,
                                 HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        return Result.success("签发成功", applicationService.issue(id,
+        CertVO vo = applicationService.issue(id,
                 loginUser.getUsername(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc)));
+                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+        // 签发已提交：按最新申请单状态推送外部系统（ISSUED 报文带证书 PEM，供其自动回填）
+        hisPushService.pushApplication(applicationService.detail(id));
+        return Result.success("签发成功", vo);
     }
 
     /** 撤销申请（需 操作员/管理员；仅提交人本人或系统管理员可撤销；申请单必须落在操作者域） */
@@ -109,9 +119,11 @@ public class CertApplicationController {
     public Result<CertApplication> cancel(@PathVariable Long id, @RequestParam(required = false) String tenantUscc,
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        return Result.success("已撤销", applicationService.cancel(id,
+        CertApplication app = applicationService.cancel(id,
                 loginUser.getUsername(), loginUser.getRoleCode(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc)));
+                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+        hisPushService.pushApplication(app);
+        return Result.success("已撤销", app);
     }
 
     private String clientIp(HttpServletRequest request) {

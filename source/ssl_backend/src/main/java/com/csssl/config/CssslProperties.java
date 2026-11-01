@@ -47,6 +47,12 @@ public class CssslProperties {
 
     private Api api = new Api();
 
+    /**
+     * 申请单状态变更主动推送（HIS 等外部系统）：外部系统只保留「提交申请」与「吊销证书」
+     * 两个出站调用，审核/签发/撤销一律由 CA 推送通知。
+     */
+    private HisPush hisPush = new HisPush();
+
     @Data
     public static class RootCa {
         /**
@@ -129,6 +135,25 @@ public class CssslProperties {
          * 单客户端每分钟请求上限（≤0 关闭限流）
          */
         private int rateLimitPerMinute = 120;
+    }
+
+    /**
+     * 申请单状态变更推送配置：推送目标是外部系统（HIS）的回调地址，仅对 API 渠道提交的申请单生效。
+     */
+    @Data
+    public static class HisPush {
+        /**
+         * 总开关：关闭时不推送（外部系统只能靠自己的本地记录等待人工核对）
+         */
+        private boolean enabled = true;
+        /**
+         * 回调地址（HIS 侧：{HIS 基地址}/api/emr/signCert/caCallback）
+         */
+        private String callbackUrl;
+        /**
+         * 单次推送超时（毫秒）
+         */
+        private int timeoutMs = 5000;
     }
 
     @Data
