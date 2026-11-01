@@ -7,6 +7,7 @@ import com.csssl.config.KeyVaultConfig;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaTenant;
 import com.csssl.entity.CrlState;
+import com.csssl.enums.TenantStatusEnum;
 import com.csssl.mapper.CaCertMapper;
 import com.csssl.mapper.CrlStateMapper;
 import com.csssl.util.CertUtil;
@@ -38,10 +39,10 @@ import java.util.stream.Collectors;
 /**
  * 吊销列表（CRL）：由各租户域的服务签发二级CA（SUB_CA）私钥签名，判重发布，per-tenant 独立。
  * <ul>
- *   <li>租户域（路线A）：ssl_crl_state 每租户一行（tenant_key 逻辑唯一，SELECT ... FOR UPDATE by tenant_key 行锁），
+ *   <li>租户域（路线A）：ssl_crl_state 每租户一行（tenant_uscc 逻辑唯一，SELECT ... FOR UPDATE by tenant_uscc 行锁），
  *       编号单调与判重指纹均 per-tenant；default 域沿用存量行（id=1）与存量路径
  *       store-dir/crl/current.pem，无参入口全部委托 default，行为逐字节不变；
- *       非 default 落盘 store-dir/tenants/{tenantKey}/crl/current.pem。</li>
+ *       非 default 落盘 store-dir/tenants/{tenantUscc}/crl/current.pem。</li>
  *   <li>判重：对「吊销+挂起」序列集合排序后算 SHA-256 指纹，指纹未变则复用现有 crl_number
  *       与已发布 CRL（current.pem 直接回读），公开端点不再"每次 GET 自增 CRLNumber"。</li>
  *   <li>全量 CRL：thisUpdate/nextUpdate + 单调递增 CRLNumber（RFC 5280 §5.2.3），30 天发布周期，
@@ -77,7 +78,7 @@ public class CrlService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     /**
-     * 租户目录解析：default → store-dir；其他 → store-dir/tenants/{tenantKey}（与 CaService 约定同源）
+     * 租户目录解析：default → store-dir；其他 → store-dir/tenants/{tenantUscc}（与 CaService 约定同源）
      */
     private final KeyVaultConfig.TenantVaultResolver tenantVaults;
 
@@ -106,16 +107,16 @@ public class CrlService {
      * 应纳入主租户 CRL 的证书（兼容入口）
      */
     public List<CaCert> revokedList() {
-        return revokedList(CaTenant.PRIMARY_TENANT_KEY);
+        return revokedList(CaTenant.PRIMARY_TENANT_USCC);
     }
 
     /**
      * 应纳入指定租户域 CRL 的证书：该租户的已吊销（REVOKED）+ 挂起（FROZEN，reason=certificateHold）；
      * 排除 ROOT/SUB_CA（由上一级CA管理）。租户域间互不信任，CRL 只列本域签发证书。
      */
-    public List<CaCert> revokedList(String tenantKey) {
+    public List<CaCert> revokedList(String tenantUscc) {
         return certMapper.selectList(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getTenantKey, tenantKey)
+                .eq(CaCert::getTenantUscc, tenantUscc)
                 .in(CaCert::getStatus, "REVOKED", "FROZEN")
                 .notIn(CaCert::getCertType, CaService.TYPE_ROOT, CaService.TYPE_SUB_CA)
                 .orderByDesc(CaCert::getRevokedAt));
@@ -125,10 +126,10 @@ public class CrlService {
      * 吊销记录分页查询（管理页）：口径与 {@link #revokedList(String)} 一致
      * （本域 REVOKED/FROZEN、排除 ROOT/SUB_CA），另支持 关键字（CN/序列号）/状态/吊销原因 过滤。
      */
-    public Page<CertVO> recordsPage(String tenantKey, String keyword, String status, String reason,
+    public Page<CertVO> recordsPage(String tenantUscc, String keyword, String status, String reason,
                                     long pageNo, long pageSize) {
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getTenantKey, tenantKey)
+                .eq(CaCert::getTenantUscc, tenantUscc)
                 .in(CaCert::getStatus, "REVOKED", "FROZEN")
                 .notIn(CaCert::getCertType, CaService.TYPE_ROOT, CaService.TYPE_SUB_CA);
         if (status != null && !status.isBlank()) {
@@ -154,18 +155,18 @@ public class CrlService {
      * </ol>
      */
     public CrlInfo publishIfNeeded() {
-        return publishIfNeeded(CaTenant.PRIMARY_TENANT_KEY);
+        return publishIfNeeded(CaTenant.PRIMARY_TENANT_USCC);
     }
 
     /**
-     * 判重发布入口（租户版）：以该租户 SUB_CA（signingCert(tenantKey)）签名，落到该租户 CRL 域
+     * 判重发布入口（租户版）：以该租户 SUB_CA（signingCert(tenantUscc)）签名，落到该租户 CRL 域
      */
-    public synchronized CrlInfo publishIfNeeded(String tenantKey) {
-        List<CaCert> revoked = revokedList(tenantKey);
+    public synchronized CrlInfo publishIfNeeded(String tenantUscc) {
+        List<CaCert> revoked = revokedList(tenantUscc);
         String fingerprint = fingerprintOf(revoked);
         // 编程式事务：@Scheduled 与类内自调用不走注解代理，SELECT ... FOR UPDATE 的行锁必须显式事务包住
         // "读指纹→重签→回写"全程，否则语句结束即释放行锁、判重失效
-        return transactionTemplate.execute(status -> doPublish(tenantKey, revoked, fingerprint));
+        return transactionTemplate.execute(status -> doPublish(tenantUscc, revoked, fingerprint));
     }
 
     /**
@@ -175,13 +176,13 @@ public class CrlService {
      */
     @Scheduled(cron = "${csssl.crl-refresh-cron:0 0 3 * * ?}")
     public void dailyRefresh() {
-        for (String tenantKey : refreshTargets()) {
+        for (String tenantUscc : refreshTargets()) {
             try {
-                CrlInfo info = publishIfNeeded(tenantKey);
+                CrlInfo info = publishIfNeeded(tenantUscc);
                 log.info("[CRL][{}] 定时发布检查完成：条目数={}, CRLNumber={}, nextUpdate={}",
-                        tenantKey, info.entries(), info.crlNumber(), info.nextUpdate());
+                        tenantUscc, info.entries(), info.crlNumber(), info.nextUpdate());
             } catch (Exception e) {
-                log.warn("[CRL][{}] 定时发布失败（SUB_CA 离线或签发异常，待解封窗口处理）: {}", tenantKey, e.getMessage());
+                log.warn("[CRL][{}] 定时发布失败（SUB_CA 离线或签发异常，待解封窗口处理）: {}", tenantUscc, e.getMessage());
             }
         }
     }
@@ -191,12 +192,12 @@ public class CrlService {
      */
     private List<String> refreshTargets() {
         List<String> keys = new ArrayList<>();
-        keys.add(CaTenant.PRIMARY_TENANT_KEY);
+        keys.add(CaTenant.PRIMARY_TENANT_USCC);
         try {
             for (CaTenant tenant : tenantService.list()) {
-                if (TenantService.STATUS_ACTIVE.equals(tenant.getStatus())
-                        && !CaTenant.PRIMARY_TENANT_KEY.equals(tenant.getTenantKey())) {
-                    keys.add(tenant.getTenantKey());
+                if (TenantStatusEnum.ACTIVE.is(tenant.getStatus())
+                        && !CaTenant.PRIMARY_TENANT_USCC.equals(tenant.getUscc())) {
+                    keys.add(tenant.getUscc());
                 }
             }
         } catch (Exception e) {
@@ -209,57 +210,57 @@ public class CrlService {
      * 生成增量 CRL（dCRL，兼容入口=default 租户）
      */
     public DeltaCrlInfo buildDeltaCrl() {
-        return buildDeltaCrl(CaTenant.PRIMARY_TENANT_KEY);
+        return buildDeltaCrl(CaTenant.PRIMARY_TENANT_USCC);
     }
 
     /**
      * 生成该租户域增量 CRL：自该域最近全量发布以来新增的吊销/挂起条目；无全量基础时返回空增量
      */
-    public synchronized DeltaCrlInfo buildDeltaCrl(String tenantKey) {
-        CrlState state = crlStateMapper.selectByTenant(tenantKey);
+    public synchronized DeltaCrlInfo buildDeltaCrl(String tenantUscc) {
+        CrlState state = crlStateMapper.selectByTenant(tenantUscc);
         long baseNumber = state == null || state.getCrlNumber() == null ? 0L : state.getCrlNumber();
         if (state == null || baseNumber == 0 || state.getThisUpdate() == null) {
-            log.info("[CRL][{}] 增量生成跳过：尚无全量 CRL 基础（先生成全量）", tenantKey);
+            log.info("[CRL][{}] 增量生成跳过：尚无全量 CRL 基础（先生成全量）", tenantUscc);
             return new DeltaCrlInfo("", null, null, 0, 0, 0);
         }
         LocalDateTime base = state.getThisUpdate();
-        List<CaCert> added = revokedList(tenantKey).stream()
+        List<CaCert> added = revokedList(tenantUscc).stream()
                 .filter(c -> c.getRevokedAt() != null && c.getRevokedAt().isAfter(base))
                 .toList();
         // 增量编号瞬态：基础全量编号+1；不写回状态行（全量编号只由 publishIfNeeded 推进）
         long number = baseNumber + 1;
-        X509Certificate caCert = caService.signingCert(tenantKey);
-        PrivateKey caKey = caService.signingKey(tenantKey);
+        X509Certificate caCert = caService.signingCert(tenantUscc);
+        PrivateKey caKey = caService.signingKey(tenantUscc);
         X509CRL crl = CertUtil.buildDeltaCrl(caCert, caKey, toEntries(added), number,
                 baseNumber, DELTA_CRL_NEXT_UPDATE_DAYS);
         DeltaCrlInfo info = new DeltaCrlInfo(PemUtil.crlToPem(crl), toLocal(crl.getThisUpdate()),
                 toLocal(crl.getNextUpdate()), added.size(), number, baseNumber);
-        log.info("[CRL][{}] 增量生成完成，新增条目数={}, CRLNumber={}, 基础全量={}", tenantKey, added.size(), number, baseNumber);
+        log.info("[CRL][{}] 增量生成完成，新增条目数={}, CRLNumber={}, 基础全量={}", tenantUscc, added.size(), number, baseNumber);
         return info;
     }
 
     /**
      * 行锁事务内发布决策：判重复用 or 重签推进（本租户域独立状态行/独立文件/独立签名CA）
      */
-    private CrlInfo doPublish(String tenantKey, List<CaCert> revoked, String fingerprint) {
-        CrlState state = ensureStateRowLocked(tenantKey);
+    private CrlInfo doPublish(String tenantUscc, List<CaCert> revoked, String fingerprint) {
+        CrlState state = ensureStateRowLocked(tenantUscc);
         long current = state.getCrlNumber() == null ? 0L : state.getCrlNumber();
         boolean reusable = current > 0
                 && fingerprint.equals(state.getFingerprint())
                 && state.getNextUpdate() != null
                 && state.getNextUpdate().isAfter(LocalDateTime.now().plusDays(REPUBLISH_AHEAD_DAYS));
         if (reusable) {
-            CrlInfo reuse = readCurrentPem(tenantKey, state, revoked.size(), current);
+            CrlInfo reuse = readCurrentPem(tenantUscc, state, revoked.size(), current);
             if (reuse != null) {
                 return reuse;
             }
         }
         long number = current + 1;
-        X509Certificate caCert = caService.signingCert(tenantKey);
-        PrivateKey caKey = caService.signingKey(tenantKey);
+        X509Certificate caCert = caService.signingCert(tenantUscc);
+        PrivateKey caKey = caService.signingKey(tenantUscc);
         X509CRL crl = CertUtil.buildCrl(caCert, caKey, toEntries(revoked), number, FULL_CRL_NEXT_UPDATE_DAYS);
         String pem = PemUtil.crlToPem(crl);
-        writeCurrentPem(tenantKey, pem);
+        writeCurrentPem(tenantUscc, pem);
         LocalDateTime thisUpdate = toLocal(crl.getThisUpdate());
         LocalDateTime nextUpdate = toLocal(crl.getNextUpdate());
         state.setCrlNumber(number);
@@ -269,7 +270,7 @@ public class CrlService {
         state.setDeltaBaseNumber(number);
         crlStateMapper.updateById(state);
         log.info("[CRL][{}] 全量重签发布：条目数={}, CRLNumber={}, thisUpdate={}, nextUpdate={}, 指纹={}",
-                tenantKey, revoked.size(), number, thisUpdate, nextUpdate, fingerprint.substring(0, 8));
+                tenantUscc, revoked.size(), number, thisUpdate, nextUpdate, fingerprint.substring(0, 8));
         return new CrlInfo(pem, thisUpdate, nextUpdate, revoked.size(),
                 CertUtil.subjectCn(caCert), number, null);
     }
@@ -278,18 +279,18 @@ public class CrlService {
      * 获取该租户状态行（FOR UPDATE 行锁）；首启补建本租户行。
      * ssl_crl_state.id 无 AUTO_INCREMENT（存量 DDL），新行按 max(id)+1 显式生成；
      * default 域首建时兼容旧 store-dir/crl-state.json 编号迁移（存量一次性逻辑，仅作用于 default）。
-     * 并发首建撞 tenant_key/id 唯一约束时重取行锁（tenant_key 唯一索引见待加DDL；过渡期靠行锁+重试兜底）。
+     * 并发首建撞 tenant_uscc/id 唯一约束时重取行锁（tenant_uscc 唯一索引见待加DDL；过渡期靠行锁+重试兜底）。
      */
-    private CrlState ensureStateRowLocked(String tenantKey) {
-        CrlState state = crlStateMapper.selectForUpdate(tenantKey);
+    private CrlState ensureStateRowLocked(String tenantUscc) {
+        CrlState state = crlStateMapper.selectForUpdate(tenantUscc);
         if (state != null) {
             return state;
         }
         for (int attempt = 0; attempt < 3; attempt++) {
             state = new CrlState();
             state.setId(nextRowId());
-            state.setTenantKey(tenantKey);
-            if (CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
+            state.setTenantUscc(tenantUscc);
+            if (CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)) {
                 LegacyState legacy = readLegacyState();
                 state.setCrlNumber(legacy.crlNumber());
                 state.setThisUpdate(legacy.lastFullCrlTime());
@@ -298,15 +299,15 @@ public class CrlService {
                 crlStateMapper.insert(state);
                 return state;
             } catch (DuplicateKeyException e) {
-                // 并发首启：另一事务已建本租户行（tenant_key 冲突）或占用了同一 id；
+                // 并发首启：另一事务已建本租户行（tenant_uscc 冲突）或占用了同一 id；
                 // 锁定读在 RR 隔离级别下仍读最新已提交版本，本租户行存在即直接重取，否则重算 id 再试
-                CrlState existing = crlStateMapper.selectForUpdate(tenantKey);
+                CrlState existing = crlStateMapper.selectForUpdate(tenantUscc);
                 if (existing != null) {
                     return existing;
                 }
             }
         }
-        throw new IllegalStateException("CRL 状态行创建失败（tenantKey=" + tenantKey + "），请检查 ssl_crl_state 表约束与并发发布日志");
+        throw new IllegalStateException("CRL 状态行创建失败（tenantUscc=" + tenantUscc + "），请检查 ssl_crl_state 表约束与并发发布日志");
     }
 
     /**
@@ -341,34 +342,34 @@ public class CrlService {
     /**
      * 回读已发布 CRL（指纹未变即复用，不重签）；文件缺失/读失败返回 null 降级重签
      */
-    private CrlInfo readCurrentPem(String tenantKey, CrlState state, int entries, long crlNumber) {
+    private CrlInfo readCurrentPem(String tenantUscc, CrlState state, int entries, long crlNumber) {
         try {
-            Path f = currentPemFile(tenantKey);
+            Path f = currentPemFile(tenantUscc);
             if (!Files.exists(f)) {
                 return null;
             }
             return new CrlInfo(Files.readString(f, StandardCharsets.UTF_8),
                     state.getThisUpdate(), state.getNextUpdate(), entries,
-                    CertUtil.subjectCn(caService.signingCert(tenantKey)), crlNumber, null);
+                    CertUtil.subjectCn(caService.signingCert(tenantUscc)), crlNumber, null);
         } catch (Exception e) {
-            log.warn("[CRL][{}] 已发布 CRL 回读失败，降级重签: {}", tenantKey, e.getMessage());
+            log.warn("[CRL][{}] 已发布 CRL 回读失败，降级重签: {}", tenantUscc, e.getMessage());
             return null;
         }
     }
 
     /**
-     * CRL 文件路径：default=store-dir/crl/current.pem（存量不变）；其他=store-dir/tenants/{tenantKey}/crl/current.pem
+     * CRL 文件路径：default=store-dir/crl/current.pem（存量不变）；其他=store-dir/tenants/{tenantUscc}/crl/current.pem
      */
-    private Path currentPemFile(String tenantKey) {
-        return tenantVaults.tenantStoreDir(tenantKey).resolve("crl").resolve("current.pem");
+    private Path currentPemFile(String tenantUscc) {
+        return tenantVaults.tenantStoreDir(tenantUscc).resolve("crl").resolve("current.pem");
     }
 
     /**
      * 已发布 CRL 落盘：临时文件 + 原子移动，杜绝并发下载端点读到半写 PEM
      */
-    private void writeCurrentPem(String tenantKey, String pem) {
+    private void writeCurrentPem(String tenantUscc, String pem) {
         try {
-            Path f = currentPemFile(tenantKey);
+            Path f = currentPemFile(tenantUscc);
             Files.createDirectories(f.getParent());
             Path tmp = f.resolveSibling("current.pem.tmp");
             Files.writeString(tmp, pem, StandardCharsets.UTF_8);

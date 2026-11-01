@@ -1,6 +1,5 @@
 import router from './index'
 import { ElMessage } from 'element-plus'
-import { isGlobalUser } from '@/lib/tenant'
 import { permReady, hasPerm } from '@/lib/perm'
 
 function clearSession() {
@@ -9,30 +8,26 @@ function clearSession() {
   localStorage.removeItem('role')
   localStorage.removeItem('roleName')
   localStorage.removeItem('perms')
-  localStorage.removeItem('tenantKey')
-  localStorage.removeItem('caDomain')
 }
 
-/** 当前角色可进入的第一个页面（侧栏顺序：概览 → 业务分组 → 审计）；无任何可用菜单返回 null */
+/** 当前角色可进入的第一个页面（侧栏顺序：概览 → 业务分组 → 平台分组）；无任何可用菜单返回 null */
 function firstAllowedPath() {
   const root = router.options.routes.find(r => r.path === '/')
   const role = localStorage.getItem('role')
   const ready = permReady()
   const allowed = (root?.children || []).filter(c => {
-    if (c.meta.globalOnly && !isGlobalUser()) return false
     if (ready) return !c.meta.perm || hasPerm(c.meta.perm)
     return !c.meta.roles || c.meta.roles.includes(role)
   })
   if (!allowed.length) return null
-  const groupOrder = ['top', 'business', 'platform', 'bottom']
+  const groupOrder = ['top', 'business', 'tenant', 'platform', 'bottom']
   allowed.sort((a, b) => groupOrder.indexOf(a.meta.group) - groupOrder.indexOf(b.meta.group))
   return '/' + allowed[0].path
 }
 
 // 登录守卫：未登录一律回登录页；已登录访问登录页则回首个可用页；
 // role 丢失视为未登录（清本地会话回登录页）；
-// 页面权限点（meta.perm）优先，旧会话（无权限缓存）回退 meta.roles；
-// meta.globalOnly 页面（租户管理/角色配置）租户用户不可进入。
+// 页面权限点（meta.perm）优先，旧会话（无权限缓存）回退 meta.roles。
 router.beforeEach(to => {
   const token = localStorage.getItem('token')
   if (!to.meta.public && !token) {
@@ -68,10 +63,6 @@ router.beforeEach(to => {
         ElMessage.warning('无权限访问该页面，已返回概览')
         return '/dashboard'
       }
-    }
-    if (to.meta.globalOnly && !isGlobalUser()) {
-      ElMessage.warning('租户用户不可访问该页面，已返回概览')
-      return '/dashboard'
     }
   }
   return true

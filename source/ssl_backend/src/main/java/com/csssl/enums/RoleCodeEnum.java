@@ -27,7 +27,8 @@ import java.util.Set;
  *   <li>AUDITOR        审计员：仅可查看审计与证书，不可签发/审核，独立于业务操作</li>
  *   <li>SECURITY_ADMIN 安全管理员：证书模板/证书策略（KeyUsage/EKU/策略OID）管理</li>
  *   <li>KEY_ADMIN      密钥管理员：根密钥门限分持/封存/解封（份额保管与恢复）</li>
- *   <li>TENANT_ADMIN      租户管理员：多租户域（独立根CA）的创建/启停/恢复/关闭，租户接入凭证与 API 客户端的登记/轮换/启停</li>
+ *   <li>TENANT_ADMIN      租户管理员：新建租户直接执行（开租户即建根），发起暂停/恢复/关闭/接入密钥重置变更单，API 客户端登记与轮换</li>
+ *   <li>TENANT_APPROVER   租户审批员：审批租户变更单（不得与发起人同一人），不参与发起</li>
  *   <li>USER_ADMIN     用户与角色管理员：账号与角色档案维护（建号、改角色、启停、授权）</li>
  *   <li>RA_ADMIN       RA业务管理员：RA 操作员账号与审核流程配置（与录入分离）</li>
  *   <li>CERT_OFFICER   证书签发操作员：仅执行证书签发/吊销/挂起/更新/换密钥/下载（不含申请录入）</li>
@@ -40,7 +41,8 @@ public enum RoleCodeEnum {
     ADMIN("ADMIN", "系统管理员", "账号建号与档案维护；全菜单只读巡检（证书/申请/租户/模板/审计只查看与检索），签发/审核/吊销/启停租户/角色授权等操作一律不沾", 10, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
             PermissionCatalog.MENU_CRL, PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
-            PermissionCatalog.MENU_TENANTS, PermissionCatalog.MENU_ROOT_CA, PermissionCatalog.MENU_TEMPLATES,
+            PermissionCatalog.MENU_TENANTS, PermissionCatalog.MENU_TENANT_OPS,
+            PermissionCatalog.MENU_ROOT_CA, PermissionCatalog.MENU_TEMPLATES,
             PermissionCatalog.MENU_USERS, PermissionCatalog.MENU_ROLES, PermissionCatalog.MENU_AUDIT,
             PermissionCatalog.CERT_LIST, PermissionCatalog.USER_LIST, PermissionCatalog.AUDIT_VIEW,
             PermissionCatalog.CA_SHARE_VIEW,
@@ -81,12 +83,16 @@ public enum RoleCodeEnum {
             PermissionCatalog.CA_SHARE_UNSEAL, PermissionCatalog.CA_ROOT_DOWNLOAD, PermissionCatalog.CA_SUBCA_DOWNLOAD,
             PermissionCatalog.CRL_DOWNLOAD)),
 
-    TENANT_ADMIN("TENANT_ADMIN", "租户管理员", "多租户域（独立根CA）的创建/启停/恢复/关闭，租户接入凭证与 API 客户端的登记/轮换/启停", 70, true, set(
-            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_TENANTS, PermissionCatalog.MENU_CRL,
+    TENANT_ADMIN("TENANT_ADMIN", "租户管理员", "新建租户直接执行（开租户即建独立根CA+SUB_CA、发接入凭证）；发起暂停/恢复/关闭/重置接入密钥变更单，API 客户端登记与轮换", 70, true, set(
+            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_TENANTS, PermissionCatalog.MENU_TENANT_OPS,
+            PermissionCatalog.MENU_CRL,
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
-            PermissionCatalog.TENANT_CREATE, PermissionCatalog.TENANT_SUSPEND, PermissionCatalog.TENANT_RESUME,
-            PermissionCatalog.TENANT_CLOSE, PermissionCatalog.TENANT_CREDENTIAL,
+            PermissionCatalog.TENANT_CREATE, PermissionCatalog.TENANT_OP_APPLY,
             PermissionCatalog.APICLIENT_MANAGE)),
+
+    TENANT_APPROVER("TENANT_APPROVER", "租户审批员", "审批租户变更单（暂停/恢复/关闭/接入密钥重置），批准即执行；不得与发起人同一人", 75, true, set(
+            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_TENANTS, PermissionCatalog.MENU_TENANT_OPS,
+            PermissionCatalog.TENANT_OP_APPROVE)),
 
     USER_ADMIN("USER_ADMIN", "用户与角色管理员", "管理账号与角色档案（建号、改角色、启停、重置口令、角色授权）", 80, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_USERS, PermissionCatalog.MENU_ROLES,

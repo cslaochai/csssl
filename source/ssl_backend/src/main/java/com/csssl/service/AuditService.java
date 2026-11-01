@@ -70,7 +70,7 @@ public class AuditService {
      * 审计行归属租户（历史行为空按 default 归位，与列默认值语义一致）
      */
     public static String tenantOf(AuditLog row) {
-        return row.getTenantKey() == null || row.getTenantKey().isBlank() ? CaTenant.PRIMARY_TENANT_KEY : row.getTenantKey();
+        return row.getTenantUscc() == null || row.getTenantUscc().isBlank() ? CaTenant.PRIMARY_TENANT_USCC : row.getTenantUscc();
     }
 
     private static String csv(String s) {
@@ -101,21 +101,21 @@ public class AuditService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void record(String username, String action, String target, String detail, String ip) {
-        record(username, action, target, detail, ip, CaTenant.PRIMARY_TENANT_KEY);
+        record(username, action, target, detail, ip, CaTenant.PRIMARY_TENANT_USCC);
     }
 
     /**
-     * 记录一条审计日志（租户域版）：tenantKey 落到审计行 tenant_key 列，供数据域强制过滤。
+     * 记录一条审计日志（租户域版）：tenantUscc 落到审计行 tenant_uscc 列，供数据域强制过滤。
      *
      * <p>口径：签发/吊销/挂起等记对象（证书/申请单）所属租户；登录/建号等按用户租户；
-     * 全局操作与 tenantKey 为空的入参统一归位 default（列 NOT NULL DEFAULT 'default'）。
-     * 注意 tenant_key 不参与 canonical 签名串——存量记录签名口径不变，租户归属仅作检索/过滤维度。</p>
+     * 全局操作与 tenantUscc 为空的入参统一归位 default（列 NOT NULL DEFAULT 'default'）。
+     * 注意 tenant_uscc 不参与 canonical 签名串——存量记录签名口径不变，租户归属仅作检索/过滤维度。</p>
      */
     @Transactional(rollbackFor = Exception.class)
-    public void record(String username, String action, String target, String detail, String ip, String tenantKey) {
+    public void record(String username, String action, String target, String detail, String ip, String tenantUscc) {
         AuditLog logRow = new AuditLog();
         logRow.setUsername(username == null || username.isBlank() ? "SYSTEM" : username);
-        logRow.setTenantKey(tenantKey == null || tenantKey.isBlank() ? CaTenant.PRIMARY_TENANT_KEY : tenantKey);
+        logRow.setTenantUscc(tenantUscc == null || tenantUscc.isBlank() ? CaTenant.PRIMARY_TENANT_USCC : tenantUscc);
         logRow.setAction(action);
         logRow.setTarget(target);
         logRow.setDetail(truncate(detail));
@@ -218,7 +218,7 @@ public class AuditService {
      *
      * <p><b>链构造/对账不分租户（有意设计）</b>：审计哈希链是全局单链，prev_id 跨租户连续。
      * 若对账按租户分段扫描，跨租户相邻行的 prev 引用会被误判为断链，链条反而不可审计。
-     * 因此租户数据域过滤只作用于"查"（page/export 按 tenant_key 收敛结果集），
+     * 因此租户数据域过滤只作用于"查"（page/export 按 tenant_uscc 收敛结果集），
      * 不作用于链构造与链对账；本接口对任何有权角色均呈现全局链完整性视角（只读，无内容泄露）。</p>
      *
      * @param fromId 起始记录ID（含，可空=从头开始）
@@ -310,22 +310,22 @@ public class AuditService {
     }
 
     /**
-     * 分页查询审计日志（tenantKey 为空=跨租户全量；仅全局用户可达此口径，调用方已按数据域强制收敛）
+     * 分页查询审计日志（tenantUscc 为空=跨租户全量；仅全局用户可达此口径，调用方已按数据域强制收敛）
      */
     public Page<AuditLog> page(long pageNo, long pageSize, String action) {
         return page(pageNo, pageSize, action, null);
     }
 
     /**
-     * 分页查询审计日志（租户域版：tenantKey 非空=仅该租户）
+     * 分页查询审计日志（租户域版：tenantUscc 非空=仅该租户）
      */
-    public Page<AuditLog> page(long pageNo, long pageSize, String action, String tenantKey) {
+    public Page<AuditLog> page(long pageNo, long pageSize, String action, String tenantUscc) {
         LambdaQueryWrapper<AuditLog> qw = new LambdaQueryWrapper<>();
         if (action != null && !action.isBlank()) {
             qw.eq(AuditLog::getAction, action);
         }
-        if (tenantKey != null && !tenantKey.isBlank()) {
-            qw.eq(AuditLog::getTenantKey, tenantKey);
+        if (tenantUscc != null && !tenantUscc.isBlank()) {
+            qw.eq(AuditLog::getTenantUscc, tenantUscc);
         }
         qw.orderByDesc(AuditLog::getCreatedAt);
         return auditLogMapper.selectPage(new Page<>(pageNo, pageSize), qw);
@@ -343,26 +343,26 @@ public class AuditService {
     }
 
     /**
-     * 归档导出（兼容入口=跨租户全量，调用方按数据域收敛后传入 tenantKey）
+     * 归档导出（兼容入口=跨租户全量，调用方按数据域收敛后传入 tenantUscc）
      */
     public AuditExportVO exportCsv() {
         return exportCsv(null);
     }
 
     /**
-     * 审计归档导出（留存 ≥5 年材料，等保要求）：按租户过滤（tenantKey 空=全量）后导出 CSV（UTF-8 BOM），
+     * 审计归档导出（留存 ≥5 年材料，等保要求）：按租户过滤（tenantUscc 空=全量）后导出 CSV（UTF-8 BOM），
      * 并对导出内容做审计 SM2 报告签名（§10.5 审计记录创建人数字签名延伸）——归档文件完整性可在线验签。
      *
      * @return sign 是对 CSV 全文的 SM3withSM2 签名（hex），验签=对下载的 CSV 内容重算比对
      */
-    public AuditExportVO exportCsv(String tenantKey) {
+    public AuditExportVO exportCsv(String tenantUscc) {
         LambdaQueryWrapper<AuditLog> qw = new LambdaQueryWrapper<AuditLog>().orderByAsc(AuditLog::getId);
-        if (tenantKey != null && !tenantKey.isBlank()) {
-            qw.eq(AuditLog::getTenantKey, tenantKey);
+        if (tenantUscc != null && !tenantUscc.isBlank()) {
+            qw.eq(AuditLog::getTenantUscc, tenantUscc);
         }
         List<AuditLog> logs = auditLogMapper.selectList(qw);
         StringBuilder sb = new StringBuilder("\uFEFF"); // UTF-8 BOM，Excel 直接识别中文
-        sb.append("id,username,tenant_key,action,target,detail,ip,created_at,prev_sign,sign\n");
+        sb.append("id,username,tenant_uscc,action,target,detail,ip,created_at,prev_sign,sign\n");
         for (AuditLog l : logs) {
             sb.append(l.getId()).append(',')
                     .append(csv(l.getUsername())).append(',')
@@ -384,7 +384,7 @@ public class AuditService {
             sign = "";
         }
         log.info("[审计] 归档导出完成，租户={}，记录数={}，报告已签名",
-                tenantKey == null || tenantKey.isBlank() ? "全部" : tenantKey, logs.size());
+                tenantUscc == null || tenantUscc.isBlank() ? "全部" : tenantUscc, logs.size());
         AuditExportVO vo = new AuditExportVO();
         vo.setCsv(csv);
         vo.setSign(sign);

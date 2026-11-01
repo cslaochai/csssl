@@ -2,6 +2,7 @@ package com.csssl.config;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.entity.CaTenant;
+import com.csssl.enums.TenantStatusEnum;
 import com.csssl.mapper.CaTenantMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,18 +29,18 @@ public class TenantScope implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         List<CaTenant> actives = tenantMapper.selectList(new LambdaQueryWrapper<CaTenant>()
-                .eq(CaTenant::getStatus, "ACTIVE")
+                .eq(CaTenant::getStatus, TenantStatusEnum.ACTIVE.getCode())
                 .orderByAsc(CaTenant::getId));
         if (actives.isEmpty()) {
-            log.warn("[租户] 尚无在营租户，兼容入口暂指向 {}，请在租户管理创建首个租户", CaTenant.PRIMARY_TENANT_KEY);
+            log.warn("[租户] 尚无在营租户，兼容入口暂指向 {}，请在租户管理创建首个租户", CaTenant.PRIMARY_TENANT_USCC);
             return;
         }
         CaTenant primary = actives.get(0);
-        CaTenant.PRIMARY_TENANT_KEY = primary.getTenantKey();
+        CaTenant.PRIMARY_TENANT_USCC = primary.getUscc();
         if (actives.size() > 1) {
-            log.warn("[租户] 在营租户 {} 个，无租户参数入口归位首个租户 {}", actives.size(), primary.getTenantKey());
+            log.warn("[租户] 在营租户 {} 个，无租户参数入口归位首个租户 {}", actives.size(), primary.getUscc());
         } else {
-            log.info("[租户] 主租户={}（{}）", primary.getTenantKey(), primary.getTenantName());
+            log.info("[租户] 主租户={}（{}）", primary.getUscc(), primary.getTenantName());
         }
     }
 }

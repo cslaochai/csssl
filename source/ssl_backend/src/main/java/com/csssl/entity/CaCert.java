@@ -24,7 +24,7 @@ public class CaCert {
     /**
      * 所属租户（独立根CA域）；default=院内默认域（存量单根）
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 证书序列号（16进制，唯一）

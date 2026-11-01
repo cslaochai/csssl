@@ -53,8 +53,8 @@ public class AuthService {
      * 审计租户归位：账号归属租户（全局账号/无账号=平台主租户）
      */
     private static String tenantOfUser(SysUser user) {
-        return user == null || user.getTenantKey() == null || user.getTenantKey().isBlank()
-                ? CaTenant.PRIMARY_TENANT_KEY : user.getTenantKey();
+        return user == null || user.getTenantUscc() == null || user.getTenantUscc().isBlank()
+                ? CaTenant.PRIMARY_TENANT_USCC : user.getTenantUscc();
     }
 
     /**
@@ -103,7 +103,7 @@ public class AuthService {
 
         SysUser user = loadByUsername(username);
         if (user == null) {
-            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, CaTenant.PRIMARY_TENANT_KEY);
+            auditService.record(username, "LOGIN", null, "登录失败（账号或口令错误）", ip, CaTenant.PRIMARY_TENANT_USCC);
             throw new IllegalArgumentException("账号或口令错误");
         }
         LocalDateTime now = LocalDateTime.now();
@@ -130,7 +130,7 @@ public class AuthService {
         }
 
         String token = jwtUtil.createToken(user.getUsername(), user.getRoleCode(),
-                user.getId(), user.getTokenVersion(), user.getTenantKey(), user.getRealName());
+                user.getId(), user.getTokenVersion(), user.getTenantUscc(), user.getRealName());
         userMapper.update(null, new LambdaUpdateWrapper<SysUser>()
                 .eq(SysUser::getId, user.getId())
                 .set(SysUser::getFailedAttempts, 0)
@@ -149,9 +149,9 @@ public class AuthService {
         // 生效权限点（菜单 + 按钮）：前端据此构建侧栏、守卫与按钮显隐；服务端仍逐接口强校验
         data.setPerms(permissionService.effectiveList(user.getRoleCode()));
         // 租户数据域：null=全局账号；前端据此锁定/展示租户切换（服务端各域操作仍强制校验，不信任前端）
-        data.setTenantKey(user.getTenantKey());
+        data.setTenantUscc(user.getTenantUscc());
         // 平台主租户（各租户标识由管理员在租户管理维护；全局账号默认落在它上面）
-        data.setPrimaryTenant(CaTenant.PRIMARY_TENANT_KEY);
+        data.setPrimaryTenant(CaTenant.PRIMARY_TENANT_USCC);
         return data;
     }
 

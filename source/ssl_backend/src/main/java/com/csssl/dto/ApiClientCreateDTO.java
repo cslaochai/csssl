@@ -10,7 +10,7 @@ import lombok.Data;
 public class ApiClientCreateDTO {
 
     @NotBlank(message = "必须指定客户端绑定的租户")
-    private String tenantKey;
+    private String tenantUscc;
 
     @NotBlank(message = "客户端名称不能为空")
     private String clientName;

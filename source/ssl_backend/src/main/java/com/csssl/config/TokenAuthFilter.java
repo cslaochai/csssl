@@ -95,7 +95,7 @@ public class TokenAuthFilter extends OncePerRequestFilter {
                 user.getUsername(),
                 claims.realName(),
                 user.getRoleCode(),
-                user.getTenantKey(),
+                user.getTenantUscc(),
                 role != null && role.getBuiltin() != null && role.getBuiltin() == 1,
                 permCodes);
         // getAuthorities() 已含 ROLE_<role> + 各权限点，既支持 hasAuthority 也支持未来 hasRole

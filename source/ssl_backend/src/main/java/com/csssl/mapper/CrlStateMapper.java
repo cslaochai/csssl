@@ -7,8 +7,8 @@ import com.csssl.entity.CrlState;
 import org.apache.ibatis.annotations.Mapper;
 
 /**
- * CRL 发布状态行（路线A：每租户一行，tenant_key 逻辑唯一）。
- * 行锁按租户读：SELECT ... FOR UPDATE ... LIMIT 1——未建 tenant_key 唯一索引前（见待加DDL），
+ * CRL 发布状态行（路线A：每租户一行，tenant_uscc 逻辑唯一）。
+ * 行锁按租户读：SELECT ... FOR UPDATE ... LIMIT 1——未建 tenant_uscc 唯一索引前（见待加DDL），
  * 取最新一行（id 最大）兜住历史迁移产生的过渡态重复行。
  */
 @Mapper
@@ -18,15 +18,15 @@ public interface CrlStateMapper extends BaseMapper<CrlState> {
      * 行锁读取主租户发布状态（兼容入口）
      */
     default CrlState selectForUpdate() {
-        return selectForUpdate(CaTenant.PRIMARY_TENANT_KEY);
+        return selectForUpdate(CaTenant.PRIMARY_TENANT_USCC);
     }
 
     /**
      * 行锁读取指定租户发布状态行：并发/多实例发布串行化（须在事务内调用才有意义）
      */
-    default CrlState selectForUpdate(String tenantKey) {
+    default CrlState selectForUpdate(String tenantUscc) {
         return selectOne(new LambdaQueryWrapper<CrlState>()
-                .eq(CrlState::getTenantKey, tenantKey)
+                .eq(CrlState::getTenantUscc, tenantUscc)
                 .orderByDesc(CrlState::getId)
                 .last("LIMIT 1 FOR UPDATE"));
     }
@@ -34,9 +34,9 @@ public interface CrlStateMapper extends BaseMapper<CrlState> {
     /**
      * 读取指定租户发布状态行（只读，不加锁；无行返回 null）
      */
-    default CrlState selectByTenant(String tenantKey) {
+    default CrlState selectByTenant(String tenantUscc) {
         return selectOne(new LambdaQueryWrapper<CrlState>()
-                .eq(CrlState::getTenantKey, tenantKey)
+                .eq(CrlState::getTenantUscc, tenantUscc)
                 .orderByDesc(CrlState::getId)
                 .last("LIMIT 1"));
     }

@@ -45,14 +45,18 @@
       </div>
     </div>
 
-    <el-alert
-        v-if="isGlobal"
-        :title="`当前在租户域「${tenantLabel}」上操作根CA（顶栏「租户域」切换）。各租户根独立、互不可信。`"
-        type="info"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 14px"
-    />
+    <el-form inline style="margin-bottom: 12px">
+      <el-form-item label="租户">
+        <el-select v-model="tenant" style="width: 320px" placeholder="选择租户" @change="onTenantChange">
+          <el-option
+              v-for="o in tenantOptions"
+              :key="o.uscc"
+              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+              :value="o.uscc"
+          />
+        </el-select>
+      </el-form-item>
+    </el-form>
 
     <el-alert
         v-if="!root.initialized && root.message"
@@ -171,17 +175,14 @@ import {
   unsealRootKey
 } from '@/api/system'
 import {downloadText} from '@/lib/download'
-import {currentTenant, isGlobalUser, syncPrimaryTenant} from '@/lib/tenant'
 import {listTenantsCached} from '@/api/system'
 
-// 当前操作域：租户用户=本租户；全局用户=平台主租户（登录下发，旧会话经 syncPrimaryTenant 自愈）
-const tenant = ref(currentTenant())
-const isGlobal = ref(isGlobalUser())
-// 域标识由统一社会信用代码派生、不可读，标签一律显示租户名称（未命中回落标识）
-const tenantLabel = ref(tenant.value)
-listTenantsCached().then(list => {
-  const hit = (list || []).find(t => t.tenantKey === tenant.value)
-  if (hit?.tenantName) tenantLabel.value = hit.tenantName
+// 操作域由页面内显式选择（根CA按租户独立）
+const tenant = ref('')
+const tenantOptions = ref([])
+const tenantLabel = computed(() => {
+  const hit = tenantOptions.value.find(t => t.uscc === tenant.value)
+  return hit?.tenantName || tenant.value
 })
 
 const root = ref({})
@@ -319,13 +320,17 @@ async function onDownloadSubCa() {
   ElMessage.success('SUB_CA证书已导出')
 }
 
-onMounted(async () => {
-  // 旧会话自愈：操作域为空（primaryTenant 未下发）时按在营租户补齐再加载
-  if (!tenant.value) {
-    const healed = syncPrimaryTenant(await listTenantsCached())
-    if (healed) tenant.value = healed
-  }
+async function onTenantChange() {
+  shareInputs.value = ['', '', '']
+  root.value = {}
   await load()
+}
+
+onMounted(async () => {
+  tenantOptions.value = await listTenantsCached()
+  const active = tenantOptions.value.find(t => t.status === 'ACTIVE') || tenantOptions.value[0]
+  tenant.value = active?.uscc || ''
+  if (tenant.value) await load()
 })
 </script>
 

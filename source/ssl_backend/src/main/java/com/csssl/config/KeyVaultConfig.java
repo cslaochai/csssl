@@ -18,10 +18,10 @@ import java.util.regex.Pattern;
 /**
  * 密钥保险库单例：CaService 与 TsaService 共用同一实例（default 租户域），
  * 消除各自 new KeyVault 的重复 SM4 初始化与主密钥首启生成竞态（master.key 语义不变）。
- * 私钥密文统一落库 ssl_key_vault（tenant_key 分域）；store-dir 仅保留主密钥文件、
+ * 私钥密文统一落库 ssl_key_vault（tenant_uscc 分域）；store-dir 仅保留主密钥文件、
  * 证书/CRL 公开材料与根密钥门限份额。
- * 路线A多租户：{@link TenantVaultResolver} 按 tenantKey 解析独立保险库——default 复用上述单例
- * （存量路径/主密钥零变化），其他租户主密钥独立生成落盘 tenants/{tenantKey}/master.key。
+ * 路线A多租户：{@link TenantVaultResolver} 按 tenantUscc 解析独立保险库——default 复用上述单例
+ * （存量路径/主密钥零变化），其他租户主密钥独立生成落盘 tenants/{tenantUscc}/master.key。
  */
 @Slf4j
 @Configuration
@@ -52,7 +52,7 @@ public class KeyVaultConfig {
 
     @Bean
     public KeyVault keyVault(CssslProperties props, KeyVaultEntryMapper mapper) {
-        return new KeyVault(CaTenant.LEGACY_TENANT_KEY, Path.of(props.getStoreDir()),
+        return new KeyVault(null, Path.of(props.getStoreDir()),
                 resolveMasterKey(props), mapper);
     }
 
@@ -62,13 +62,14 @@ public class KeyVaultConfig {
     }
 
     /**
-     * 租户保险库解析器：存量单根（LEGACY_TENANT_KEY）→ 现单例（SSL_MASTER_KEY/master.key，兼容铁律）；
-     * 其他租户主密钥首启自动生成落盘 tenants/{tenantKey}/master.key——刻意不复用环境变量主密钥，
-     * 保证租户域间密钥材料完全隔离。私钥密文统一落库 ssl_key_vault，tenant_key 为租户域。
+     * 租户保险库解析器：存量单根（LEGACY_NAMESPACE）→ 现单例（SSL_MASTER_KEY/master.key，兼容铁律）；
+     * 其他租户主密钥首启自动生成落盘 tenants/{tenantUscc}/master.key——刻意不复用环境变量主密钥，
+     * 保证租户域间密钥材料完全隔离。私钥密文统一落库 ssl_key_vault，tenant_uscc 为租户域。
      */
     public static class TenantVaultResolver {
 
-        private static final Pattern TENANT_KEY_PATTERN = Pattern.compile("^[a-z0-9]{1,32}$");
+        private static final Pattern TENANT_USCC_PATTERN =
+                Pattern.compile("^([0-9A-HJ-NPQRTUWXY]{18}|default)$");
 
         private final CssslProperties props;
         private final KeyVault defaultVault;
@@ -82,11 +83,11 @@ public class KeyVaultConfig {
         }
 
         /**
-         * 租户标识格式校验（同时兜住路径穿越：仅小写字母数字）
+         * 租户标识校验（统一社会信用代码）：同时兜住路径穿越（字符集不含 . / 等）
          */
-        public static void checkTenantKey(String tenantKey) {
-            if (tenantKey == null || !TENANT_KEY_PATTERN.matcher(tenantKey).matches()) {
-                throw new IllegalArgumentException("非法租户标识（仅允许1-32位小写字母数字）: " + tenantKey);
+        public static void checkTenantUscc(String tenantUscc) {
+            if (tenantUscc == null || !TENANT_USCC_PATTERN.matcher(tenantUscc).matches()) {
+                throw new IllegalArgumentException("非法租户标识（须为18位统一社会信用代码）: " + tenantUscc);
             }
         }
 
@@ -110,25 +111,25 @@ public class KeyVaultConfig {
         }
 
         /**
-         * 租户落盘根目录：存量单根 → store-dir；其他 → store-dir/tenants/{tenantKey}
+         * 租户落盘根目录：存量单根 → store-dir；其他 → store-dir/tenants/{tenantUscc}
          * （仅承载主密钥文件与证书/CRL 公开材料；私钥密文已统一落库）
          */
-        public Path tenantStoreDir(String tenantKey) {
-            checkTenantKey(tenantKey);
-            return CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)
+        public Path tenantStoreDir(String tenantUscc) {
+            checkTenantUscc(tenantUscc);
+            return CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)
                     ? Path.of(props.getStoreDir())
-                    : Path.of(props.getStoreDir(), "tenants", tenantKey);
+                    : Path.of(props.getStoreDir(), "tenants", tenantUscc);
         }
 
         /**
          * 取租户保险库（租户不存在时按需构建并缓存；存量单根恒返回共享单例）
          */
-        public KeyVault forTenant(String tenantKey) {
-            if (CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
+        public KeyVault forTenant(String tenantUscc) {
+            if (CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)) {
                 return defaultVault;
             }
-            checkTenantKey(tenantKey);
-            return pool.computeIfAbsent(tenantKey,
+            checkTenantUscc(tenantUscc);
+            return pool.computeIfAbsent(tenantUscc,
                     k -> new KeyVault(k, tenantStoreDir(k), resolveTenantMasterKey(tenantStoreDir(k)), mapper));
         }
     }

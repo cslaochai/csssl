@@ -15,12 +15,7 @@ import java.time.LocalDateTime;
 public class TenantDetailVO {
 
     /**
-     * 租户标识（由统一社会信用代码派生）
-     */
-    private String tenantKey;
-
-    /**
-     * 统一社会信用代码（存量租户可能为空）
+     * 统一社会信用代码：租户唯一标识
      */
     private String uscc;
 
@@ -75,7 +70,6 @@ public class TenantDetailVO {
      */
     public static TenantDetailVO from(CaTenant tenant) {
         TenantDetailVO vo = new TenantDetailVO();
-        vo.setTenantKey(tenant.getTenantKey());
         vo.setUscc(tenant.getUscc());
         vo.setTenantName(tenant.getTenantName());
         vo.setSubjectO(tenant.getSubjectO());

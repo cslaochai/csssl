@@ -3,9 +3,9 @@
 面向 HIS 生态的独立证书认证中心：为多家医院提供**独立信任域（每租户一把根CA）**，并作为平台集中 RA，代医院完成证书的录入、审核、签发与全生命周期管理。
 
 - **CA 认证**：根CA初始化（RSA2048 / SM2 国密）、二级CA（SUB_CA）签发、证书签发、CRL（全量+增量）、证书链校验、OCSP 三态查询
-- **多租户**：每家医院独立根CA + SUB_CA + 密钥域 + 审计与数据隔离（`tenant_key` 服务端强制过滤，不信任前端传参）
-- **平台集中 RA + 线下人工中转**：医院不登录系统，只提交申请名单；医生签名证书由平台操作员录入、审核员复核后签发（双人分离）。**与 HIS 之间无任何在线发证接口**
-- **分权制衡**：证书的全部写操作（吊销/挂起/更新/换密钥）走**操作单双人复核**；系统管理员 ADMIN 权限全收，只管人工信息（账号/角色/租户档案），业务台账只读
+- **多租户**：每家医院独立根CA + SUB_CA + 密钥域 + 审计与数据隔离（`tenant_uscc` 服务端强制过滤，不信任前端传参）
+- **平台集中 RA + 双通道接入**：管理后台人工录入/审核/签发（双人分离）；同时提供 HIS 侧受控在线接口（`/ca/api/v1`，App ID + HMAC 签名 + SM4 报文加密，App ID 反查租户域，申请仍须人工审批）
+- **分权制衡**：证书写操作（吊销/挂起/更新/换密钥）与租户生命周期（新建/暂停/恢复/关闭/接入密钥重置）全部走**操作单双人复核**；系统管理员 ADMIN 权限全收，只管人工信息（账号/角色），业务台账与租户档案只读
 
 ## 架构位置
 
@@ -93,8 +93,8 @@ csssl/
 │   ├── ssl_backend/          # 后端（Spring Boot，端口 8092，context-path /ssl）
 │   │   └── src/main/
 │   │       ├── java/com/csssl/
-│   │       │   ├── controller/    # auth / admin/{users,roles,tenants,ca,certs,cert-ops,applications,templates,crl,audit} / ca/public / tsa
-│   │       │   ├── service/       # CaService CertService CertApplicationService CertOpTicketService CrlService VerifyService OcspService TenantService ...
+│   │       │   ├── controller/    # auth / admin/{users,roles,tenants,tenant-ops,ca,certs,cert-ops,applications,templates,crl,audit} / ca/public / ca/api / tsa
+│   │       │   ├── service/       # CaService CertService CertApplicationService CertOpTicketService TenantOpTicketService CrlService VerifyService OcspService TenantService ...
 │   │       │   ├── util/          # CertUtil KeyVault Sm2Util Sm4Util PemUtil JwtUtil TenantScope
 │   │       │   ├── entity/ enums/ mapper/ dto/ config/ common/
 │   │       │   └── CssslApplication.java
@@ -128,7 +128,7 @@ npm run dev                  # http://localhost:5175
 1. 铺行数据：预置角色、`admin / 123456`、内置证书模板、过期扫描（DataInitializer，只铺行不建表）
 2. 各租户根CA + SUB_CA：仅当无根记录且无私钥时才生成；已有则加载复用。唯一重建场景：根私钥丢失（吊销旧根重建新链，需主动触发「初始化根CA」）
 
-> 生产必须注入 `SSL_MASTER_KEY`（32位十六进制 SM4 主密钥）。开发期未配置时首启随机生成落盘 `master.key`。私钥密文统一存 `ssl_key_vault` 表；密钥目录 `store-dir/tenants/{tenantKey}/` 存证书/CRL/根密钥份额。
+> 生产必须注入 `SSL_MASTER_KEY`（32位十六进制 SM4 主密钥）。开发期未配置时首启随机生成落盘 `master.key`。私钥密文统一存 `ssl_key_vault` 表；密钥目录 `store-dir/tenants/{tenantUscc}/` 存证书/CRL/根密钥份额。
 
 ## 核心 API
 
@@ -140,7 +140,7 @@ npm run dev                  # http://localhost:5175
 | `POST /ca/public/verify` | 证书链在线校验（叶子→SUB_CA→根逐级验签/有效期/吊销/用途） |
 | `GET /ca/public/crl` · `/crl/delta` | 全量 CRL / 增量 CRL（dCRL）下载 |
 | `POST /ca/public/ocsp` · `GET /ca/public/ocsp/{b64url}` | OCSP 三态查询（good/revoked/unknown，RFC 6960） |
-| `/ca/public/{tenantKey}/…` | 上述全部接口的按租户域变体（root/subca/verify/crl/crl/delta/ocsp） |
+| `/ca/public/{tenantUscc}/…` | 上述全部接口的按租户域变体（root/subca/verify/crl/crl/delta/ocsp） |
 
 ### RA 申请单（`/ssl/admin/applications`）
 
@@ -172,8 +172,15 @@ npm run dev                  # http://localhost:5175
 
 | 接口 | 说明 |
 |---|---|
-| `GET/POST /admin/tenants` · `/{key}/suspend\|resume\|close` | 租户注册与状态流转（开租户即建独立根CA+SUB_CA+门限份额；仅 TENANT_ADMIN/ADMIN 档案侧） |
-| `GET /admin/ca/status` | 根CA状态（含 SUB_CA 与根密钥封存状态，`?tenantKey=` 切域） |
+| `GET /admin/tenants` · `/page` · `/{uscc}` | 租户档案查询（列表/分页/详情） |
+| `POST /admin/tenants` | 新建租户（仅 TENANT_ADMIN，直接执行：建独立根CA+SUB_CA 并发放接入凭证，secret 仅返回一次） |
+| `GET /admin/tenant-ops` · `/{id}` | 租户变更单列表/详情（暂停/恢复/关闭/接入密钥重置；历史新建单可查） |
+| `POST /admin/tenant-ops` | 发起变更单（仅 TENANT_ADMIN；必填变更事由；不接受 CREATE） |
+| `POST /admin/tenant-ops/{id}/approve` · `/reject` · `/cancel` | 审批（仅 TENANT_APPROVER，批准即执行，审批人≠发起人）/驳回（必填意见）/发起人撤回 |
+| `GET /admin/tenant-ops/{id}/receipt` | 领取接入凭证（仅发起人、仅 EXECUTED、仅一次；密钥从加密库解密回传，库中无明文） |
+
+> **新建租户直接执行**（常规建档，无需双人复核）；**暂停/恢复/关闭/接入密钥重置没有直接执行接口**——只能发起变更单，TENANT_APPROVER 审批通过才执行；ADMIN 对租户与变更单只读。
+| `GET /admin/ca/status` | 根CA状态（含 SUB_CA 与根密钥封存状态，`?tenantUscc=` 切域） |
 | `POST /admin/ca/init` | 初始化/重建根CA（幂等，私钥丢失时吊销旧根重建） |
 | `POST /admin/ca/seal` · `/unseal` | 根私钥封存（离线化）/ 解封 |
 | `GET/POST /admin/ca/shares*` | 根密钥 Shamir(3,5)：`/shares` 状态 / `/shares/migrate` 迁移 / `/shares/{index}` 下载份额 / `/unseal-shares` 3份解封 |
@@ -189,24 +196,26 @@ npm run dev                  # http://localhost:5175
 
 ## 角色与分权
 
-三员分立 + 双人复核（GM/T 0034 §10.1g），内置角色：
+三员分立 + 双人复核（GM/T 0034 §10.1g），内置 12 个角色：
 
 | 角色 | 职责边界 |
 |---|---|
-| ADMIN 系统管理员 | **只管人工信息**（账号/角色/租户档案），业务台账只读；签发/审核/吊销/模板/根密钥一律不沾 |
+| ADMIN 系统管理员 | **只管人工信息**（账号/角色档案），证书/申请/租户档案与审计只查看检索；签发/审核/吊销/租户变更/角色授权一律不沾 |
 | OPERATOR CA操作员 | 申请录入、直发签发、发起操作单 |
 | APPROVER 审核员 | 审核申请单与操作单（不得与发起人同一人） |
 | AUDITOR 审计员 | 审计查询/验签/归档，只读独立 |
 | SECURITY_ADMIN 安全管理员 | 证书模板与策略（KeyUsage/EKU/策略OID） |
 | KEY_ADMIN 密钥管理员 | 根密钥门限分持/封存/解封、私钥导出开关 |
-| TENANT_ADMIN / USER_ADMIN / RA_ADMIN / CERT_OFFICER / AUDIT_ADMIN | 租户域管理 / 用户角色档案 / RA 流程配置 / 仅签发执行 / 审计策略（按需启用） |
+| TENANT_ADMIN 租户管理员 | 新建租户直接执行；发起暂停/恢复/关闭/接入密钥重置变更单；API 客户端登记与轮换 |
+| TENANT_APPROVER 租户审批员 | 审批租户变更单（暂停/恢复/关闭/接入密钥重置），批准即执行；不得与发起人同一人 |
+| USER_ADMIN / RA_ADMIN / CERT_OFFICER / AUDIT_ADMIN | 用户角色档案 / RA 流程配置 / 仅签发执行 / 审计策略（按需启用） |
 
 权限每次请求从库现取（配置 ∩ 法定上限），改完即时生效、无需重登。
 
 ## 关键设计
 
-- **多租户独立信任域**：每租户一把独立根CA + 专属 SUB_CA + 独立密钥目录（`store-dir/tenants/{tenantKey}/`）；租户间互不信任（A 域根验 B 域证书一律 valid=false）。主租户唯一（PRIMARY_TENANT_KEY），旧 `default` 域仅作存量路径兼容标识、不可新建。租户 SUSPENDED/CLOSED 只门禁写操作，历史证书仍可验证吊销
-- **数据域服务端强制隔离**：业务表带 `tenant_key`，租户用户锁定本域（跨域读写 403，不信任前端传参）；全局账号需显式 `?tenantKey=` 才跨域
+- **多租户独立信任域**：每租户一把独立根CA + 专属 SUB_CA + 独立密钥目录（`store-dir/tenants/{tenantUscc}/`）；租户间互不信任（A 域根验 B 域证书一律 valid=false）。主租户唯一（PRIMARY_TENANT_USCC），旧 `default` 域仅作存量路径兼容标识、不可新建。租户 SUSPENDED/CLOSED 只门禁写操作，历史证书仍可验证吊销
+- **数据域服务端强制隔离**：业务表带 `tenant_uscc`，租户用户锁定本域（跨域读写 403，不信任前端传参）；全局账号需显式 `?tenantUscc=` 才跨域
 - **根CA离线化 + 门限分持**：根CA仅初始化与签发 SUB_CA，日常签发/CRL/OCSP 全由 SUB_CA 承担；根私钥推荐 Shamir(3,5) 门限分持（任 3 份恢复，份额是唯一持久形态），到期前自动轮换
 - **私钥加密落库**：平台自有密钥 SM4 加密存 `ssl_key_vault`，旧密钥文件首访自动迁移；医生/申请方私钥永不入库
 - **增量 CRL（dCRL）**：带 DeltaCRLIndicator，只发布自最近全量以来新增条目；CRL 按"吊销集合指纹"判重（内容未变不递增编号）；每日定时发布，依赖方全量+增量合并同步
@@ -235,6 +244,7 @@ npm run dev                  # http://localhost:5175
 
 ## 演进记录（已交付）
 
+- [x] 租户生命周期分档：新建租户直接执行（常规建档）；暂停/恢复/关闭/接入密钥重置走变更单，TENANT_APPROVER 审批通过才执行，敏感变更无直接执行端点
 - [x] RA 申请-审核-签发双人审批 + 证书操作单双人复核（吊销/挂起/更新/换密钥直接执行端点全部拆除）
 - [x] 多租户架构（机构 org → 租户 tenant 全量改造：表/接口/权限码/密钥目录/前端）
 - [x] ADMIN 权限全收：只管人工信息，业务只读（三员分立）

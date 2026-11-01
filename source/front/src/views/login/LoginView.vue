@@ -64,7 +64,6 @@ import {ElMessage} from 'element-plus'
 import {Lock, Search, User} from '@element-plus/icons-vue'
 import {login} from '@/api/system'
 import {encryptPassword, resetPublicKeyCache} from '@/lib/password'
-import {saveSessionTenant} from '@/lib/tenant'
 import {savePerms, saveRoleName} from '@/lib/perm'
 import {copyText} from '@/lib/clipboard'
 import logo from '@/assets/logo.svg'
@@ -80,7 +79,7 @@ const form = reactive({
 })
 
 // ===== 演示账号凭据（与后端 ssl_sys_user 同步；口令已统一为 123456）=====
-// 数据来源：直读 ssl_ca.ssl_sys_user（2026-11-01）—— 10 个全局账号全部启用
+// 数据来源：直读 ssl_ca.ssl_sys_user（2026-11-01）—— 11 个全局账号全部启用
 const credVisible = ref(false)
 
 const credRows = [
@@ -94,7 +93,13 @@ const credRows = [
     role: '租户管理员',
     login: 'zhangshuhao',
     name: '张书豪',
-    ability: '开租户（登记即建独立根CA与SUB_CA、发接入凭证）、租户暂停/恢复/关闭、重置接入密钥、API 客户端登记与轮换',
+    ability: '新建租户直接执行（建独立根CA与SUB_CA、发接入凭证）；发起暂停/恢复/关闭/重置接入密钥变更单（需租户审批员批准）；API 客户端登记与轮换',
+  },
+  {
+    role: '租户审批员',
+    login: 'luoyiming',
+    name: '罗一鸣',
+    ability: '审批租户变更单（暂停/恢复/关闭/重置接入密钥），批准即执行，不得与发起人同一人；不新建租户、不改租户档案',
   },
   {
     role: '用户与角色管理员',
@@ -218,13 +223,12 @@ async function onSubmit() {
     const res = await login({username: form.username.trim(), passwordCipher: cipher})
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.username)
+    localStorage.setItem('realName', res.data.realName || '')
     // 不再缺省回退 ADMIN：后端未返回角色即视为异常，由守卫按未登录处理
     localStorage.setItem('role', res.data.role || '')
     // 角色名称与生效权限点：侧栏/守卫/按钮均按权限点收敛（服务端仍逐接口强校验）
     saveRoleName(res.data.roleName || '')
     savePerms(res.data.perms || [])
-    // 租户域：tenantKey=null 全局用户（落平台主租户），非空租户用户（固定本域）
-    saveSessionTenant(res.data.tenantKey || '', res.data.primaryTenant || '')
     ElMessage.success('登录成功')
     // 落到根路由（首页=概览；redirect 优先）
     const redirect = route.query.redirect || '/'

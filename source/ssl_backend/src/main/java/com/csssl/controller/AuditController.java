@@ -30,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 系统管理员/操作员不得读审计（防"做事的人删自己的痕迹"）。</p>
  *
  * <p>路线A数据域口径：租户审计员强制本租户过滤（显式传别租户 403）；
- * 全局审计员可按 ?tenantKey= 逐租户查看，不传=跨租户全量——审计域本就属监督职能，
+ * 全局审计员可按 ?tenantUscc= 逐租户查看，不传=跨租户全量——审计域本就属监督职能，
  * 全局只读总览为合规设计，不构成写旁路。</p>
  */
 @RestController
@@ -40,12 +40,12 @@ public class AuditController {
 
     private final AuditService auditService;
 
-    /** 审计日志分页查询（仅审计员；租户用户强制本租户，全局用户 tenantKey 缺省=全量只读） */
+    /** 审计日志分页查询（仅审计员；租户用户强制本租户，全局用户 tenantUscc 缺省=全量只读） */
     @PreAuthorize("hasAuthority('audit:view')")
     @GetMapping
     public Result<Page<AuditLog>> page(@Valid AuditPageQueryDTODTO query, HttpServletRequest request) {
         return Result.success("查询成功", auditService.page(query.getPageNo(), query.getPageSize(), query.getAction(),
-                TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantKey(), query.getTenantKey())));
+                TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), query.getTenantUscc())));
     }
 
     /**
@@ -60,19 +60,19 @@ public class AuditController {
             throw new IllegalArgumentException("参数 id 不能为空");
         }
         AuditLog row = auditService.load(id);
-        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantKey(), AuditService.tenantOf(row));
+        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantUscc(), AuditService.tenantOf(row));
         return Result.success("验签完成", auditService.verifyLog(id));
     }
 
     /**
      * 审计归档导出（≥5年留存材料）：CSV（UTF-8 BOM）+ 审计报告 SM2 签名，归档文件完整性可验签（仅审计员）。
-     * 租户用户强制导出本租户；全局用户 tenantKey 缺省=跨租户全量导出（只读放行，合规设计）。
+     * 租户用户强制导出本租户；全局用户 tenantUscc 缺省=跨租户全量导出（只读放行，合规设计）。
      */
     @PreAuthorize("hasAuthority('audit:export')")
     @GetMapping("/export")
-    public Result<AuditExportVO> export(@RequestParam(required = false) String tenantKey,
+    public Result<AuditExportVO> export(@RequestParam(required = false) String tenantUscc,
                                         HttpServletRequest request) {
-        return Result.success("导出完成", auditService.exportCsv(TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantKey(), tenantKey)));
+        return Result.success("导出完成", auditService.exportCsv(TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc)));
     }
 
     /**

@@ -46,9 +46,9 @@ import java.util.Set;
  * 证书签发与生命周期管理：在线签发（内部生成密钥对）/ CSR 签发 / 吊销 / 下载 / 概览统计。
  * 签发私钥只落盘（租户域 issued/{serial}），数据库只存证书与元信息。
  *
- * <p>路线A多租户：全部签发入口提供 tenantKey 首参正式版（CaService 按租户取签发CA、私钥/证书落租户域、
- * CRL/OCSP 分发点写租户公开端点、证书行记录 tenant_key）；原无 tenantKey 签名全部保留并委托 default 域，
- * 存量行为逐字节不变。吊销/挂起/下载按证书行自带 tenant_key 定位密钥与 CRL 域。</p>
+ * <p>路线A多租户：全部签发入口提供 tenantUscc 首参正式版（CaService 按租户取签发CA、私钥/证书落租户域、
+ * CRL/OCSP 分发点写租户公开端点、证书行记录 tenant_uscc）；原无 tenantUscc 签名全部保留并委托 default 域，
+ * 存量行为逐字节不变。吊销/挂起/下载按证书行自带 tenant_uscc 定位密钥与 CRL 域。</p>
  */
 @Slf4j
 @Service
@@ -70,24 +70,24 @@ public class CertService {
      * 证书行归属租户（A1 加列前的语义兜底：空=default，存量行由 DDL 默认值归位 default）
      */
     private static String tenantOf(CaCert row) {
-        String k = row.getTenantKey();
-        return k == null || k.isBlank() ? CaTenant.PRIMARY_TENANT_KEY : k;
+        String k = row.getTenantUscc();
+        return k == null || k.isBlank() ? CaTenant.PRIMARY_TENANT_USCC : k;
     }
 
     /**
-     * renew/rekey 租户版前置：显式传入的 tenantKey 必须与证书行归属一致（防跨租户更新/重签）
+     * renew/rekey 租户版前置：显式传入的 tenantUscc 必须与证书行归属一致（防跨租户更新/重签）
      */
-    private static void requireTenantMatch(String tenantKey, CaCert row) {
-        if (!tenantOf(row).equals(tenantKey)) {
-            throw new IllegalArgumentException("证书归属租户为 " + tenantOf(row) + "，不能在租户 " + tenantKey + " 域下更新/重签");
+    private static void requireTenantMatch(String tenantUscc, CaCert row) {
+        if (!tenantOf(row).equals(tenantUscc)) {
+            throw new IllegalArgumentException("证书归属租户为 " + tenantOf(row) + "，不能在租户 " + tenantUscc + " 域下更新/重签");
         }
     }
 
     /**
      * 主体 DN：default 域保持老口径 CN=xxx,O=CSSSL（逐字节兼容，不转义）；非 default 用 CN=xxx,O={租户subject_o}
      */
-    private static X500Name leafSubject(String tenantKey, CaTenant tenant, String cn) {
-        if (tenant == null || CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
+    private static X500Name leafSubject(String tenantUscc, CaTenant tenant, String cn) {
+        if (tenant == null || CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)) {
             return new X500Name("CN=" + cn + ",O=CSSSL");
         }
         return CertUtil.subjectDn(cn, tenant.getSubjectO());
@@ -133,8 +133,8 @@ public class CertService {
     /**
      * 审计文案租户后缀：default 返回空串（存量审计文本逐字节不变），其他租户标注归属域
      */
-    private static String tenantSuffix(String tenantKey) {
-        return CaTenant.LEGACY_TENANT_KEY.equals(tenantKey) ? "" : "，租户 " + tenantKey;
+    private static String tenantSuffix(String tenantUscc) {
+        return CaTenant.LEGACY_NAMESPACE.equals(tenantUscc) ? "" : "，租户 " + tenantUscc;
     }
 
     /**
@@ -143,7 +143,7 @@ public class CertService {
     public Page<CertVO> page(long pageNo, long pageSize, String certType, String status, String keyword, String tenantScope) {
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<>();
         if (tenantScope != null && !tenantScope.isBlank()) {
-            qw.eq(CaCert::getTenantKey, tenantScope);
+            qw.eq(CaCert::getTenantUscc, tenantScope);
         }
         if (certType != null && !certType.isBlank()) {
             qw.eq(CaCert::getCertType, certType);
@@ -166,7 +166,7 @@ public class CertService {
      */
     public CertVO detailVisible(Long id, String operatorTenant) {
         CaCert row = findById(id);
-        TenantScope.requireRowVisible(operatorTenant, row.getTenantKey());
+        TenantScope.requireRowVisible(operatorTenant, row.getTenantUscc());
         CertVO vo = CertVO.from(row);
         enrich(List.of(vo));
         return vo;
@@ -176,16 +176,16 @@ public class CertService {
      * 出参补中文展示字段：租户中文名、签发人中文姓名（key/账号仅作兜底回落，界面不裸吐英文标识）。
      */
     private void enrich(List<CertVO> vos) {
-        Set<String> tenantKeys = new java.util.HashSet<>();
+        Set<String> tenantUsccs = new java.util.HashSet<>();
         Set<String> usernames = new java.util.HashSet<>();
         for (CertVO vo : vos) {
-            if (vo.getTenantKey() != null && !vo.getTenantKey().isBlank()) tenantKeys.add(vo.getTenantKey());
+            if (vo.getTenantUscc() != null && !vo.getTenantUscc().isBlank()) tenantUsccs.add(vo.getTenantUscc());
             if (vo.getCreatedBy() != null && !vo.getCreatedBy().isBlank()) usernames.add(vo.getCreatedBy());
         }
         Map<String, String> tenantNames = new HashMap<>();
-        if (!tenantKeys.isEmpty()) {
-            tenantMapper.selectList(new LambdaQueryWrapper<CaTenant>().in(CaTenant::getTenantKey, tenantKeys))
-                    .forEach(t -> tenantNames.put(t.getTenantKey(), t.getTenantName()));
+        if (!tenantUsccs.isEmpty()) {
+            tenantMapper.selectList(new LambdaQueryWrapper<CaTenant>().in(CaTenant::getUscc, tenantUsccs))
+                    .forEach(t -> tenantNames.put(t.getUscc(), t.getTenantName()));
         }
         Map<String, String> realNames = new HashMap<>();
         if (!usernames.isEmpty()) {
@@ -193,10 +193,10 @@ public class CertService {
                     .forEach(u -> realNames.put(u.getUsername(), u.getRealName()));
         }
         for (CertVO vo : vos) {
-            vo.setTenantName(tenantNames.get(vo.getTenantKey()));
+            vo.setTenantName(tenantNames.get(vo.getTenantUscc()));
             vo.setCreatedByName(realNames.get(vo.getCreatedBy()));
-            String rowTenant = vo.getTenantKey() == null || vo.getTenantKey().isBlank()
-                    ? CaTenant.PRIMARY_TENANT_KEY : vo.getTenantKey();
+            String rowTenant = vo.getTenantUscc() == null || vo.getTenantUscc().isBlank()
+                    ? CaTenant.PRIMARY_TENANT_USCC : vo.getTenantUscc();
             vo.setKeyHeld(caService.issuedKeyExists(rowTenant, vo.getSerialHex()));
         }
     }
@@ -205,19 +205,19 @@ public class CertService {
      * 在线签发（兼容入口=平台主租户）
      */
     public CertVO issue(IssueCertRequestDTO req, String username, String ip) {
-        return issue(CaTenant.PRIMARY_TENANT_KEY, req, username, ip);
+        return issue(CaTenant.PRIMARY_TENANT_USCC, req, username, ip);
     }
 
     /**
      * 在线签发（租户版）：内部生成密钥对，私钥落该租户域盘
      */
-    public CertVO issue(String tenantKey, IssueCertRequestDTO req, String username, String ip) {
+    public CertVO issue(String tenantUscc, IssueCertRequestDTO req, String username, String ip) {
         String cn = req.getSubjectCn() == null ? "" : req.getSubjectCn().trim();
         if (cn.isEmpty()) {
             throw new IllegalArgumentException("主体CN不能为空");
         }
         // 签发入口租户状态门禁：CLOSED/SUSPENDED 拒签（default 域不受租户表约束）
-        CaTenant tenant = checkIssueTenant(tenantKey);
+        CaTenant tenant = checkIssueTenant(tenantUscc);
         CertTemplate tpl = resolveTemplate(req.getTemplateId());
         // 模板锁定：类型/算法/有效期/KeyUsage/EKU/策略OID 全部以模板为准（GM/T 0034 §5.3.4）
         String type = tpl != null ? tpl.getCertType() : (req.getCertType() == null ? "SERVER" : req.getCertType()).toUpperCase();
@@ -229,33 +229,33 @@ public class CertService {
         int days = tpl != null ? tpl.getValidityDays() : resolveValidityDays(req.getValidityDays());
 
         KeyPair subjectKey = CertUtil.generateKeyPair(algorithm);
-        X509Certificate caCert = caService.signingCert(tenantKey);
-        PrivateKey caKey = caService.signingKey(tenantKey);
+        X509Certificate caCert = caService.signingCert(tenantUscc);
+        PrivateKey caKey = caService.signingKey(tenantUscc);
         X509Certificate cert;
         if (tpl != null) {
             cert = CertUtil.issueByTemplate(
-                    leafSubject(tenantKey, tenant, cn), subjectKey.getPublic(), caCert, caKey,
-                    type, days, req.getSan(), crlUrl(tenantKey), ocspUrl(tenantKey),
+                    leafSubject(tenantUscc, tenant, cn), subjectKey.getPublic(), caCert, caKey,
+                    type, days, req.getSan(), crlUrl(tenantUscc), ocspUrl(tenantUscc),
                     tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid());
         } else if (tenant == null) {
             // default 域走旧 KeyPair 入口（DN 拼法 CN=xxx,O=CSSSL 不转义），存量证书逐字节兼容
             cert = CertUtil.issue(subjectKey, caCert, caKey, cn, type, days,
-                    req.getSan(), crlUrl(tenantKey), ocspUrl(tenantKey));
+                    req.getSan(), crlUrl(tenantUscc), ocspUrl(tenantUscc));
         } else {
-            cert = CertUtil.issue(leafSubject(tenantKey, tenant, cn), subjectKey.getPublic(), caCert, caKey,
-                    type, days, req.getSan(), crlUrl(tenantKey), ocspUrl(tenantKey));
+            cert = CertUtil.issue(leafSubject(tenantUscc, tenant, cn), subjectKey.getPublic(), caCert, caKey,
+                    type, days, req.getSan(), crlUrl(tenantUscc), ocspUrl(tenantUscc));
         }
         checkSubjectTenant(cert, tenant, type);
 
         String serial = cert.getSerialNumber().toString(16);
-        persistFiles(tenantKey, serial, PemUtil.keyToPem(subjectKey.getPrivate()), PemUtil.certToPem(cert));
+        persistFiles(tenantUscc, serial, PemUtil.keyToPem(subjectKey.getPrivate()), PemUtil.certToPem(cert));
 
-        CaCert row = buildRow(tenantKey, serial, cn, type, algorithm, caCert, cert, req.getSan(),
+        CaCert row = buildRow(tenantUscc, serial, cn, type, algorithm, caCert, cert, req.getSan(),
                 req.getDescription(), username, tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(username, "CERT_ISSUE", String.valueOf(row.getId()),
-                "签发 " + type + " 证书：" + cn + "（" + algorithm + (tpl != null ? "，模板 " + tpl.getTemplateCode() : "") + tenantSuffix(tenantKey) + "）", ip, tenantKey);
-        log.info("[证书签发][{}] id={}, cn={}, type={}, algorithm={}, serial={}", tenantKey, row.getId(), cn, type, algorithm, serial);
+                "签发 " + type + " 证书：" + cn + "（" + algorithm + (tpl != null ? "，模板 " + tpl.getTemplateCode() : "") + tenantSuffix(tenantUscc) + "）", ip, tenantUscc);
+        log.info("[证书签发][{}] id={}, cn={}, type={}, algorithm={}, serial={}", tenantUscc, row.getId(), cn, type, algorithm, serial);
         return CertVO.from(row);
     }
 
@@ -272,19 +272,19 @@ public class CertService {
      */
     public CertVO issueFromCsr(String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip, Long templateId) {
-        return issueFromCsr(CaTenant.PRIMARY_TENANT_KEY, csrPem, certType, validityDays,
+        return issueFromCsr(CaTenant.PRIMARY_TENANT_USCC, csrPem, certType, validityDays,
                 san, description, username, ip, templateId);
     }
 
     /**
      * CSR 签发（租户版，支持模板）：主体与公钥取自 CSR，落到该租户域
      */
-    public CertVO issueFromCsr(String tenantKey, String csrPem, String certType, Integer validityDays,
+    public CertVO issueFromCsr(String tenantUscc, String csrPem, String certType, Integer validityDays,
                                String san, String description, String username, String ip, Long templateId) {
         if (csrPem == null || csrPem.isBlank()) {
             throw new IllegalArgumentException("CSR内容不能为空");
         }
-        CaTenant tenant = checkIssueTenant(tenantKey);
+        CaTenant tenant = checkIssueTenant(tenantUscc);
         CertTemplate tpl = resolveTemplate(templateId);
         String type = tpl != null ? tpl.getCertType() : (certType == null ? "SERVER" : certType).toUpperCase();
         if (!TYPES.contains(type)) {
@@ -292,32 +292,32 @@ public class CertService {
         }
         int days = tpl != null ? tpl.getValidityDays() : resolveValidityDays(validityDays);
 
-        X509Certificate caCert = caService.signingCert(tenantKey);
-        PrivateKey caKey = caService.signingKey(tenantKey);
+        X509Certificate caCert = caService.signingCert(tenantUscc);
+        PrivateKey caKey = caService.signingKey(tenantUscc);
         String effectiveSan = CertUtil.sanFromCsr(csrPem, san);
         // 证书签名算法跟随签发CA（SUB_CA）密钥类型（RSA SHA256withRSA / 国密 SM3withSM2）
         X509Certificate cert = tpl != null
                 ? CertUtil.issueFromCsrByTemplate(csrPem, caCert, caKey, type, days,
-                effectiveSan, crlUrl(tenantKey), ocspUrl(tenantKey),
+                effectiveSan, crlUrl(tenantUscc), ocspUrl(tenantUscc),
                 tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
                 : CertUtil.issueFromCsr(csrPem, caCert, caKey, type, days,
-                effectiveSan, crlUrl(tenantKey), ocspUrl(tenantKey));
+                effectiveSan, crlUrl(tenantUscc), ocspUrl(tenantUscc));
         // CSR 主体由申请方自定：非 default 域校验其 O 与租户受控 O 一致（SUB_CA 必须一致），不一致即拒签不落盘
         checkSubjectTenant(cert, tenant, type);
 
         String serial = cert.getSerialNumber().toString(16);
         // CSR 申请方自持私钥，不落盘
-        persistFiles(tenantKey, serial, null, PemUtil.certToPem(cert));
+        persistFiles(tenantUscc, serial, null, PemUtil.certToPem(cert));
         String cn = CertUtil.subjectCn(cert);
         // CSR 场景密钥由申请方自持，算法从证书公钥类型推导（记录用）
         String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
 
-        CaCert row = buildRow(tenantKey, serial, cn, type, algorithm, caCert, cert, effectiveSan,
+        CaCert row = buildRow(tenantUscc, serial, cn, type, algorithm, caCert, cert, effectiveSan,
                 description, username, tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(username, "CERT_CSR_ISSUE", String.valueOf(row.getId()),
-                "CSR签发 " + type + " 证书：" + cn + (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : "") + tenantSuffix(tenantKey), ip, tenantKey);
+                "CSR签发 " + type + " 证书：" + cn + (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : "") + tenantSuffix(tenantUscc), ip, tenantUscc);
         return CertVO.from(row);
     }
 
@@ -336,14 +336,14 @@ public class CertService {
      */
     public CertVO issueWithPublicKey(PublicKeyIssueDTO req, IssuePolicy policy,
                                      String username, String ip) {
-        return issueWithPublicKey(CaTenant.PRIMARY_TENANT_KEY, req, policy, username, ip);
+        return issueWithPublicKey(CaTenant.PRIMARY_TENANT_USCC, req, policy, username, ip);
     }
 
     /**
      * 公钥签发（RA 场景，租户版）：落到该租户域；非 default 域校验申请 DN 的 O 与租户受控 O 一致
      * （SUB_CA 证书强制一致，_leaf 证书带 O 即须一致，防跨租户冒名）。
      */
-    public CertVO issueWithPublicKey(String tenantKey, PublicKeyIssueDTO req, IssuePolicy policy,
+    public CertVO issueWithPublicKey(String tenantUscc, PublicKeyIssueDTO req, IssuePolicy policy,
                                      String username, String ip) {
         String dn = req.getSubjectDn() == null ? "" : req.getSubjectDn().trim();
         if (dn.isEmpty()) {
@@ -352,7 +352,7 @@ public class CertService {
         if (req.getPublicKeyPem() == null || req.getPublicKeyPem().isBlank()) {
             throw new IllegalArgumentException("公钥PEM不能为空（申请方自持私钥，仅提交公钥）");
         }
-        CaTenant tenant = checkIssueTenant(tenantKey);
+        CaTenant tenant = checkIssueTenant(tenantUscc);
         CertTemplate tpl = policy == null ? resolveTemplate(req.getTemplateId()) : null;
         String type = policy != null ? (policy.certType() == null ? "" : policy.certType().toUpperCase())
                 : (tpl != null ? tpl.getCertType() : (req.getCertType() == null ? "CLIENT" : req.getCertType()).toUpperCase());
@@ -368,30 +368,30 @@ public class CertService {
         String extKeyUsage = policy != null ? policy.extKeyUsage() : (tpl != null ? tpl.getExtKeyUsage() : null);
         String policyOid = policy != null ? policy.policyOid() : (tpl != null ? tpl.getPolicyOid() : null);
 
-        X509Certificate caCert = caService.signingCert(tenantKey);
-        PrivateKey caKey = caService.signingKey(tenantKey);
+        X509Certificate caCert = caService.signingCert(tenantUscc);
+        PrivateKey caKey = caService.signingKey(tenantUscc);
         // SAN 透传：申请单/请求里带的 SAN 必须写进证书，此前模板分支写死 null 属丢弃申请内容
         X509Certificate cert = policy != null || tpl != null
                 ? CertUtil.issuePublicKeyByTemplate(dn, req.getPublicKeyPem(), caCert, caKey,
-                type, days, req.getSan(), crlUrl(tenantKey), ocspUrl(tenantKey), keyUsage, extKeyUsage, policyOid)
+                type, days, req.getSan(), crlUrl(tenantUscc), ocspUrl(tenantUscc), keyUsage, extKeyUsage, policyOid)
                 : CertUtil.issuePublicKey(dn, req.getPublicKeyPem(), caCert, caKey,
-                type, days, req.getSan(), crlUrl(tenantKey), ocspUrl(tenantKey));
+                type, days, req.getSan(), crlUrl(tenantUscc), ocspUrl(tenantUscc));
         checkSubjectTenant(cert, tenant, type);
 
         String serial = cert.getSerialNumber().toString(16);
         // 申请方自持私钥，不落盘
-        persistFiles(tenantKey, serial, null, PemUtil.certToPem(cert));
+        persistFiles(tenantUscc, serial, null, PemUtil.certToPem(cert));
         String cn = CertUtil.subjectCn(cert);
         String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
 
-        CaCert row = buildRow(tenantKey, serial, cn, type, algorithm, caCert, cert, req.getSan(),
+        CaCert row = buildRow(tenantUscc, serial, cn, type, algorithm, caCert, cert, req.getSan(),
                 req.getDescription(), username, policy != null ? req.getTemplateId() : (tpl == null ? null : tpl.getId()));
         certMapper.insert(row);
         auditService.record(username, "CERT_PUBKEY_ISSUE", String.valueOf(row.getId()),
-                "公钥签发 " + type + " 证书：" + cn + (policy != null ? "（按批准快照）" : (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : "")) + tenantSuffix(tenantKey), ip, tenantKey);
+                "公钥签发 " + type + " 证书：" + cn + (policy != null ? "（按批准快照）" : (tpl != null ? "（模板 " + tpl.getTemplateCode() + "）" : "")) + tenantSuffix(tenantUscc), ip, tenantUscc);
         log.info("[公钥签发][{}] id={}, cn={}, type={}, algorithm={}, serial={}, snapshot={}",
-                tenantKey, row.getId(), cn, type, algorithm, serial, policy != null);
+                tenantUscc, row.getId(), cn, type, algorithm, serial, policy != null);
         return CertVO.from(row);
     }
 
@@ -455,11 +455,11 @@ public class CertService {
 
     /**
      * 证书更新（租户版，GM/T 0034 §12.2 更新）：原证书吊销（SUPERSEDED）+ 以原公钥在该租户域重签延长有效期。
-     * tenantKey 必须与证书行归属一致（防跨租户更新）。仅由证书操作单批准执行（CertOpTicketService）调用。
+     * tenantUscc 必须与证书行归属一致（防跨租户更新）。仅由证书操作单批准执行（CertOpTicketService）调用。
      */
-    public CertVO renew(String tenantKey, Long id, Integer validityDays, String username, String ip) {
+    public CertVO renew(String tenantUscc, Long id, Integer validityDays, String username, String ip) {
         CaCert old = findById(id);
-        requireTenantMatch(tenantKey, old);
+        requireTenantMatch(tenantUscc, old);
         if (CaService.TYPE_ROOT.equals(old.getCertType())) {
             throw new IllegalArgumentException("根CA证书不支持在线更新");
         }
@@ -509,9 +509,9 @@ public class CertService {
      * 仅限内部生成密钥对的在线签发证书（私钥在 CA 侧）；CSR/公钥签发证书私钥由申请方自持，须重新走申请流程。
      * 仅由证书操作单批准执行（CertOpTicketService）调用。
      */
-    public CertVO rekey(String tenantKey, Long id, Integer validityDays, String username, String ip) {
+    public CertVO rekey(String tenantUscc, Long id, Integer validityDays, String username, String ip) {
         CaCert old = findById(id);
-        requireTenantMatch(tenantKey, old);
+        requireTenantMatch(tenantUscc, old);
         if (CaService.TYPE_ROOT.equals(old.getCertType()) || "SUB_CA".equals(old.getCertType())) {
             throw new IllegalArgumentException("根CA/二级CA不支持在线重签（CA 密钥轮换属系统维护，另走流程）");
         }
@@ -608,11 +608,11 @@ public class CertService {
         if (CaService.TYPE_ROOT.equals(row.getCertType())) {
             throw new IllegalArgumentException("根CA私钥为系统核心密钥，不提供在线下载，请直接操作服务器文件");
         }
-        String tenantKey = tenantOf(row);
-        if (!caService.issuedKeyExists(tenantKey, row.getSerialHex())) {
+        String tenantUscc = tenantOf(row);
+        if (!caService.issuedKeyExists(tenantUscc, row.getSerialHex())) {
             throw new IllegalArgumentException("该证书无落盘私钥（CSR签发场景私钥由申请方自持）");
         }
-        String keyPem = caService.loadIssuedKey(tenantKey, row.getSerialHex());
+        String keyPem = caService.loadIssuedKey(tenantUscc, row.getSerialHex());
         if (keyPem == null) {
             throw new IllegalArgumentException("该证书私钥不可用（已封存或缺失）");
         }
@@ -623,16 +623,16 @@ public class CertService {
      * 匹配叶子证书的签发 SUB_CA（限同租户域按 issuer 精确匹配，找不到时退回该租户当前 SUB_CA）
      */
     private CaCert matchingSubCa(CaCert leaf) {
-        String tenantKey = tenantOf(leaf);
+        String tenantUscc = tenantOf(leaf);
         if (leaf.getIssuerCn() == null || leaf.getIssuerCn().isBlank()) {
-            return caService.currentSubCa(tenantKey);
+            return caService.currentSubCa(tenantUscc);
         }
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, "SUB_CA")
-                .eq(CaCert::getTenantKey, tenantKey)
+                .eq(CaCert::getTenantUscc, tenantUscc)
                 .eq(CaCert::getSubjectCn, leaf.getIssuerCn())
                 .orderByDesc(CaCert::getCreatedAt));
-        return subs.isEmpty() ? caService.currentSubCa(tenantKey) : subs.get(0);
+        return subs.isEmpty() ? caService.currentSubCa(tenantUscc) : subs.get(0);
     }
 
     /**
@@ -648,11 +648,11 @@ public class CertService {
         if (password == null || password.length() < 4) {
             throw new IllegalArgumentException("导出口令不能少于4位");
         }
-        String tenantKey = tenantOf(row);
-        if (!caService.issuedKeyExists(tenantKey, row.getSerialHex())) {
+        String tenantUscc = tenantOf(row);
+        if (!caService.issuedKeyExists(tenantUscc, row.getSerialHex())) {
             throw new IllegalArgumentException("该证书无落盘私钥（CSR/公钥签发场景私钥由申请方自持，无CA侧密钥可导出）");
         }
-        String keyPem = caService.loadIssuedKey(tenantKey, row.getSerialHex());
+        String keyPem = caService.loadIssuedKey(tenantUscc, row.getSerialHex());
         if (keyPem == null) {
             throw new IllegalArgumentException("该证书私钥不可用（已封存或缺失）");
         }
@@ -665,7 +665,7 @@ public class CertService {
             if (sub != null) {
                 chain.add(PemUtil.parseCert(sub.getCertPem()));
             }
-            chain.add(caService.loadRootCert(tenantKey));
+            chain.add(caService.loadRootCert(tenantUscc));
             KeyStore ks = KeyStore.getInstance("PKCS12");
             ks.load(null, null);
             ks.setKeyEntry(row.getSerialHex(), key, password.toCharArray(),
@@ -684,10 +684,10 @@ public class CertService {
     /**
      * 概览统计：按租户域过滤（证书总量/状态分布/类型分布/30天内到期），供仪表盘渲染
      */
-    public CertOverviewVO overview(String tenantKey) {
-        String tenant = tenantKey == null || tenantKey.isBlank() ? CaTenant.PRIMARY_TENANT_KEY : tenantKey;
+    public CertOverviewVO overview(String tenantUscc) {
+        String tenant = tenantUscc == null || tenantUscc.isBlank() ? CaTenant.PRIMARY_TENANT_USCC : tenantUscc;
         List<CaCert> all = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getTenantKey, tenant));
+                .eq(CaCert::getTenantUscc, tenant));
         long valid = 0, revoked = 0, expired = 0;
         long server = 0, client = 0, subCa = 0;
         long expiring = 0;
@@ -750,22 +750,22 @@ public class CertService {
      *
      * @return default 域返回 null（老口径组装证书），其他租户返回注册表行（subject_o 受控来源）
      */
-    private CaTenant checkIssueTenant(String tenantKey) {
-        if (CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
+    private CaTenant checkIssueTenant(String tenantUscc) {
+        if (CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)) {
             return null;
         }
-        tenantService.requireActive(tenantKey);
-        return tenantService.get(tenantKey);
+        tenantService.requireActive(tenantUscc);
+        return tenantService.get(tenantUscc);
     }
 
-    private void persistFiles(String tenantKey, String serial, String keyPem, String certPem) {
+    private void persistFiles(String tenantUscc, String serial, String keyPem, String certPem) {
         try {
-            Path dir = caService.issuedDir(tenantKey, serial);
+            Path dir = caService.issuedDir(tenantUscc, serial);
             Files.createDirectories(dir);
             Files.writeString(dir.resolve("cert.pem"), certPem, StandardCharsets.UTF_8);
             if (keyPem != null) {
                 // 私钥经该租户密钥保险库 SM4 加密落盘，不写明文
-                caService.storeIssuedKey(tenantKey, serial, keyPem);
+                caService.storeIssuedKey(tenantUscc, serial, keyPem);
             }
         } catch (IOException e) {
             throw new IllegalStateException("证书落盘失败: " + e.getMessage(), e);
@@ -774,28 +774,28 @@ public class CertService {
 
     /**
      * CRL 分发点 URL（写入证书 CDP 扩展）：default 沿用现有公开端点（存量证书扩展语义兼容），
-     * 非 default 指向租户域端点 /ssl/ca/public/{tenantKey}/crl。
+     * 非 default 指向租户域端点 /ssl/ca/public/{tenantUscc}/crl。
      */
-    private String crlUrl(String tenantKey) {
-        return CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)
+    private String crlUrl(String tenantUscc) {
+        return CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)
                 ? props.getPublicBaseUrl() + "/ca/public/crl"
-                : props.getPublicBaseUrl() + "/ca/public/" + tenantKey + "/crl";
+                : props.getPublicBaseUrl() + "/ca/public/" + tenantUscc + "/crl";
     }
 
     /**
-     * OCSP 访问点 URL（写入证书 AIA 扩展）：default 现有端点不变，非 default 为 /ssl/ca/public/{tenantKey}/ocsp
+     * OCSP 访问点 URL（写入证书 AIA 扩展）：default 现有端点不变，非 default 为 /ssl/ca/public/{tenantUscc}/ocsp
      */
-    private String ocspUrl(String tenantKey) {
-        return CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)
+    private String ocspUrl(String tenantUscc) {
+        return CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)
                 ? props.getPublicBaseUrl() + "/ca/public/ocsp"
-                : props.getPublicBaseUrl() + "/ca/public/" + tenantKey + "/ocsp";
+                : props.getPublicBaseUrl() + "/ca/public/" + tenantUscc + "/ocsp";
     }
 
-    private CaCert buildRow(String tenantKey, String serial, String cn, String type, String algorithm,
+    private CaCert buildRow(String tenantUscc, String serial, String cn, String type, String algorithm,
                             X509Certificate caCert, X509Certificate cert, String san,
                             String description, String username, Long templateId) {
         CaCert row = new CaCert();
-        row.setTenantKey(tenantKey);
+        row.setTenantUscc(tenantUscc);
         row.setSerialHex(serial);
         row.setSubjectCn(cn);
         row.setCertType(type);

@@ -12,8 +12,9 @@ import java.time.LocalDateTime;
 
 /**
  * CA 租户注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额），租户间互不信任。
- * 平台只有一家在营租户时，它即主租户（{@link #PRIMARY_TENANT_KEY}）；存量单根的落盘路径命名空间
- * 仍是 {@link #LEGACY_TENANT_KEY}，两者刻意分开，避免主租户切换后找不到旧密钥目录。
+ * 统一社会信用代码即租户标识（路径/接口/落盘目录同名），不另设内部标识字段。
+ * 平台只有一家在营租户时，它即主租户（{@link #PRIMARY_TENANT_USCC}）；存量单根的落盘路径命名空间
+ * 仍是 {@link #LEGACY_NAMESPACE}，两者刻意分开，避免主租户切换后找不到旧密钥目录。
  */
 @Data
 @TableName("ssl_ca_tenant")
@@ -22,12 +23,12 @@ public class CaTenant {
     /**
      * 存量单根的密钥目录/DN 命名空间（路径兼容判断专用，不随主租户变化）
      */
-    public static final String LEGACY_TENANT_KEY = "default";
+    public static final String LEGACY_NAMESPACE = "default";
     /**
      * 平台主租户标识：所有不带租户参数的兼容入口都落到它。
      * 缺省 default（存量单根部署）；启动时由 TenantScope 校准为唯一在营租户。
      */
-    public static volatile String PRIMARY_TENANT_KEY = "default";
+    public static volatile String PRIMARY_TENANT_USCC = "default";
 
 
     @TableId(type = IdType.ASSIGN_ID)
@@ -35,12 +36,7 @@ public class CaTenant {
     private Long id;
 
     /**
-     * 租户标识：由统一社会信用代码小写派生（路径/接口用），不再人工填写
-     */
-    private String tenantKey;
-
-    /**
-     * 统一社会信用代码（18位，登记唯一键）
+     * 统一社会信用代码（18位，GB 32100）：租户唯一标识（路径/接口用）+ 登记唯一键
      */
     private String uscc;
 

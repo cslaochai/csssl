@@ -14,7 +14,7 @@ public class CrlRecordQueryDTODTO extends PageParam {
     /**
      * 租户数据域过滤
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 关键字（命中 主体CN/序列号）

@@ -16,7 +16,7 @@ public class CertVO {
 
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
-    private String tenantKey;
+    private String tenantUscc;
     /** 租户中文名（展示用，后端填充；存量 default 域无归属时为 null） */
     private String tenantName;
     private String serialHex;
@@ -45,7 +45,7 @@ public class CertVO {
     public static CertVO from(CaCert c) {
         CertVO vo = new CertVO();
         vo.setId(c.getId());
-        vo.setTenantKey(c.getTenantKey());
+        vo.setTenantUscc(c.getTenantUscc());
         vo.setSerialHex(c.getSerialHex());
         vo.setSubjectCn(c.getSubjectCn());
         vo.setCertType(c.getCertType());

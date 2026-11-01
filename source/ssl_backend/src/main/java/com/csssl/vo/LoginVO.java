@@ -43,7 +43,7 @@ public class LoginVO {
     /**
      * 租户数据域：null=全局账号；前端据此锁定/展示租户切换
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 平台主租户（各租户标识由管理员在租户管理维护；全局账号默认落在它上面）

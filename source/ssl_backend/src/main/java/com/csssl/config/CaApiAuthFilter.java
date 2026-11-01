@@ -37,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 外部系统 API 鉴权过滤器（仅 /ca/api/**）：
  * 校验 X-App-Id / X-Timestamp / X-Nonce / X-Signature（HMAC-SHA256），并完成
  * IP 白名单、可选 mTLS 证书指纹、防重放与限流。通过后把 {@link ApiClient} 放进请求属性，
- * 控制器一律以它绑定的 tenantKey 为数据域——请求 URL 不携带租户标识，租户不可由调用方指定。
+ * 控制器一律以它绑定的 tenantUscc 为数据域——请求 URL 不携带租户标识，租户不可由调用方指定。
  *
  * <p>canonical（六行，LF 分隔，末尾不加换行）：
  * appId \\n timestamp \\n nonce \\n METHOD \\n pathWithQuery \\n sha256Hex(body)；

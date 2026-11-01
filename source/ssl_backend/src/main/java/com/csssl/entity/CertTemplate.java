@@ -25,7 +25,7 @@ public class CertTemplate {
     /**
      * 归属租户；NULL=全局模板（所有租户可用，兼容内置模板）
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 模板编码（唯一）：SERVER_COMM-租户通信 / DOCTOR_SIGN-医生签名 / SUB_CA-二级CA

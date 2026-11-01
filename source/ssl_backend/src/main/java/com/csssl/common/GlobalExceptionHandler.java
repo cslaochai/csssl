@@ -73,6 +73,22 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.FORBIDDEN.value(), "权限不足"));
     }
 
+    /** 路径不存在（如已拆除的直接执行接口）：按 404 返回，不落入兜底 500 */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<Result<Void>> handleNoResource(org.springframework.web.servlet.resource.NoResourceFoundException e) {
+        log.warn("[路径不存在] {} {}", e.getHttpMethod(), e.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Result.error(HttpStatus.NOT_FOUND.value(), "接口不存在"));
+    }
+
+    /** 路径存在但方法不匹配（如对只读资源发 POST）：按 405 返回 */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Result<Void>> handleMethodNotSupported(org.springframework.web.HttpRequestMethodNotSupportedException e) {
+        log.warn("[方法不支持] {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(Result.error(HttpStatus.METHOD_NOT_ALLOWED.value(), "请求方法不支持"));
+    }
+
     /** 兜底异常 */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleException(Exception e) {

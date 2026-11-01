@@ -1,5 +1,18 @@
 <template>
   <div class="dashboard">
+    <el-form inline class="dash-toolbar">
+      <el-form-item label="租户">
+        <el-select v-model="tenantUscc" placeholder="选择租户" style="width: 320px" @change="load">
+          <el-option
+            v-for="o in tenantOptions"
+            :key="o.uscc"
+            :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+            :value="o.uscc"
+          />
+        </el-select>
+      </el-form-item>
+    </el-form>
+
     <!-- 运营指标：待办优先，点击进对应列表 -->
     <div class="stat-grid">
       <button
@@ -77,8 +90,10 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getOverview, pageApplications } from '@/api/system'
+import { getOverview, pageApplications, listTenantsCached } from '@/api/system'
 
+const tenantOptions = ref([])
+const tenantUscc = ref('')
 const overview = ref({})
 const root = ref({})
 const pending = ref(0)
@@ -138,10 +153,11 @@ const statCards = computed(() => [
 ])
 
 async function load() {
+  if (!tenantUscc.value) return
   try {
     const [ov, apps] = await Promise.all([
-      getOverview(),
-      pageApplications({ status: 'PENDING', pageNo: 1, pageSize: 1 })
+      getOverview(tenantUscc.value),
+      pageApplications({ status: 'PENDING', pageNo: 1, pageSize: 1, tenantUscc: tenantUscc.value })
     ])
     overview.value = ov.data || {}
     root.value = ov.data?.root || {}
@@ -151,10 +167,19 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  tenantOptions.value = await listTenantsCached()
+  const active = tenantOptions.value.find(o => o.status === 'ACTIVE') || tenantOptions.value[0]
+  tenantUscc.value = active?.uscc || ''
+  await load()
+})
 </script>
 
 <style scoped>
+.dash-toolbar {
+  margin-bottom: 4px;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

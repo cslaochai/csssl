@@ -25,7 +25,7 @@ public class CertApplication {
     /**
      * 受理租户（签发落到该租户根域）；default=院内默认域
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 申请单号（RA20261027xxx）

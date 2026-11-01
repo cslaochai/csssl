@@ -11,8 +11,8 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * CRL 发布状态：路线A 多租户后为「每租户一行」（tenant_key 逻辑唯一，行锁 SELECT FOR UPDATE by tenant_key）。
- * 存量单行（id=1，tenant_key='default'）即院内默认域发布状态，语义与原「全库单行」完全一致；
+ * CRL 发布状态：路线A 多租户后为「每租户一行」（tenant_uscc 逻辑唯一，行锁 SELECT FOR UPDATE by tenant_uscc）。
+ * 存量单行（id=1，tenant_uscc='default'）即院内默认域发布状态，语义与原「全库单行」完全一致；
  * 新租户首次发布时按 max(id)+1 补建本租户行（id 列无 AUTO_INCREMENT，代码显式生成）。
  */
 @Data
@@ -31,7 +31,7 @@ public class CrlState {
     /**
      * 所属租户（每租户独立 CRL 发布状态行：编号单调与判重指纹均 per-tenant）
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 当前全量 CRL 编号（单调递增，仅内容变化/到期续发时递增）

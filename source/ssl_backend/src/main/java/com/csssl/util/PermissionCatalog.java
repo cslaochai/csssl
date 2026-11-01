@@ -38,6 +38,7 @@ public final class PermissionCatalog {
     public static final String MENU_OCSP = "menu:ocsp";
     public static final String MENU_TSA = "menu:tsa";
     public static final String MENU_TENANTS = "menu:tenants";
+    public static final String MENU_TENANT_OPS = "menu:tenant-ops";
     public static final String MENU_ROOT_CA = "menu:root-ca";
     public static final String MENU_TEMPLATES = "menu:templates";
     public static final String MENU_USERS = "menu:users";
@@ -79,10 +80,8 @@ public final class PermissionCatalog {
     public static final String CA_SUBCA_DOWNLOAD = "ca:subca:download";
 
     public static final String TENANT_CREATE = "tenant:create";
-    public static final String TENANT_SUSPEND = "tenant:suspend";
-    public static final String TENANT_RESUME = "tenant:resume";
-    public static final String TENANT_CLOSE = "tenant:close";
-    public static final String TENANT_CREDENTIAL = "tenant:credential";
+    public static final String TENANT_OP_APPLY = "tenant:op:apply";
+    public static final String TENANT_OP_APPROVE = "tenant:op:approve";
 
     public static final String USER_LIST = "user:list";
     public static final String USER_CREATE = "user:create";
@@ -112,7 +111,8 @@ public final class PermissionCatalog {
         menu(MENU_CRL, "CRL吊销", "吊销列表查看与下载");
         menu(MENU_OCSP, "OCSP查询", "证书状态在线查询");
         menu(MENU_TSA, "时间戳TSA", "可信时间戳服务");
-        menu(MENU_TENANTS, "租户管理", "多租户域注册与启停（租户管理员；系统管理员只读巡检）");
+        menu(MENU_TENANTS, "租户管理", "租户档案与新建（租户管理员；系统管理员只读巡检）");
+        menu(MENU_TENANT_OPS, "租户变更审批", "暂停/恢复/关闭/重置接入密钥变更单的提交、审批与回执领取");
         menu(MENU_ROOT_CA, "根CA管理", "根CA初始化、密钥封存与门限分持");
         menu(MENU_TEMPLATES, "证书模板", "证书策略模板（KeyUsage/EKU/策略OID）");
         menu(MENU_USERS, "用户管理", "管理账号的建号、改角色、启停与重置口令");
@@ -157,11 +157,9 @@ public final class PermissionCatalog {
         action("根CA与密钥", CA_SUBCA_DOWNLOAD, "下载二级CA证书", "中间CA链配置");
 
         // ---------- 租户管理 ----------
-        action("租户管理", TENANT_CREATE, "新建租户", "登记即生成独立根CA");
-        action("租户管理", TENANT_SUSPEND, "暂停租户", "停止对外签发");
-        action("租户管理", TENANT_RESUME, "恢复租户", "恢复签发");
-        action("租户管理", TENANT_CLOSE, "关闭租户", "CLOSED 终态");
-        action("租户管理", TENANT_CREDENTIAL, "重置接入密钥", "HIS 接入凭证轮换，旧 secret 立即失效（仅展示一次）");
+        action("租户管理", TENANT_CREATE, "新建租户", "开租户即建独立根CA+SUB_CA 并发放接入凭证，直接执行，无需双人复核");
+        action("租户管理", TENANT_OP_APPLY, "发起租户变更单", "暂停/恢复/关闭/重置接入密钥一律走单，不得直接执行");
+        action("租户管理", TENANT_OP_APPROVE, "审批租户变更单", "批准即执行；不得与发起人同一人");
 
         // ---------- 用户与角色 ----------
         action("用户与角色", USER_LIST, "查看账号", "管理账号列表");

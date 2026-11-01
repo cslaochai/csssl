@@ -30,9 +30,9 @@ import java.util.Date;
  *   <li>revoked：证书已吊销（附带吊销时间与原因码）</li>
  *   <li>unknown：本租户域未签发的证书（serial 命中但归属其他租户同样按 unknown，域间互不代答）</li>
  * </ul>
- * 响应由请求 tenantKey 对应租户的服务签发二级CA（SUB_CA）私钥签名，依赖方可用该租户 SUB_CA/根证书验签。
+ * 响应由请求 tenantUscc 对应租户的服务签发二级CA（SUB_CA）私钥签名，依赖方可用该租户 SUB_CA/根证书验签。
  * 传输：POST（application/ocsp-request）与 GET（/ocsp/{base64url}）两种标准形式；
- * 无 tenantKey 入口（respond(byte[])）委托 default 域，现存端点行为不变。
+ * 无 tenantUscc 入口（respond(byte[])）委托 default 域，现存端点行为不变。
  * 合规点：SUSPENDED/CLOSED 租户历史证书必须可继续查询状态，本类不做租户状态门禁（只读端点不因租户关闭）。
  */
 @Slf4j
@@ -48,13 +48,13 @@ public class OcspService {
      * 响应 OCSP 请求（DER 输入 → DER 输出，兼容入口=default 租户域）
      */
     public byte[] respond(byte[] requestDer) {
-        return respond(CaTenant.PRIMARY_TENANT_KEY, requestDer);
+        return respond(CaTenant.PRIMARY_TENANT_USCC, requestDer);
     }
 
     /**
-     * 租户域 responder：按 tenantKey 定位租户域查询吊销状态，用该租户 SUB_CA 密钥签响应
+     * 租户域 responder：按 tenantUscc 定位租户域查询吊销状态，用该租户 SUB_CA 密钥签响应
      */
-    public byte[] respond(String tenantKey, byte[] requestDer) {
+    public byte[] respond(String tenantUscc, byte[] requestDer) {
         try {
             OCSPReq req = new OCSPReq(requestDer);
             Req[] reqs = req.getRequestList();
@@ -64,13 +64,13 @@ public class OcspService {
             CertificateID certId = reqs[0].getCertID();
             BigInteger serial = certId.getSerialNumber();
 
-            // 域内查询：仅本租户签发的证书参与三态判定（存量行 tenant_key='default'，default 域行为不变）
+            // 域内查询：仅本租户签发的证书参与三态判定（存量行 tenant_uscc='default'，default 域行为不变）
             CaCert row = certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
                     .eq(CaCert::getSerialHex, serial.toString(16))
-                    .eq(CaCert::getTenantKey, tenantKey));
+                    .eq(CaCert::getTenantUscc, tenantUscc));
 
-            X509Certificate signerCert = caService.signingCert(tenantKey);
-            PrivateKey signerKey = caService.signingKey(tenantKey);
+            X509Certificate signerCert = caService.signingCert(tenantUscc);
+            PrivateKey signerKey = caService.signingKey(tenantUscc);
             JcaX509CertificateHolder signerHolder = new JcaX509CertificateHolder(signerCert);
             // responder 身份 = 该租户服务签发二级CA（SUB_CA），响应由同一私钥签名
             BasicOCSPRespBuilder builder = new BasicOCSPRespBuilder(signerHolder.getSubjectPublicKeyInfo(),
@@ -83,16 +83,16 @@ public class OcspService {
             CertificateStatus status;
             if (row == null) {
                 status = new UnknownStatus();
-                log.info("[OCSP][{}] serial={} -> unknown（非本租户证书）", tenantKey, serial);
+                log.info("[OCSP][{}] serial={} -> unknown（非本租户证书）", tenantUscc, serial);
             } else if ("REVOKED".equals(row.getStatus()) || "FROZEN".equals(row.getStatus())) {
                 Date revokedAt = row.getRevokedAt() == null ? new Date()
                         : Date.from(row.getRevokedAt().atZone(ZoneId.systemDefault()).toInstant());
                 status = new RevokedStatus(revokedAt, CertUtil.crlReasonCode(row.getRevokeReason()));
-                log.info("[OCSP][{}] serial={} -> revoked（{}）", tenantKey, serial,
+                log.info("[OCSP][{}] serial={} -> revoked（{}）", tenantUscc, serial,
                         "FROZEN".equals(row.getStatus()) ? "CERTIFICATE_HOLD(挂起)" : row.getRevokeReason());
             } else {
                 status = CertificateStatus.GOOD;
-                log.info("[OCSP][{}] serial={} -> good（{}）", tenantKey, serial, row.getSubjectCn());
+                log.info("[OCSP][{}] serial={} -> good（{}）", tenantUscc, serial, row.getSubjectCn());
             }
             builder.addResponse(certId, status, thisUpdate, nextUpdate, null);
 

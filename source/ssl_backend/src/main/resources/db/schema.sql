@@ -180,14 +180,14 @@ CREATE TABLE IF NOT EXISTS ssl_crl_state (
 -- =============================================================================
 -- ===== 路线 A：多租户（按租户独立根CA） =====
 -- 兼容铁律：存量单根原样成为 default 租户（subject_o='CSSSL'），
--- 其落盘路径沿用现有根路径；新租户路径 store-dir/tenants/{tenantKey}/…，互相不信任。
+-- 其落盘路径沿用现有根路径；新租户路径 store-dir/tenants/{tenantUscc}/…，互相不信任。
 -- =============================================================================
 
 -- 租户注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额）
+-- 统一社会信用代码即租户标识（路径/接口/落盘目录同名），不另设内部标识列
 CREATE TABLE IF NOT EXISTS ssl_ca_tenant (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
-    tenant_key     VARCHAR(32)  NOT NULL COMMENT '租户标识（由统一社会信用代码小写派生，如 91430100ma4l5k2n3x；default=院内默认域/存量单根）',
-    uscc        VARCHAR(18)  NULL COMMENT '统一社会信用代码（GB 32100，新租户必填且唯一；存量行留空）',
+    uscc        VARCHAR(18)  NOT NULL COMMENT '统一社会信用代码（GB 32100）：租户唯一标识 + 登记唯一键',
     tenant_name    VARCHAR(64)  NOT NULL COMMENT '租户名称（展示与新根CA CN用）',
     subject_o   VARCHAR(128) NOT NULL COMMENT '证书主体O（租户受控，根/子CA DN 的 O 字段，全局唯一）',
     algorithm   VARCHAR(32)  NOT NULL DEFAULT 'SM2' COMMENT '根CA算法：RSA2048 / SM2（建租户时定，SUB_CA 跟随根）',
@@ -197,7 +197,6 @@ CREATE TABLE IF NOT EXISTS ssl_ca_tenant (
     description   VARCHAR(500) NULL COMMENT '备注',
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_tenant_key (tenant_key),
     UNIQUE KEY uk_uscc (uscc),
     UNIQUE KEY uk_subject_o (subject_o)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA租户注册表（多根CA域隔离）';
@@ -208,28 +207,49 @@ SET @c_tel = (SELECT COUNT(*) FROM information_schema.columns
 SET @s_tel = IF(@c_tel = 0, 'ALTER TABLE ssl_ca_tenant ADD COLUMN contact_phone VARCHAR(32) NULL COMMENT ''联系人手机号（前端展示做掩码）'' AFTER contact', 'SELECT 1');
 PREPARE s_tel FROM @s_tel; EXECUTE s_tel; DEALLOCATE PREPARE s_tel;
 
--- 幂等加列：租户统一社会信用代码（新租户唯一键，租户标识由它派生；存量行留空）
+-- 存量库升级：租户标识并入统一社会信用代码
+-- 1) 其他业务表 tenant_key → tenant_uscc（值由统一社会信用代码回填，见发布说明）；
+-- 2) 租户注册表删除 tenant_key 列，uscc 成为唯一标识（无 uscc 的历史租户需人工补代码后方可继续使用）。
+SET @c_tk_t = (SELECT COUNT(*) FROM information_schema.columns
+               WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_tenant' AND column_name = 'tenant_key');
+SET @s_tk_t = IF(@c_tk_t > 0, 'ALTER TABLE ssl_ca_tenant DROP COLUMN tenant_key', 'SELECT 1');
+PREPARE s_tk_t FROM @s_tk_t; EXECUTE s_tk_t; DEALLOCATE PREPARE s_tk_t;
+
+-- 幂等补列：早于该设计的库补 uscc；补列时允许 NULL，待无空值后（下一段）收紧为 NOT NULL
 SET @c_uscc = (SELECT COUNT(*) FROM information_schema.columns
                WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_tenant' AND column_name = 'uscc');
-SET @s_uscc = IF(@c_uscc = 0, 'ALTER TABLE ssl_ca_tenant ADD COLUMN uscc VARCHAR(18) NULL COMMENT ''统一社会信用代码（GB 32100，新租户必填且唯一；存量行留空）'' AFTER tenant_key', 'SELECT 1');
+SET @s_uscc = IF(@c_uscc = 0, 'ALTER TABLE ssl_ca_tenant ADD COLUMN uscc VARCHAR(18) NULL COMMENT ''统一社会信用代码（GB 32100）：租户唯一标识'' AFTER id', 'SELECT 1');
 PREPARE s_uscc FROM @s_uscc; EXECUTE s_uscc; DEALLOCATE PREPARE s_uscc;
 
--- 幂等唯一索引：同一统一社会信用代码只能登记一个租户（MySQL 唯一索引允许多个 NULL，存量不受影响）
+-- 无空值时收紧为 NOT NULL（有历史空值行时保持可空，避免启动失败；管理端仍会拒绝新增空代码租户）
+SET @n_uscc = (SELECT COUNT(*) FROM ssl_ca_tenant WHERE uscc IS NULL);
+SET @s_n_uscc = IF(@n_uscc = 0, 'ALTER TABLE ssl_ca_tenant MODIFY COLUMN uscc VARCHAR(18) NOT NULL COMMENT ''统一社会信用代码（GB 32100）：租户唯一标识 + 登记唯一键''', 'SELECT 1');
+PREPARE s_n_uscc FROM @s_n_uscc; EXECUTE s_n_uscc; DEALLOCATE PREPARE s_n_uscc;
+
+-- 幂等唯一索引：同一统一社会信用代码只能登记一个租户
 SET @i_uscc = (SELECT COUNT(*) FROM information_schema.statistics
                WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_tenant' AND index_name = 'uk_uscc');
 SET @s_i_uscc = IF(@i_uscc = 0, 'ALTER TABLE ssl_ca_tenant ADD UNIQUE KEY uk_uscc (uscc)', 'SELECT 1');
 PREPARE s_i_uscc FROM @s_i_uscc; EXECUTE s_i_uscc; DEALLOCATE PREPARE s_i_uscc;
 
--- 幂等加列：各业务表归属租户。存量行由 DEFAULT 'default' 自动归位院内默认域；
+-- 幂等加列：各业务表归属租户。存量列 tenant_key 直接改名为 tenant_uscc；
 -- 模板/用户用 NULL 表达"全局"语义（全局模板对所有租户可见、全局管理员不受限）
-SET @c10 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'tenant_key');
-SET @s10 = IF(@c10 = 0, 'ALTER TABLE ssl_ca_cert ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（独立根CA域），default=院内默认域'' AFTER id', 'SELECT 1');
+SET @c10k = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'tenant_key');
+SET @c10u = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'tenant_uscc');
+SET @s10 = IF(@c10k > 0,
+    'ALTER TABLE ssl_ca_cert CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（统一社会信用代码）；default=存量单根兼容值''',
+    IF(@c10u = 0, 'ALTER TABLE ssl_ca_cert ADD COLUMN tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（统一社会信用代码）；default=存量单根兼容值''', 'SELECT 1'));
 PREPARE s10 FROM @s10; EXECUTE s10; DEALLOCATE PREPARE s10;
 
-SET @c11 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'tenant_key');
-SET @s11 = IF(@c11 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理租户（签发落到该租户根域）'' AFTER id', 'SELECT 1');
+SET @c11k = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'tenant_key');
+SET @c11u = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'tenant_uscc');
+SET @s11 = IF(@c11k > 0,
+    'ALTER TABLE ssl_cert_application CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理租户（统一社会信用代码，签发落到该租户根域）''',
+    IF(@c11u = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理租户（统一社会信用代码，签发落到该租户根域）''', 'SELECT 1'));
 PREPARE s11 FROM @s11; EXECUTE s11; DEALLOCATE PREPARE s11;
 
 -- 幂等加列：申请单提交人/审核人展示用真实姓名。登录账号仍保留在 applied_by/reviewed_by
@@ -245,47 +265,79 @@ SET @c_name2 = (SELECT COUNT(*) FROM information_schema.columns
 SET @s_name2 = IF(@c_name2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN reviewed_by_name VARCHAR(64) NULL COMMENT ''审核人真实姓名（登录账号见 reviewed_by）'' AFTER reviewed_at', 'SELECT 1');
 PREPARE s_name2 FROM @s_name2; EXECUTE s_name2; DEALLOCATE PREPARE s_name2;
 
-SET @c12 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'tenant_key');
-SET @s12 = IF(@c12 = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''操作归属租户（全局操作记 default）'' AFTER username', 'SELECT 1');
+SET @c12k = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'tenant_key');
+SET @c12u = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'tenant_uscc');
+SET @s12 = IF(@c12k > 0,
+    'ALTER TABLE ssl_audit_log CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''操作归属租户（统一社会信用代码；default=无在营租户时的兜底）''',
+    IF(@c12u = 0, 'ALTER TABLE ssl_audit_log ADD COLUMN tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''操作归属租户（统一社会信用代码；default=无在营租户时的兜底）''', 'SELECT 1'));
 PREPARE s12 FROM @s12; EXECUTE s12; DEALLOCATE PREPARE s12;
 
-SET @c13 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_template' AND column_name = 'tenant_key');
-SET @s13 = IF(@c13 = 0, 'ALTER TABLE ssl_cert_template ADD COLUMN tenant_key VARCHAR(32) NULL COMMENT ''归属租户；NULL=全局模板（所有租户可用）'' AFTER id', 'SELECT 1');
+SET @c13k = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_template' AND column_name = 'tenant_key');
+SET @c13u = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_template' AND column_name = 'tenant_uscc');
+SET @s13 = IF(@c13k > 0,
+    'ALTER TABLE ssl_cert_template CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NULL COMMENT ''归属租户（统一社会信用代码）；NULL=全局模板（所有租户可用）''',
+    IF(@c13u = 0, 'ALTER TABLE ssl_cert_template ADD COLUMN tenant_uscc VARCHAR(32) NULL COMMENT ''归属租户（统一社会信用代码）；NULL=全局模板（所有租户可用）''', 'SELECT 1'));
 PREPARE s13 FROM @s13; EXECUTE s13; DEALLOCATE PREPARE s13;
 
-SET @c14 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'tenant_key');
-SET @s14 = IF(@c14 = 0, 'ALTER TABLE ssl_sys_user ADD COLUMN tenant_key VARCHAR(32) NULL COMMENT ''归属租户；NULL=全局管理员（跨租户）'' AFTER role_code', 'SELECT 1');
+SET @c14k = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'tenant_key');
+SET @c14u = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'tenant_uscc');
+SET @s14 = IF(@c14k > 0,
+    'ALTER TABLE ssl_sys_user CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NULL COMMENT ''归属租户（统一社会信用代码）；NULL=全局管理员（跨租户）''',
+    IF(@c14u = 0, 'ALTER TABLE ssl_sys_user ADD COLUMN tenant_uscc VARCHAR(32) NULL COMMENT ''归属租户（统一社会信用代码）；NULL=全局管理员（跨租户）''', 'SELECT 1'));
 PREPARE s14 FROM @s14; EXECUTE s14; DEALLOCATE PREPARE s14;
 
-SET @c15 = (SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'tenant_key');
-SET @s15 = IF(@c15 = 0, 'ALTER TABLE ssl_crl_state ADD COLUMN tenant_key VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（每租户独立CRL发布状态行）'' AFTER id', 'SELECT 1');
+SET @c15k = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'tenant_key');
+SET @c15u = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'tenant_uscc');
+SET @s15 = IF(@c15k > 0,
+    'ALTER TABLE ssl_crl_state CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（统一社会信用代码；每租户独立CRL发布状态行）''',
+    IF(@c15u = 0, 'ALTER TABLE ssl_crl_state ADD COLUMN tenant_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属租户（统一社会信用代码；每租户独立CRL发布状态行）''', 'SELECT 1'));
 PREPARE s15 FROM @s15; EXECUTE s15; DEALLOCATE PREPARE s15;
+
+-- 平台级保险库（TSA/审计签名/接入密钥）用 NULL 表示不归属任何租户
+SET @c15a = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_key_vault' AND column_name = 'tenant_key');
+SET @s15a = IF(@c15a > 0, 'ALTER TABLE ssl_key_vault CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NULL COMMENT ''租户域（统一社会信用代码）；NULL=平台级保险库（TSA/审计签名/接入密钥）''', 'SELECT 1');
+PREPARE s15a FROM @s15a; EXECUTE s15a; DEALLOCATE PREPARE s15a;
+
+SET @c15b = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_op_ticket' AND column_name = 'tenant_key');
+SET @s15b = IF(@c15b > 0, 'ALTER TABLE ssl_cert_op_ticket CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NULL COMMENT ''受理租户（统一社会信用代码）；NULL=存量单根域历史证书的操作单''', 'SELECT 1');
+PREPARE s15b FROM @s15b; EXECUTE s15b; DEALLOCATE PREPARE s15b;
+
+SET @c15c = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_api_client' AND column_name = 'tenant_key');
+SET @s15c = IF(@c15c > 0, 'ALTER TABLE ssl_api_client CHANGE COLUMN tenant_key tenant_uscc VARCHAR(32) NOT NULL COMMENT ''绑定租户（统一社会信用代码）：请求租户域由此反查，不信任调用方''', 'SELECT 1');
+PREPARE s15c FROM @s15c; EXECUTE s15c; DEALLOCATE PREPARE s15c;
 
 -- 幂等加索引：证书按租户过滤（租户化查询主路径）、审计按租户+时间检索
 SET @c16 = (SELECT COUNT(*) FROM information_schema.statistics
             WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_tenant');
-SET @s16 = IF(@c16 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_tenant (tenant_key, status)', 'SELECT 1');
+SET @s16 = IF(@c16 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_tenant (tenant_uscc, status)', 'SELECT 1');
 PREPARE s16 FROM @s16; EXECUTE s16; DEALLOCATE PREPARE s16;
 
 SET @c17 = (SELECT COUNT(*) FROM information_schema.statistics
             WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND index_name = 'idx_tenant_time');
-SET @s17 = IF(@c17 = 0, 'ALTER TABLE ssl_audit_log ADD KEY idx_tenant_time (tenant_key, created_at)', 'SELECT 1');
+SET @s17 = IF(@c17 = 0, 'ALTER TABLE ssl_audit_log ADD KEY idx_tenant_time (tenant_uscc, created_at)', 'SELECT 1');
 PREPARE s17 FROM @s17; EXECUTE s17; DEALLOCATE PREPARE s17;
 
--- CRL 发布状态每租户一行：tenant_key 唯一（并发首建靠唯一索引闭环，代码侧 DuplicateKey 重试兜底）
+-- CRL 发布状态每租户一行：tenant_uscc 唯一（并发首建靠唯一索引闭环，代码侧 DuplicateKey 重试兜底）
 SET @c18 = (SELECT COUNT(*) FROM information_schema.statistics
             WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND index_name = 'uk_crl_state_tenant');
-SET @s18 = IF(@c18 = 0, 'ALTER TABLE ssl_crl_state ADD UNIQUE KEY uk_crl_state_tenant (tenant_key)', 'SELECT 1');
+SET @s18 = IF(@c18 = 0, 'ALTER TABLE ssl_crl_state ADD UNIQUE KEY uk_crl_state_tenant (tenant_uscc)', 'SELECT 1');
 PREPARE s18 FROM @s18; EXECUTE s18; DEALLOCATE PREPARE s18;
 
 -- 租户域内按序列号检索（OCSP/verify 域内命中）
 SET @c19 = (SELECT COUNT(*) FROM information_schema.statistics
             WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_tenant_serial');
-SET @s19 = IF(@c19 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_tenant_serial (tenant_key, serial_hex)', 'SELECT 1');
+SET @s19 = IF(@c19 = 0, 'ALTER TABLE ssl_ca_cert ADD KEY idx_tenant_serial (tenant_uscc, serial_hex)', 'SELECT 1');
 PREPARE s19 FROM @s19; EXECUTE s19; DEALLOCATE PREPARE s19;
 
 -- =============================================================================
@@ -321,7 +373,7 @@ CREATE TABLE IF NOT EXISTS ssl_role_perm (
 
 CREATE TABLE IF NOT EXISTS ssl_key_vault (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
-    tenant_key     VARCHAR(32)  NOT NULL COMMENT '租户域（default=存量单根保险库；其他=租户独立保险库，主密钥亦独立）',
+    tenant_uscc     VARCHAR(32)  NULL COMMENT '租户域（统一社会信用代码）；NULL=平台级保险库（TSA/审计签名/接入密钥）',
     rel_dir     VARCHAR(128) NOT NULL COMMENT '保险库相对目录（root/subca/tsa/audit-sign/issued/{serial}），沿用原文件路径语义',
     name        VARCHAR(64)  NOT NULL COMMENT '密钥名（key/pub）',
     cipher_hex  TEXT         NOT NULL COMMENT 'SM4 加密后的私钥 PEM（hex 密文）；主密钥（KEK）不入库，走 SSL_MASTER_KEY 或 master.key 文件',
@@ -329,14 +381,14 @@ CREATE TABLE IF NOT EXISTS ssl_key_vault (
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_vault_entry (tenant_key, rel_dir, name)
+    UNIQUE KEY uk_vault_entry (tenant_uscc, rel_dir, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='密钥保险库（私钥 SM4 密文落库，替代原 key.pem.enc 文件形态）';
 
 -- 证书操作审批单（吊销/挂起/解除挂起/证书更新/密钥更新 双人复核：发起→他人审批→批准即执行，GM/T 0034 §10.1g 分权制衡；
 -- 直接执行通道已拆除，系统管理员同样只能走单）
 CREATE TABLE IF NOT EXISTS ssl_cert_op_ticket (
     id               BIGINT       NOT NULL AUTO_INCREMENT,
-    tenant_key       VARCHAR(32)  NULL COMMENT '受理租户（NULL=存量单根域历史证书的操作单）',
+    tenant_uscc       VARCHAR(32)  NULL COMMENT '受理租户（NULL=存量单根域历史证书的操作单）',
     op_no            VARCHAR(32)  NOT NULL COMMENT '操作单号（CO+时间戳+随机，同申请单号规则）',
     op_type          VARCHAR(16)  NOT NULL COMMENT '操作类型：REVOKE-吊销 SUSPEND-挂起 UNSUSPEND-解除挂起 RENEW-证书更新 REKEY-密钥更新',
     cert_id          BIGINT       NOT NULL COMMENT '目标证书ID',
@@ -376,12 +428,12 @@ INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
 
 -- ===== HIS 等外部系统在线对接（APP 直连 API） =====
 
--- 外部 API 客户端：tenant_key 由服务端绑定，请求路径不再携带租户标识；
+-- 外部 API 客户端：tenant_uscc 由服务端绑定，请求路径不再携带租户标识；
 -- app_id/secret 均为随机不可猜串，secret 密文存 ssl_key_vault（api-clients/{app_id}），本表不落明文
 CREATE TABLE IF NOT EXISTS ssl_api_client (
     id                 BIGINT       NOT NULL AUTO_INCREMENT,
     app_id             VARCHAR(64)  NOT NULL COMMENT '随机客户端标识（app_+32位十六进制）',
-    tenant_key         VARCHAR(32)  NOT NULL COMMENT '绑定租户：请求租户域由此反查，不信任调用方',
+    tenant_uscc         VARCHAR(32)  NOT NULL COMMENT '绑定租户：请求租户域由此反查，不信任调用方',
     client_name        VARCHAR(64)  NOT NULL COMMENT '客户端名称（审计展示，如 HIS生产前置）',
     ip_allowlist       VARCHAR(500) NULL COMMENT '逗号分隔 IP/CIDR（IPv4 CIDR；空=不限来源）',
     client_cert_sha256 VARCHAR(128) NULL COMMENT 'mTLS 客户端证书 SHA-256 指纹（空=不校验）',
@@ -393,7 +445,7 @@ CREATE TABLE IF NOT EXISTS ssl_api_client (
     rotated_at         DATETIME     NULL COMMENT 'secret 最近轮换时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_app_id (app_id),
-    KEY idx_client_tenant (tenant_key)
+    KEY idx_client_tenant (tenant_uscc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='外部系统 API 客户端（HIS 等；租户绑定+随机凭证）';
 
 -- 幂等补列：申请单外部对接字段（幂等键/对账/来源渠道）
@@ -434,14 +486,54 @@ PREPARE s_ext7 FROM @s_ext7; EXECUTE s_ext7; DEALLOCATE PREPARE s_ext7;
 
 SET @idx_ext := (SELECT COUNT(*) FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND INDEX_NAME = 'uk_ext_request');
-SET @s_ext8 := IF(@idx_ext = 0, 'ALTER TABLE ssl_cert_application ADD UNIQUE KEY uk_ext_request (tenant_key, external_system, external_request_id)', 'SELECT 1');
+SET @s_ext8 := IF(@idx_ext = 0, 'ALTER TABLE ssl_cert_application ADD UNIQUE KEY uk_ext_request (tenant_uscc, external_system, external_request_id)', 'SELECT 1');
 PREPARE s_ext8 FROM @s_ext8; EXECUTE s_ext8; DEALLOCATE PREPARE s_ext8;
 
--- 幂等播种：租户接入凭证重置权（tenant:credential）与 API 客户端管理权（apiclient:manage）归租户管理员；
--- 租户生命周期/接入凭证等权限已从 ADMIN 法定上限移除（DataInitializer 启动时自动修剪库中超界授权）
+-- 租户变更单（暂停/恢复/关闭/重置接入密钥走单双人复核：发起→他人审批→批准即执行；
+-- 新建租户已改为直接执行（POST /admin/tenants），本表 CREATE 仅存历史单。接入密钥明文不落库，发起人凭一次性回执从保险库领取）
+CREATE TABLE IF NOT EXISTS ssl_tenant_op_ticket (
+    id                    BIGINT       NOT NULL AUTO_INCREMENT,
+    op_no                 VARCHAR(32)  NOT NULL COMMENT '变更单号（TO+时间戳+随机）',
+    op_type               VARCHAR(20)  NOT NULL COMMENT 'SUSPEND-暂停 RESUME-恢复 CLOSE-关闭 RESET_CREDENTIAL-重置接入密钥（CREATE 仅存历史单）',
+    tenant_uscc           VARCHAR(32)  NULL COMMENT '目标租户（统一社会信用代码；历史 CREATE 单为拟登记代码）',
+    tenant_name           VARCHAR(64)  NULL COMMENT '租户名称（历史 CREATE 参数快照/审批展示）',
+    subject_o             VARCHAR(128) NULL COMMENT '证书主体O（历史 CREATE 参数快照）',
+    algorithm             VARCHAR(16)  NULL COMMENT '算法（历史 CREATE 参数快照）',
+    contact               VARCHAR(64)  NULL COMMENT '联系人（历史 CREATE 参数快照）',
+    contact_phone         VARCHAR(32)  NULL COMMENT '联系方式（历史 CREATE 参数快照）',
+    description           VARCHAR(500) NULL COMMENT '说明（历史 CREATE 参数快照）',
+    reason                VARCHAR(255) NOT NULL COMMENT '变更事由（审批依据，必填）',
+    status                VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING-待审批 EXECUTED-已执行 REJECTED-已驳回 CANCELLED-已撤销',
+    requested_by          VARCHAR(64)  NOT NULL COMMENT '发起人账号',
+    requested_by_name     VARCHAR(64)  NULL COMMENT '发起人真实姓名',
+    requested_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发起时间',
+    reviewed_by           VARCHAR(64)  NULL COMMENT '审批人账号（不得与发起人同一人）',
+    reviewed_by_name      VARCHAR(64)  NULL COMMENT '审批人真实姓名',
+    reviewed_at           DATETIME     NULL COMMENT '审批时间',
+    review_comment        VARCHAR(500) NULL COMMENT '审批意见（驳回必填）',
+    executed_at           DATETIME     NULL COMMENT '执行时间（批准即执行，同事务）',
+    result_app_id         VARCHAR(64)  NULL COMMENT '执行结果：接入 App ID（RESET_CREDENTIAL 及历史 CREATE 单；密钥明文不落库）',
+    result_secret_version INT          NULL COMMENT '执行结果：接入密钥版本',
+    receipt_taken_at      DATETIME     NULL COMMENT '接入凭证回执领取时间（一次性，领取后不可再查看）',
+    created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_tenant_op_no (op_no),
+    KEY idx_tenant_op_status (status),
+    KEY idx_tenant_op_tenant (tenant_uscc, op_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='租户变更审批单（暂停/恢复/关闭/接入密钥重置双人复核；历史 CREATE 单可查）';
+
+-- 幂等播种：新建租户（tenant:create，直接执行）、租户变更单菜单与权限
+-- （menu:tenant-ops + 发起 tenant:op:apply / 审批 tenant:op:approve）与 API 客户端管理权；
+-- 暂停/恢复/关闭/重置接入密钥的旧直接执行权限点已拆除，
+-- 存量库中的这些授权由 DataInitializer 按法定上限自动修剪
 INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
-    ('TENANT_ADMIN', 'tenant:credential'),
-    ('TENANT_ADMIN', 'apiclient:manage');
+    ('TENANT_ADMIN', 'tenant:create'),
+    ('TENANT_ADMIN', 'tenant:op:apply'),
+    ('TENANT_ADMIN', 'apiclient:manage'),
+    ('TENANT_APPROVER', 'tenant:op:approve'),
+    ('TENANT_ADMIN', 'menu:tenant-ops'),
+    ('TENANT_APPROVER', 'menu:tenant-ops'),
+    ('ADMIN', 'menu:tenant-ops');
 
 -- 幂等播种：ADMIN 全菜单只读巡检权限（存量库升级补授；新库由 DataInitializer 按法定上限播种）。
 -- 系统管理员保留账号建号（user:create/user:update），其余业务/租户/角色授权一律只读或不可见

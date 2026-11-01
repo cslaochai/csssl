@@ -11,6 +11,11 @@ import java.util.List;
 public class MyPermsVO {
 
     /**
+     * 姓名（顶栏展示，中文优先）
+     */
+    private String realName;
+
+    /**
      * 角色编码
      */
     private String roleCode;

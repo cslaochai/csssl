@@ -4,6 +4,16 @@
     <el-card ref="queryCardRef" class="query-card" shadow="never">
       <div class="query-wrap">
         <el-form :model="query" inline>
+          <el-form-item label="租户">
+            <el-select v-model="query.tenantUscc" placeholder="全部" clearable style="width: 300px" @change="handleSearch">
+              <el-option
+                v-for="o in tenantOptions"
+                :key="o.uscc"
+                :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+                :value="o.uscc"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="证书类型">
             <el-select v-model="query.certType" clearable placeholder="全部" style="width: 130px" @change="handleSearch">
               <el-option label="服务端" value="SERVER" />
@@ -35,7 +45,6 @@
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-tag size="small" type="info" effect="plain">当前域：{{ tenantName || tenantDomain }}</el-tag>
           <template v-if="canIssue">
             <el-button v-perm="'cert:issue'" type="primary" @click="openIssue">签发证书</el-button>
             <el-button v-perm="'cert:issue'" @click="openCsr">CSR签发</el-button>
@@ -49,6 +58,9 @@
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
         <el-table-column prop="subjectCn" label="主体CN" min-width="180" show-overflow-tooltip />
+        <el-table-column label="所属租户" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.tenantName || row.tenantUscc || '-' }}</template>
+        </el-table-column>
         <el-table-column label="类型" width="90">
           <template #default="{ row }">
             <el-tag size="small" :type="typeTag(row.certType)">{{ typeText(row.certType) }}</el-tag>
@@ -113,17 +125,19 @@
 
     <!-- 签发证书 -->
     <el-dialog v-model="issueVisible" title="签发证书" width="640px" :close-on-click-modal="false">
-      <el-alert
-        v-if="isTenantDomain"
-        type="info"
-        :closable="false"
-        show-icon
-        :title="`租户域「${tenantName || tenantDomain}」签发：证书主体归属由租户确定，无需手填，仅需填写主体CN。`"
-        style="margin-bottom: 12px"
-      />
       <el-form :model="issueForm" label-width="150px">
+        <el-form-item label="目标租户" required>
+          <el-select v-model="issueForm.tenantUscc" placeholder="选择租户" style="width: 100%">
+            <el-option
+              v-for="o in tenantOptions"
+              :key="o.uscc"
+              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+              :value="o.uscc"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="主体CN" required>
-          <el-input v-model="issueForm.subjectCn" :placeholder="isTenantDomain ? '仅填主体CN，如 his.yibao.local（主体归属由后端按租户附加）' : '如 his.cslk.local / csmig 前置机'" />
+          <el-input v-model="issueForm.subjectCn" placeholder="仅填主体CN，如 his.yibao.local（主体归属由所选租户附加）" />
         </el-form-item>
         <el-form-item label="证书类型">
           <el-radio-group v-model="issueForm.certType">
@@ -159,6 +173,16 @@
     <!-- CSR 签发 -->
     <el-dialog v-model="csrVisible" title="证书请求签发（CSR）" width="680px" :close-on-click-modal="false">
       <el-form :model="csrForm" label-width="150px">
+        <el-form-item label="目标租户" required>
+          <el-select v-model="csrForm.tenantUscc" placeholder="选择租户" style="width: 100%">
+            <el-option
+              v-for="o in tenantOptions"
+              :key="o.uscc"
+              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+              :value="o.uscc"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="证书请求内容（CSR）" required>
           <el-input
             v-model="csrForm.csrPem"
@@ -193,15 +217,17 @@
 
     <!-- 公钥直签（RA 场景：申请方自持私钥） -->
     <el-dialog v-model="pubKeyVisible" title="公钥直签（申请方自持私钥，仅提交公钥）" width="680px" :close-on-click-modal="false">
-      <el-alert
-        v-if="isTenantDomain"
-        type="info"
-        :closable="false"
-        show-icon
-        :title="`租户域「${tenantName || tenantDomain}」签发：证书主体归属由租户确定，仅需填写主体CN。`"
-        style="margin-bottom: 12px"
-      />
       <el-form :model="pubKeyForm" label-width="150px">
+        <el-form-item label="目标租户" required>
+          <el-select v-model="pubKeyForm.tenantUscc" placeholder="选择租户" style="width: 100%">
+            <el-option
+              v-for="o in tenantOptions"
+              :key="o.uscc"
+              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+              :value="o.uscc"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="公钥PEM" required>
           <el-input
             v-model="pubKeyForm.publicKeyPem"
@@ -345,7 +371,7 @@
         <el-descriptions-item label="有效期">{{ detail?.validFrom }} ~ {{ detail?.validTo }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
         <el-descriptions-item v-if="detail?.revokedAt" label="吊销时间/原因">{{ detail?.revokedAt }}（{{ detail?.revokeReason }}）</el-descriptions-item>
-        <el-descriptions-item label="所属租户">{{ detail?.tenantName || detail?.tenantKey || '全局' }}</el-descriptions-item>
+        <el-descriptions-item label="所属租户">{{ detail?.tenantName || detail?.tenantUscc || '全局' }}</el-descriptions-item>
         <el-descriptions-item label="签发人">{{ detail?.createdByName || detail?.createdBy || '-' }}</el-descriptions-item>
         <el-descriptions-item label="用途说明">{{ detail?.description || '无' }}</el-descriptions-item>
       </el-descriptions>
@@ -354,7 +380,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, onMounted, ref } from 'vue'
+import { reactive, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, ArrowDown } from '@element-plus/icons-vue'
 import {
@@ -370,7 +396,6 @@ import {
   listTenantsCached
 } from '@/api/system'
 import { downloadText } from '@/lib/download'
-import { currentTenant } from '@/lib/tenant'
 import { hasPerm, permReady } from '@/lib/perm'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
@@ -382,15 +407,16 @@ const canIssue = permLoaded ? hasPerm('cert:issue') : role === 'OPERATOR'
 const canDownloadCert = permLoaded ? hasPerm('cert:download') : ['OPERATOR', 'CERT_OFFICER'].includes(role)
 const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : role === 'KEY_ADMIN'
 
-// 当前租户域：列表/签发/吊销等请求由 request 封装自动附带 tenantKey=currentTenant()
-const tenantDomain = ref(currentTenant())
-const tenantName = ref('')
-const isTenantDomain = computed(() => !!tenantDomain.value)
+// 租户域由页面显式选择：列表可留空=跨租户只读，签发/操作单必须指定目标租户
+const tenantOptions = ref([])
+function defaultTenant() {
+  return tenantOptions.value.find(o => o.status === 'ACTIVE')?.uscc || tenantOptions.value[0]?.uscc || ''
+}
 
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, certType: '', status: '', keyword: '' })
+const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, tenantUscc: '', certType: '', status: '', keyword: '' })
 
 // 两卡式列表页：表格只设最大高度，超高内部滚动
 const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
@@ -419,6 +445,7 @@ const defaultDays = 365
 const pubKeyVisible = ref(false)
 const templates = ref([])
 const pubKeyForm = reactive({
+  tenantUscc: '',
   publicKeyPem: '',
   templateId: null,
   subjectCn: '',
@@ -429,6 +456,7 @@ const pubKeyForm = reactive({
 })
 
 const issueForm = reactive({
+  tenantUscc: '',
   subjectCn: '',
   certType: 'SERVER',
   algorithm: 'RSA2048',
@@ -438,6 +466,7 @@ const issueForm = reactive({
 })
 
 const csrForm = reactive({
+  tenantUscc: '',
   csrPem: '',
   certType: 'SERVER',
   validityDays: defaultDays,
@@ -509,6 +538,7 @@ async function load() {
     const res = await pageCerts({
       pageNo: query.pageNo,
       pageSize: query.pageSize,
+      tenantUscc: query.tenantUscc || undefined,
       certType: query.certType || undefined,
       status: query.status || undefined,
       keyword: query.keyword || undefined
@@ -528,6 +558,7 @@ function handleSearch() {
 }
 
 function handleReset() {
+  query.tenantUscc = ''
   query.certType = ''
   query.status = ''
   query.keyword = ''
@@ -547,6 +578,7 @@ function handleCurrentChange(val) {
 
 function openIssue() {
   Object.assign(issueForm, {
+    tenantUscc: query.tenantUscc || defaultTenant(),
     subjectCn: '',
     certType: 'SERVER',
     algorithm: 'RSA2048',
@@ -558,13 +590,18 @@ function openIssue() {
 }
 
 async function onIssue() {
+  if (!issueForm.tenantUscc) {
+    ElMessage.warning('请选择目标租户')
+    return
+  }
   if (!issueForm.subjectCn.trim()) {
     ElMessage.warning('请填写主体CN')
     return
   }
   submitting.value = true
   try {
-    await issueCert({ ...issueForm, validityDays: issueForm.validityDays || defaultDays })
+    const { tenantUscc, ...body } = issueForm
+    await issueCert({ ...body, validityDays: issueForm.validityDays || defaultDays }, tenantUscc)
     ElMessage.success('签发成功，私钥已落盘（管理端可下载）')
     issueVisible.value = false
     load()
@@ -575,6 +612,7 @@ async function onIssue() {
 
 function openCsr() {
   Object.assign(csrForm, {
+    tenantUscc: query.tenantUscc || defaultTenant(),
     csrPem: '',
     certType: 'SERVER',
     validityDays: defaultDays,
@@ -585,13 +623,18 @@ function openCsr() {
 }
 
 async function onCsrIssue() {
+  if (!csrForm.tenantUscc) {
+    ElMessage.warning('请选择目标租户')
+    return
+  }
   if (!csrForm.csrPem.trim()) {
     ElMessage.warning('请粘贴 CSR 内容')
     return
   }
   submitting.value = true
   try {
-    await issueCertByCsr({ ...csrForm, validityDays: csrForm.validityDays || defaultDays })
+    const { tenantUscc, ...body } = csrForm
+    await issueCertByCsr({ ...body, validityDays: csrForm.validityDays || defaultDays }, tenantUscc)
     ElMessage.success('CSR签发成功（私钥由申请方自持）')
     csrVisible.value = false
     load()
@@ -602,6 +645,7 @@ async function onCsrIssue() {
 
 async function openPubKey() {
   Object.assign(pubKeyForm, {
+    tenantUscc: query.tenantUscc || defaultTenant(),
     publicKeyPem: '',
     templateId: null,
     subjectCn: '',
@@ -622,6 +666,10 @@ async function openPubKey() {
 }
 
 async function onPubKeyIssue() {
+  if (!pubKeyForm.tenantUscc) {
+    ElMessage.warning('请选择目标租户')
+    return
+  }
   if (!pubKeyForm.publicKeyPem.trim()) {
     ElMessage.warning('请粘贴公钥 PEM')
     return
@@ -640,7 +688,7 @@ async function onPubKeyIssue() {
       templateId: pubKeyForm.templateId || undefined,
       san: pubKeyForm.san || undefined,
       description: pubKeyForm.description || undefined
-    })
+    }, pubKeyForm.tenantUscc)
     ElMessage.success('公钥直签成功（私钥由申请方自持，CA 不留存）')
     pubKeyVisible.value = false
     load()
@@ -664,7 +712,8 @@ function openSuspend(row) {
 async function onSuspendConfirm() {
   submitting.value = true
   try {
-    const res = await submitCertOp({ opType: 'SUSPEND', certId: suspendTarget.value.id, reason: suspendReason.value })
+    const res = await submitCertOp({ opType: 'SUSPEND', certId: suspendTarget.value.id, reason: suspendReason.value },
+        suspendTarget.value.tenantUscc)
     ElMessage.success(`挂起操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     suspendVisible.value = false
   } finally {
@@ -676,7 +725,7 @@ async function onUnsuspend(row) {
   await ElMessageBox.confirm(`为证书 ${row.subjectCn} 发起解除挂起申请？提交后由持审批权限的其他人员批准后执行。`, '发起操作单', { type: 'warning' })
   submitting.value = true
   try {
-    const res = await submitCertOp({ opType: 'UNSUSPEND', certId: row.id })
+    const res = await submitCertOp({ opType: 'UNSUSPEND', certId: row.id }, row.tenantUscc)
     ElMessage.success(`解除挂起操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
   } finally {
     submitting.value = false
@@ -694,7 +743,8 @@ async function onRenewConfirm() {
   submitting.value = true
   try {
     const opType = renewAction.value === 'renew' ? 'RENEW' : 'REKEY'
-    const res = await submitCertOp({ opType, certId: renewTarget.value.id, validityDays: renewDays.value })
+    const res = await submitCertOp({ opType, certId: renewTarget.value.id, validityDays: renewDays.value },
+        renewTarget.value.tenantUscc)
     ElMessage.success(`${opType === 'RENEW' ? '证书更新' : '密钥更新'}操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     renewVisible.value = false
   } finally {
@@ -734,7 +784,8 @@ async function onExportP12() {
 async function onRevokeConfirm() {
   submitting.value = true
   try {
-    const res = await submitCertOp({ opType: 'REVOKE', certId: revokeTarget.value.id, reason: revokeReason.value })
+    const res = await submitCertOp({ opType: 'REVOKE', certId: revokeTarget.value.id, reason: revokeReason.value },
+        revokeTarget.value.tenantUscc)
     ElMessage.success(`吊销操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     revokeVisible.value = false
   } finally {
@@ -759,11 +810,8 @@ async function onDownloadKey(row) {
 }
 
 onMounted(async () => {
+  tenantOptions.value = await listTenantsCached()
   load()
-  if (tenantDomain.value) {
-    const hit = (await listTenantsCached()).find(o => o.tenantKey === tenantDomain.value)
-    tenantName.value = hit?.tenantName || ''
-  }
 })
 </script>
 

@@ -6,6 +6,7 @@ import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
 import com.csssl.entity.ApiClient;
 import com.csssl.entity.CaTenant;
+import com.csssl.enums.TenantStatusEnum;
 import com.csssl.mapper.ApiClientMapper;
 import com.csssl.mapper.CaTenantMapper;
 import com.csssl.util.CertUtil;
@@ -21,7 +22,7 @@ import java.util.List;
 
 /**
  * 租户域管理（路线A：每家医院=一套独立根CA，租户间互不信任）。
- * 开租户即建根：登记记录后立即复用 {@link CaService} 带 tenantKey 的初始化路径生成
+ * 开租户即建根：登记记录后立即复用 {@link CaService} 带 tenantUscc 的初始化路径生成
  * 独立根CA+SUB_CA+Shamir(3,5) 门限份额；suspend/close 本波仅落状态字段，
  * CLOSED 拒绝签发由后续波次在签发/CRL/OCSP 链路 enforce。
  */
@@ -30,9 +31,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TenantService {
 
-    public static final String STATUS_ACTIVE = "ACTIVE";
-    public static final String STATUS_SUSPENDED = "SUSPENDED";
-    public static final String STATUS_CLOSED = "CLOSED";
     /**
      * 统一社会信用代码（GB 32100）字符集与加权因子：末位校验码 = 加权和 mod 31 映射
      */
@@ -64,8 +62,8 @@ public class TenantService {
         }
         if (keyword != null && !keyword.isBlank()) {
             String kw = keyword.trim();
-            qw.and(w -> w.like(CaTenant::getTenantKey, kw).or().like(CaTenant::getTenantName, kw)
-                    .or().like(CaTenant::getSubjectO, kw).or().like(CaTenant::getUscc, kw));
+            qw.and(w -> w.like(CaTenant::getUscc, kw).or().like(CaTenant::getTenantName, kw)
+                    .or().like(CaTenant::getSubjectO, kw));
         }
         qw.orderByAsc(CaTenant::getId);
         Page<CaTenant> page = tenantMapper.selectPage(new Page<>(pageNo, pageSize), qw);
@@ -75,14 +73,14 @@ public class TenantService {
     /**
      * 单租户状态摘要（详情/创建回执用）
      */
-    public TenantVO overviewOf(String tenantKey) {
-        return buildRow(get(tenantKey));
+    public TenantVO overviewOf(String tenantUscc) {
+        return buildRow(get(tenantUscc));
     }
 
     private TenantVO buildRow(CaTenant tenant) {
         TenantVO vo = TenantVO.from(tenant);
         try {
-            CaStatusVO st = caService.status(tenant.getTenantKey());
+            CaStatusVO st = caService.status(tenant.getUscc());
             vo.setHasRoot(st.isInitialized());
             vo.setRootSerialHex(st.getSerialHex());
             vo.setRootCn(st.getCn());
@@ -102,7 +100,7 @@ public class TenantService {
             vo.setStatusError(e.getMessage());
         }
         ApiClient client = apiClientMapper.selectOne(new LambdaQueryWrapper<ApiClient>()
-                .eq(ApiClient::getTenantKey, tenant.getTenantKey())
+                .eq(ApiClient::getTenantUscc, tenant.getUscc())
                 .orderByAsc(ApiClient::getId)
                 .last("LIMIT 1"));
         if (client != null) {
@@ -121,20 +119,20 @@ public class TenantService {
     }
 
     /**
-     * 按 tenantKey 查询（不存在返回 null）
+     * 按 tenantUscc 查询（不存在返回 null）
      */
-    public CaTenant findByKey(String tenantKey) {
-        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
-        return tenantMapper.selectOne(new LambdaQueryWrapper<CaTenant>().eq(CaTenant::getTenantKey, tenantKey));
+    public CaTenant findByUscc(String tenantUscc) {
+        KeyVaultConfig.TenantVaultResolver.checkTenantUscc(tenantUscc);
+        return tenantMapper.selectOne(new LambdaQueryWrapper<CaTenant>().eq(CaTenant::getUscc, tenantUscc));
     }
 
     /**
-     * 按 tenantKey 查询（不存在抛异常）
+     * 按 tenantUscc 查询（不存在抛异常）
      */
-    public CaTenant get(String tenantKey) {
-        CaTenant tenant = findByKey(tenantKey);
+    public CaTenant get(String tenantUscc) {
+        CaTenant tenant = findByUscc(tenantUscc);
         if (tenant == null) {
-            throw new IllegalArgumentException("租户不存在: " + tenantKey);
+            throw new IllegalArgumentException("租户不存在: " + tenantUscc);
         }
         return tenant;
     }
@@ -142,28 +140,27 @@ public class TenantService {
     /**
      * 校验租户存在且 ACTIVE（根CA管理写操作前置；default 域存量语义不受租户表约束）
      */
-    public void requireActive(String tenantKey) {
-        CaTenant tenant = get(tenantKey);
-        if (!STATUS_ACTIVE.equals(tenant.getStatus())) {
-            throw new IllegalArgumentException("租户状态不允许该操作: " + tenantKey + "（" + tenant.getStatus() + "）");
+    public void requireActive(String tenantUscc) {
+        CaTenant tenant = get(tenantUscc);
+        if (!TenantStatusEnum.ACTIVE.is(tenant.getStatus())) {
+            throw new IllegalArgumentException("租户状态不允许该操作: " + tenantUscc + "（" + statusText(tenant.getStatus()) + "）");
         }
     }
 
     /**
-     * 新建租户并立即初始化独立根CA+SUB_CA+门限份额。
-     * 算法缺省取全局配置 csssl.root-ca.algorithm（新租户"开租户默认参数"约定）。
-     * 租户标识由统一社会信用代码小写派生（不再人工填写），唯一性由该代码保证。
+     * 统一社会信用代码规整：去空格、转大写（唯一性按规整后的值判定）
      */
-    public CaTenant create(String uscc, String tenantName, String subjectO, String algorithm,
-                        String contact, String contactPhone, String description) {
-        String code = uscc == null ? "" : uscc.trim().toUpperCase();
+    public static String normalizeUscc(String uscc) {
+        return uscc == null ? "" : uscc.trim().toUpperCase();
+    }
+
+    /**
+     * 新建租户参数预检（变更单提交时先验一次快速失败；执行时 create() 再验一次，以执行时为准）
+     */
+    public void validateCreate(String uscc, String tenantName, String subjectO, String algorithm, String contactPhone) {
+        String code = normalizeUscc(uscc);
         if (!isValidUscc(code)) {
             throw new IllegalArgumentException("统一社会信用代码校验不通过，请核对18位代码与末位校验码");
-        }
-        String tenantKey = code.toLowerCase();
-        KeyVaultConfig.TenantVaultResolver.checkTenantKey(tenantKey);
-        if (CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
-            throw new IllegalArgumentException("default 为存量单根兼容标识，不可新建");
         }
         if (tenantName == null || tenantName.isBlank() || tenantName.trim().length() > 64) {
             throw new IllegalArgumentException("租户名称必填且不超过64字符");
@@ -175,46 +172,62 @@ public class TenantService {
         if (phone != null && !phone.matches("^1[3-9]\\d{9}$")) {
             throw new IllegalArgumentException("联系方式须为11位手机号");
         }
-        String alg = algorithm == null || algorithm.isBlank()
-                ? props.getRootCa().getAlgorithm() : algorithm.trim();
-        CertUtil.checkAlgorithm(alg);
+        CertUtil.checkAlgorithm(resolveAlgorithm(algorithm));
         CaTenant sameCode = tenantMapper.selectOne(new LambdaQueryWrapper<CaTenant>()
                 .eq(CaTenant::getUscc, code));
         if (sameCode != null) {
             throw new IllegalArgumentException("该统一社会信用代码已登记租户：" + sameCode.getTenantName()
-                    + "（" + sameCode.getTenantKey() + "）");
-        }
-        if (findByKey(tenantKey) != null) {
-            throw new IllegalArgumentException("租户标识已存在: " + tenantKey);
+                    + "（" + statusText(sameCode.getStatus()) + "）"
+                    + (TenantStatusEnum.CLOSED.is(sameCode.getStatus())
+                            ? "，已关闭租户的根CA密钥与历史证书仍在，不能同码另建，如需重新服务请对该租户发起「申请恢复」" : ""));
         }
         if (tenantMapper.selectCount(new LambdaQueryWrapper<CaTenant>()
                 .eq(CaTenant::getSubjectO, subjectO.trim())) > 0) {
             throw new IllegalArgumentException("证书主体O已被其他租户占用: " + subjectO);
         }
+    }
+
+    /**
+     * 算法缺省取全局配置 csssl.root-ca.algorithm（新租户"开租户默认参数"约定）
+     */
+    public String resolveAlgorithm(String algorithm) {
+        return algorithm == null || algorithm.isBlank()
+                ? props.getRootCa().getAlgorithm() : algorithm.trim();
+    }
+
+    /**
+     * 新建租户并立即初始化独立根CA+SUB_CA+门限份额。
+     * 统一社会信用代码即租户标识，唯一性由该代码保证（不另设内部标识）。
+     */
+    public CaTenant create(String uscc, String tenantName, String subjectO, String algorithm,
+                        String contact, String contactPhone, String description) {
+        String code = normalizeUscc(uscc);
+        String alg = resolveAlgorithm(algorithm);
+        validateCreate(code, tenantName, subjectO, alg, contactPhone);
+        String phone = contactPhone == null || contactPhone.isBlank() ? null : contactPhone.trim();
 
         CaTenant tenant = new CaTenant();
-        tenant.setTenantKey(tenantKey);
         tenant.setUscc(code);
         tenant.setTenantName(tenantName.trim());
         tenant.setSubjectO(subjectO.trim());
         tenant.setAlgorithm(alg);
-        tenant.setStatus(STATUS_ACTIVE);
+        tenant.setStatus(TenantStatusEnum.ACTIVE.getCode());
         tenant.setContact(contact);
         tenant.setContactPhone(phone);
         tenant.setDescription(description);
         tenant.setCreatedAt(LocalDateTime.now());
         tenantMapper.insert(tenant);
-        log.info("[租户] 已登记租户 {}（{}，USCC={}，主体O={}，算法={}）", tenantKey, tenant.getTenantName(),
-                code, tenant.getSubjectO(), alg);
+        log.info("[租户] 已登记租户 {}（{}，主体O={}，算法={}）", code, tenant.getTenantName(),
+                tenant.getSubjectO(), alg);
 
-        // 开租户即建根：独立根CA → SUB_CA → 门限份额（复用带 tenantKey 的初始化路径，幂等）
-        caService.initRoot(tenantKey);
+        // 开租户即建根：独立根CA → SUB_CA → 门限份额（复用带租户标识的初始化路径，幂等）
+        caService.initRoot(code);
 
         // 平台唯一在营租户即主租户：无租户参数入口（审计/兼容调用）归位到它，无需重启
         Long actives = tenantMapper.selectCount(new LambdaQueryWrapper<CaTenant>()
-                .eq(CaTenant::getStatus, STATUS_ACTIVE));
+                .eq(CaTenant::getStatus, TenantStatusEnum.ACTIVE.getCode()));
         if (actives != null && actives == 1) {
-            CaTenant.PRIMARY_TENANT_KEY = tenantKey;
+            CaTenant.PRIMARY_TENANT_USCC = code;
         }
         return tenant;
     }
@@ -222,33 +235,44 @@ public class TenantService {
     /**
      * 暂停租户（ACTIVE → SUSPENDED）
      */
-    public CaTenant suspend(String tenantKey) {
-        return updateStatus(tenantKey, STATUS_SUSPENDED, List.of(STATUS_ACTIVE));
+    public CaTenant suspend(String tenantUscc) {
+        return updateStatus(tenantUscc, TenantStatusEnum.SUSPENDED, List.of(TenantStatusEnum.ACTIVE));
     }
 
     /**
-     * 恢复租户（SUSPENDED → ACTIVE）
+     * 恢复租户（SUSPENDED/CLOSED → ACTIVE）
+     *
+     * <p>关闭只翻状态字段，根CA密钥、已签发证书与接入凭证都在原地未动，故关闭后同码既不能再新建
+     * （{@code uk_uscc} 占位）也不需要新建——要重新服务这家机构就走本方法把它恢复回启用。</p>
      */
-    public CaTenant resume(String tenantKey) {
-        return updateStatus(tenantKey, STATUS_ACTIVE, List.of(STATUS_SUSPENDED));
+    public CaTenant resume(String tenantUscc) {
+        return updateStatus(tenantUscc, TenantStatusEnum.ACTIVE,
+                List.of(TenantStatusEnum.SUSPENDED, TenantStatusEnum.CLOSED));
     }
 
     /**
-     * 关闭租户（SUSPENDED → CLOSED；CLOSED 为终态，密钥清理由后续波次处置）
+     * 关闭租户（ACTIVE → CLOSED：停签发、停 CRL 发布、接入凭证鉴权拒绝，密钥保留待恢复或运维处置）
      */
-    public CaTenant close(String tenantKey) {
-        return updateStatus(tenantKey, STATUS_CLOSED, List.of(STATUS_ACTIVE, STATUS_SUSPENDED));
+    public CaTenant close(String tenantUscc) {
+        return updateStatus(tenantUscc, TenantStatusEnum.CLOSED, List.of(TenantStatusEnum.ACTIVE, TenantStatusEnum.SUSPENDED));
     }
 
-    private CaTenant updateStatus(String tenantKey, String target, List<String> fromAllowed) {
-        CaTenant tenant = get(tenantKey);
-        if (!fromAllowed.contains(tenant.getStatus())) {
-            throw new IllegalArgumentException("租户当前状态（" + tenant.getStatus() + "）不允许变更为 " + target);
+    private CaTenant updateStatus(String tenantUscc, TenantStatusEnum target, List<TenantStatusEnum> fromAllowed) {
+        CaTenant tenant = get(tenantUscc);
+        boolean allowed = fromAllowed.stream().anyMatch(s -> s.is(tenant.getStatus()));
+        if (!allowed) {
+            throw new IllegalArgumentException("租户当前状态（" + statusText(tenant.getStatus())
+                    + "）不允许变更为 " + target.getLabel());
         }
-        tenant.setStatus(target);
+        tenant.setStatus(target.getCode());
         tenantMapper.updateById(tenant);
-        log.info("[租户] {} 状态变更为 {}", tenantKey, target);
+        log.info("[租户] {} 状态变更为 {}", tenantUscc, target.getCode());
         return tenant;
+    }
+
+    private String statusText(String status) {
+        TenantStatusEnum s = TenantStatusEnum.fromCode(status);
+        return s == null ? status : s.getLabel();
     }
 
     /**

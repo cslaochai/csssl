@@ -7,6 +7,7 @@ import com.csssl.dto.PublicKeyIssueDTO;
 import com.csssl.entity.CaTenant;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.CertTemplate;
+import com.csssl.enums.CertApplicationStatusEnum;
 import com.csssl.mapper.CertApplicationMapper;
 import com.csssl.util.TenantScope;
 import com.csssl.vo.CertVO;
@@ -29,22 +30,16 @@ import java.util.Map;
 /**
  * RA 用户注册流程（GM/T 0034 §5.2.2 用户注册管理系统）：
  * 提交（录入员）→ 审核批准/驳回（审核员，§10.1g 不得与录入员同一人）→ 签发（操作员，复用模板与公钥签发）。
- * 申请单状态机：PENDING → APPROVED / REJECTED → ISSUED / CANCELLED。
+ * 申请单状态机：PENDING → APPROVED / REJECTED → ISSUED / CANCELLED（见 {@link CertApplicationStatusEnum}）。
  *
- * <p>路线A数据域：提交时申请单 tenant 绑定=effectiveTenant（租户用户本人域；全局用户显式 tenantKey，缺省 default）；
+ * <p>路线A数据域：提交时申请单 tenant 绑定=effectiveTenant（租户用户本人域；全局用户显式 tenantUscc，缺省 default）；
  * 列表/详情按域过滤；approve/reject/issue/cancel 校验申请单 tenant==操作者域（跨租户→403）；
- * issue 走 CertService 带 tenantKey 正式版；租户域申请的 subjectDn 受控：CN 自由但 O 必须等于
+ * issue 走 CertService 带 tenantUscc 正式版；租户域申请的 subjectDn 受控：CN 自由但 O 必须等于
  * 租户 subject_o（提交时校验并提示），default 域保持 O=CSSSL 老口径不校验。</p>
  */
 @Service
 @RequiredArgsConstructor
 public class CertApplicationService {
-
-    public static final String ST_PENDING = "PENDING";
-    public static final String ST_APPROVED = "APPROVED";
-    public static final String ST_REJECTED = "REJECTED";
-    public static final String ST_ISSUED = "ISSUED";
-    public static final String ST_CANCELLED = "CANCELLED";
 
     private static final DateTimeFormatter APPLY_NO_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -57,11 +52,11 @@ public class CertApplicationService {
     private final ObjectMapper objectMapper;
 
     /**
-     * 数据域强制：申请单归属租户必须等于操作者有效域（租户用户越域 403；全局用户须显式传对 tenantKey）
+     * 数据域强制：申请单归属租户必须等于操作者有效域（租户用户越域 403；全局用户须显式传对 tenantUscc）
      */
     private static void requireTenantMatch(CertApplication app, String effTenant) {
-        String appTenant = app.getTenantKey() == null || app.getTenantKey().isBlank()
-                ? CaTenant.PRIMARY_TENANT_KEY : app.getTenantKey();
+        String appTenant = app.getTenantUscc() == null || app.getTenantUscc().isBlank()
+                ? CaTenant.PRIMARY_TENANT_USCC : app.getTenantUscc();
         if (!appTenant.equals(effTenant)) {
             throw new SecurityException("权限不足：申请单归属租户 " + appTenant + "，与当前操作域 " + effTenant + " 不一致");
         }
@@ -87,7 +82,7 @@ public class CertApplicationService {
                     .like(CertApplication::getApplyNo, keyword));
         }
         if (tenantScope != null && !tenantScope.isBlank()) {
-            qw.eq(CertApplication::getTenantKey, tenantScope);
+            qw.eq(CertApplication::getTenantUscc, tenantScope);
         }
         qw.orderByDesc(CertApplication::getCreatedAt);
         return applicationMapper.selectPage(new Page<>(pageNo, pageSize), qw);
@@ -109,7 +104,7 @@ public class CertApplicationService {
      */
     public CertApplication detailVisible(Long id, String operatorTenant) {
         CertApplication app = detail(id);
-        TenantScope.requireRowVisible(operatorTenant, app.getTenantKey());
+        TenantScope.requireRowVisible(operatorTenant, app.getTenantUscc());
         return app;
     }
 
@@ -172,7 +167,7 @@ public class CertApplicationService {
         checkSubjectDnTenant(subjectDn, tenant);
 
         CertApplication app = new CertApplication();
-        app.setTenantKey(tenant);
+        app.setTenantUscc(tenant);
         app.setApplyNo("RA" + APPLY_NO_TS.format(LocalDateTime.now()) + String.format("%04d", RANDOM.nextInt(10000)));
         app.setApplicantType(applicantType);
         app.setApplicantName(applicantName.trim());
@@ -181,7 +176,7 @@ public class CertApplicationService {
         app.setSan(blankToNull(body.getSan()));
         app.setPublicKeyPem(publicKeyPem.trim());
         app.setDescription(blankToNull(body.getDescription()));
-        app.setStatus(ST_PENDING);
+        app.setStatus(CertApplicationStatusEnum.PENDING.getCode());
         app.setChannel("WEB");
         app.setAppliedBy(username);
         app.setAppliedByName(realNameOrAccount(realName, username));
@@ -213,16 +208,16 @@ public class CertApplicationService {
         CertApplication app = checkPending(id);
         requireTenantMatch(app, effTenant);
         checkReviewerDiff(app, username);
-        CertTemplate tpl = templateService.detailVisible(app.getTemplateId(), app.getTenantKey());
+        CertTemplate tpl = templateService.detailVisible(app.getTemplateId(), app.getTenantUscc());
         app.setTemplateSnapshot(snapshotJson(tpl));
-        app.setStatus(ST_APPROVED);
+        app.setStatus(CertApplicationStatusEnum.APPROVED.getCode());
         app.setReviewedBy(username);
         app.setReviewedByName(realNameOrAccount(realName, username));
         app.setReviewedAt(LocalDateTime.now());
         app.setReviewComment(blankToNull(comment));
         applicationMapper.updateById(app);
         auditService.record(username, "RA_APPROVE", app.getApplyNo(),
-                "批准证书申请：" + app.getApplicantName() + "（已固化模板策略快照）", ip, app.getTenantKey());
+                "批准证书申请：" + app.getApplicantName() + "（已固化模板策略快照）", ip, app.getTenantUscc());
         return app;
     }
 
@@ -236,21 +231,21 @@ public class CertApplicationService {
         if (comment == null || comment.isBlank()) {
             throw new IllegalArgumentException("驳回必须填写审核意见");
         }
-        app.setStatus(ST_REJECTED);
+        app.setStatus(CertApplicationStatusEnum.REJECTED.getCode());
         app.setReviewedBy(username);
         app.setReviewedByName(realNameOrAccount(realName, username));
         app.setReviewedAt(LocalDateTime.now());
         app.setReviewComment(comment.trim());
         applicationMapper.updateById(app);
         auditService.record(username, "RA_REJECT", app.getApplyNo(),
-                "驳回证书申请：" + app.getApplicantName(), ip, app.getTenantKey());
+                "驳回证书申请：" + app.getApplicantName(), ip, app.getTenantUscc());
         return app;
     }
 
     /**
      * 签发：按批准快照 + 公钥签发，私钥由申请方自持（操作员执行）。
      * FOR UPDATE 行锁 + 同事务状态流转，防两个操作员并发对同一「已批准」单双签。
-     * 数据域：申请单归属租户必须等于操作者域（跨租户 403）；签发走 CertService 带 tenantKey 正式版，
+     * 数据域：申请单归属租户必须等于操作者域（跨租户 403）；签发走 CertService 带 tenantUscc 正式版，
      * 落到申请单受理租户根域。
      */
     @Transactional(rollbackFor = Exception.class)
@@ -260,8 +255,8 @@ public class CertApplicationService {
             throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
         }
         requireTenantMatch(app, effTenant);
-        if (!ST_APPROVED.equals(app.getStatus())) {
-            throw new IllegalArgumentException("仅「已批准」状态的申请单可签发（当前状态：" + app.getStatus() + "）");
+        if (!CertApplicationStatusEnum.APPROVED.is(app.getStatus())) {
+            throw new IllegalArgumentException("仅「已批准」状态的申请单可签发（当前状态：" + statusText(app.getStatus()) + "）");
         }
         PublicKeyIssueDTO req = new PublicKeyIssueDTO();
         req.setSubjectDn(app.getSubjectDn());
@@ -274,11 +269,11 @@ public class CertApplicationService {
         // 租户版正式入口：落到申请单受理租户根域（requireTenantMatch 已保证 effTenant==申请单域）
         CertVO vo = certService.issueWithPublicKey(effTenant, req, policy, username, ip);
 
-        app.setStatus(ST_ISSUED);
+        app.setStatus(CertApplicationStatusEnum.ISSUED.getCode());
         app.setIssuedCertId(Long.valueOf(vo.getId()));
         applicationMapper.updateById(app);
         auditService.record(username, "RA_ISSUE", app.getApplyNo(),
-                "按申请签发证书：" + app.getApplicantName() + "（证书 id=" + vo.getId() + "）", ip, app.getTenantKey());
+                "按申请签发证书：" + app.getApplicantName() + "（证书 id=" + vo.getId() + "）", ip, app.getTenantUscc());
         return vo;
     }
 
@@ -302,15 +297,16 @@ public class CertApplicationService {
         if (!java.util.Objects.equals(app.getAppliedBy(), username)) {
             throw new SecurityException("仅申请提交人本人可撤销申请（当前操作人：" + username + "）");
         }
-        if (!ST_PENDING.equals(app.getStatus()) && !ST_APPROVED.equals(app.getStatus())) {
-            throw new IllegalArgumentException("仅「待审核/已批准」状态的申请单可撤销（当前状态：" + app.getStatus() + "）");
+        if (!CertApplicationStatusEnum.PENDING.is(app.getStatus())
+                && !CertApplicationStatusEnum.APPROVED.is(app.getStatus())) {
+            throw new IllegalArgumentException("仅「待审核/已批准」状态的申请单可撤销（当前状态：" + statusText(app.getStatus()) + "）");
         }
-        app.setStatus(ST_CANCELLED);
+        app.setStatus(CertApplicationStatusEnum.CANCELLED.getCode());
         applicationMapper.updateById(app);
         auditService.record(username, "RA_CANCEL", app.getApplyNo(),
                 "撤销证书申请：" + app.getApplicantName()
                         + (reason == null || reason.isBlank() ? "" : "（原因：" + reason.trim() + "）"),
-                ip, app.getTenantKey());
+                ip, app.getTenantUscc());
         return app;
     }
 
@@ -319,7 +315,7 @@ public class CertApplicationService {
      * 避免签发出才被拒）；default 域保持 O=CSSSL 老口径不校验。
      */
     private void checkSubjectDnTenant(String subjectDn, String tenant) {
-        if (CaTenant.LEGACY_TENANT_KEY.equals(tenant)) {
+        if (CaTenant.LEGACY_NAMESPACE.equals(tenant)) {
             return;
         }
         CaTenant tenantRow = tenantService.get(tenant);
@@ -353,10 +349,15 @@ public class CertApplicationService {
         if (app == null) {
             throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
         }
-        if (!ST_PENDING.equals(app.getStatus())) {
-            throw new IllegalArgumentException("仅「待审核」状态的申请单可审核（当前状态：" + app.getStatus() + "）");
+        if (!CertApplicationStatusEnum.PENDING.is(app.getStatus())) {
+            throw new IllegalArgumentException("仅「待审核」状态的申请单可审核（当前状态：" + statusText(app.getStatus()) + "）");
         }
         return app;
+    }
+
+    private String statusText(String status) {
+        CertApplicationStatusEnum s = CertApplicationStatusEnum.fromCode(status);
+        return s == null ? status : s.getLabel();
     }
 
     /**
@@ -392,7 +393,7 @@ public class CertApplicationService {
      */
     private CertService.IssuePolicy parseSnapshot(CertApplication app) {
         if (app.getTemplateSnapshot() == null || app.getTemplateSnapshot().isBlank()) {
-            return snapshotOf(templateService.detailVisible(app.getTemplateId(), app.getTenantKey()));
+            return snapshotOf(templateService.detailVisible(app.getTemplateId(), app.getTenantUscc()));
         }
         try {
             JsonNode node = objectMapper.readTree(app.getTemplateSnapshot());

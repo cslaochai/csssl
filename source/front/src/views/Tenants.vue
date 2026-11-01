@@ -35,7 +35,7 @@
     <!-- 表格卡 -->
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-        <el-table-column prop="uscc" label="统一社会信用代码" class-name="cell-mono" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="uscc" label="统一社会信用代码" class-name="cell-mono" width="200" show-overflow-tooltip>
           <template #default="{ row }">{{ row.uscc || '-' }}</template>
         </el-table-column>
         <el-table-column prop="tenantName" label="租户名称" min-width="150" show-overflow-tooltip>
@@ -52,19 +52,19 @@
             <el-tag size="small" :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="根密钥状态" width="120">
+        <el-table-column label="根密钥状态" width="150">
           <template #default="{ row }">
             <el-tag v-if="row.rootKeyState" size="small" :type="rootKeyTag(row.rootKeyState)">{{ rootKeyText(row.rootKeyState) }}</el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="根CA有效期" min-width="170">
+        <el-table-column label="根CA有效期" width="350">
           <template #default="{ row }">{{ validity(row.rootValidFrom, row.rootValidTo) }}</template>
         </el-table-column>
-        <el-table-column label="二级CA有效期（SUB_CA）" min-width="170">
+        <el-table-column label="二级CA有效期（SUB_CA）" width="350">
           <template #default="{ row }">{{ validity(row.subCaValidFrom, row.subCaValidTo) }}</template>
         </el-table-column>
-        <el-table-column label="接入ID（App ID）" min-width="230" show-overflow-tooltip>
+        <el-table-column label="接入ID（App ID）" width="250" show-overflow-tooltip>
           <template #default="{ row }">
             <template v-if="row.apiAppId">
               <span class="cell-mono">{{ row.apiAppId }}</span>
@@ -73,13 +73,13 @@
             <span v-else class="cell-sub">未生成</span>
           </template>
         </el-table-column>
-        <el-table-column label="联系人" min-width="140">
+        <el-table-column label="联系人" min-width="50">
           <template #default="{ row }">
             {{ row.contact || '-' }}
             <div v-if="row.contactPhone" class="cell-sub">{{ maskPhone(row.contactPhone) }}</div>
           </template>
         </el-table-column>
-        <el-table-column align="right" label="操作" width="220" fixed="right">
+        <el-table-column align="right" label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button
               v-for="a in visibleRowActions(row)"
@@ -122,8 +122,8 @@
       </div>
     </el-card>
 
-    <!-- 新建租户 -->
-    <el-dialog v-model="createVisible" title="新建租户" width="540px" :close-on-click-modal="false">
+    <!-- 新建租户（直接执行） -->
+    <el-dialog v-model="createVisible" title="新建租户" width="680px" :close-on-click-modal="false">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="130px">
         <el-form-item label="租户名称" prop="tenantName">
           <el-input v-model="form.tenantName" placeholder="如 医保结算中心" />
@@ -138,7 +138,7 @@
           />
         </el-form-item>
         <el-form-item label="主体O" prop="subjectO">
-          <el-input v-model="form.subjectO" placeholder="该租户全部证书的主体O，如 HOSPITAL-A" />
+          <el-input v-model="form.subjectO" placeholder="该租户全部证书的主体O，如 长沙麓康医院" />
         </el-form-item>
         <el-form-item label="算法" prop="algorithm">
           <el-radio-group v-model="form.algorithm">
@@ -158,10 +158,36 @@
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button :disabled="creating" @click="createVisible = false">取消</el-button>
-          <el-button type="primary" :loading="creating" @click="onCreate">
-            {{ creating ? '正在生成独立根CA…' : '创建租户' }}
-          </el-button>
+          <el-button :disabled="submitting" @click="createVisible = false">取消</el-button>
+          <el-button type="primary" :loading="submitting" @click="onCreate">新建租户</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 其他变更（暂停/恢复/关闭/重置接入密钥） -->
+    <el-dialog v-model="opVisible" :title="opTitle" width="560px" :close-on-click-modal="false">
+      <el-alert v-if="opType === 'CLOSE'" type="error" :closable="false" show-icon
+        title="关闭后该租户停签发、停 CRL 发布、接入密钥鉴权被拒；根CA密钥与历史证书保留，可再走「申请恢复」回到启用。" class="dialog-tip" />
+      <el-alert v-else-if="opType === 'RESUME'" type="warning" :closable="false" show-icon
+        title="批准执行后该租户根CA重新可签发并进入 CRL 发布，原接入密钥（App ID）同时恢复可用。" class="dialog-tip" />
+      <el-alert v-else-if="opType === 'RESET_CREDENTIAL'" type="warning" :closable="false" show-icon
+        title="批准执行后旧接入密钥立即失效，外部系统需换成新密钥；新密钥由发起人一次性领取。" class="dialog-tip" />
+      <el-alert v-else type="info" :closable="false" show-icon
+        title="提交后需租户审批员批准才执行。" class="dialog-tip" />
+      <el-descriptions :column="1" border class="op-desc">
+        <el-descriptions-item label="目标租户">{{ opTarget?.tenantName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="统一社会信用代码"><span class="cell-mono">{{ opTarget?.uscc || '-' }}</span></el-descriptions-item>
+        <el-descriptions-item label="当前状态">{{ opTarget ? statusText(opTarget.status) : '-' }}</el-descriptions-item>
+      </el-descriptions>
+      <el-form label-width="90px" class="op-form">
+        <el-form-item label="变更事由" required>
+          <el-input v-model="opReason" type="textarea" :rows="3" maxlength="255" show-word-limit placeholder="业务依据（审批人据此核对），必填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button :disabled="submitting" @click="opVisible = false">取消</el-button>
+          <el-button type="primary" :loading="submitting" @click="onSubmitOp">提交变更单</el-button>
         </div>
       </template>
     </el-dialog>
@@ -191,7 +217,7 @@
       </el-descriptions>
     </el-dialog>
 
-    <!-- 接入凭证（仅展示一次） -->
+    <!-- 接入凭证回执（仅展示一次） -->
     <el-dialog v-model="credVisible" title="接入凭证" width="620px" :close-on-click-modal="false" @closed="cred = null">
       <el-alert
         type="warning"
@@ -208,7 +234,8 @@
           <span class="cell-mono">{{ cred.secret }}</span>
           <el-button link type="primary" size="small" @click="onCopy(cred.secret)">复制</el-button>
         </el-descriptions-item>
-        <el-descriptions-item label="绑定租户">{{ cred.tenantName || cred.tenantKey }}</el-descriptions-item>
+        <el-descriptions-item label="绑定租户">{{ cred.tenantName || cred.tenantUscc }}</el-descriptions-item>
+        <el-descriptions-item label="密钥版本">{{ cred.secretVersion ?? '-' }}</el-descriptions-item>
       </el-descriptions>
       <template #footer>
         <div class="dialog-footer">
@@ -220,27 +247,36 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { ArrowDown, Plus, Refresh, Search } from '@element-plus/icons-vue'
-import {
-  pageTenants, createTenant, suspendTenant, resumeTenant, closeTenant, resetTenantApiCredential, listTenantsCached
-} from '@/api/system'
+import { createTenant, pageTenants, submitTenantOp, listTenantsCached } from '@/api/system'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 import { hasPerm } from '@/lib/perm'
 import { copyText } from '@/lib/clipboard'
 
+const OP_TYPE_LABELS = {
+  SUSPEND: '暂停租户',
+  RESUME: '恢复租户',
+  CLOSE: '关闭租户',
+  RESET_CREDENTIAL: '重置接入密钥'
+}
+
+// ===== 租户列表 =====
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, status: '', keyword: '' })
-
-// 两卡式列表页：表格只设最大高度，超高内部滚动
 const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
 
+// ===== 弹窗 =====
 const createVisible = ref(false)
-const creating = ref(false)
+const opVisible = ref(false)
+const opType = ref('')
+const opTarget = ref(null)
+const opReason = ref('')
+const submitting = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
 const credVisible = ref(false)
@@ -249,6 +285,8 @@ const formRef = ref()
 const form = reactive({
   uscc: '', tenantName: '', subjectO: '', algorithm: 'SM2', contact: '', contactPhone: '', description: ''
 })
+
+const opTitle = computed(() => OP_TYPE_LABELS[opType.value] || '租户变更')
 
 // ===== 统一社会信用代码（GB 32100）：18 位，末位为加权和 mod 31 的校验码 =====
 const USCC_CHARSET = '0123456789ABCDEFGHJKLMNPQRTUWXY'
@@ -320,23 +358,27 @@ function onRowDetail(row) {
 // 操作列口径：前 3 个平铺，其余收进「更多」下拉
 const ACTION_VISIBLE = 3
 
+// 租户列表操作：全部是「提交变更单」，不直接执行
 function tenantActions(row) {
   const acts = [{ label: '详情', run: () => onRowDetail(row) }]
-  if (hasPerm('tenant:credential')) {
+  if (!hasPerm('tenant:op:apply')) return acts
+  if (row.status === 'ACTIVE') {
     acts.push({
-      label: row.apiAppId ? '重置接入密钥' : '生成接入凭证',
-      type: row.apiAppId ? 'primary' : 'success',
-      run: () => onResetCredential(row)
+      label: row.apiAppId ? '申请重置密钥' : '申请生成凭证',
+      type: 'primary',
+      run: () => openOp('RESET_CREDENTIAL', row)
     })
+    acts.push({ label: '申请暂停', type: 'warning', run: () => openOp('SUSPEND', row) })
   }
-  if (row.status === 'ACTIVE' && hasPerm('tenant:suspend')) {
-    acts.push({ label: '暂停', type: 'warning', run: () => onSuspend(row) })
+  if (row.status === 'SUSPENDED') {
+    acts.push({ label: '申请恢复', type: 'success', run: () => openOp('RESUME', row) })
   }
-  if (row.status === 'SUSPENDED' && hasPerm('tenant:resume')) {
-    acts.push({ label: '恢复', type: 'success', run: () => onResume(row) })
+  if (row.status === 'CLOSED') {
+    // 关闭只停服务不动密钥，同码不能再新建（唯一键占位），要重新服务这家机构只能恢复
+    acts.push({ label: '申请恢复', type: 'success', run: () => openOp('RESUME', row) })
   }
-  if (row.status !== 'CLOSED' && hasPerm('tenant:close')) {
-    acts.push({ label: '关闭', type: 'danger', run: () => onClose(row) })
+  if (row.status === 'ACTIVE') {
+    acts.push({ label: '申请关闭', type: 'danger', run: () => openOp('CLOSE', row) })
   }
   return acts
 }
@@ -349,34 +391,23 @@ function moreRowActions(row) {
   return tenantActions(row).slice(ACTION_VISIBLE)
 }
 
-function showCredential(payload) {
-  cred.value = {
-    appId: payload.appId,
-    secret: payload.secret,
-    tenantKey: payload.tenantKey,
-    tenantName: payload.tenantName
-  }
-  credVisible.value = true
-}
-
-async function onResetCredential(row) {
-  await ElMessageBox.confirm(
-    row.apiAppId
-      ? `重置后「${row.tenantName}」的旧密钥立即失效，外部系统需同步换成新密钥。`
-      : `将为「${row.tenantName}」生成 App ID 与接入密钥。`,
-    row.apiAppId ? '重置接入密钥' : '生成接入凭证',
-    { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }
-  )
-  const res = await resetTenantApiCredential(row.tenantKey)
-  showCredential({ ...res.data, tenantKey: row.tenantKey, tenantName: row.tenantName })
-  await load()
-}
-
 async function onCopy(text) {
   const ok = await copyText(text)
   ok ? ElMessage.success('已复制') : ElMessage.error('复制失败，请手动选择复制')
 }
 
+function showCredential(payload) {
+  cred.value = {
+    appId: payload.appId,
+    secret: payload.secret,
+    tenantUscc: payload.tenantUscc,
+    tenantName: payload.tenantName,
+    secretVersion: payload.secretVersion
+  }
+  credVisible.value = true
+}
+
+// ===== 租户列表加载 =====
 async function load() {
   loading.value = true
   try {
@@ -417,68 +448,69 @@ function handleCurrentChange(val) {
   load()
 }
 
+// ===== 新建租户（直接执行：建租户即建根并发放接入凭证） =====
 function openCreate() {
   Object.assign(form, {
     uscc: '', tenantName: '', subjectO: '', algorithm: 'SM2', contact: '', contactPhone: '', description: ''
   })
+  formRef.value?.clearValidate()
   createVisible.value = true
 }
 
 async function onCreate() {
   await formRef.value.validate()
-  creating.value = true
-  ElMessage.info('正在生成独立根CA，请稍候…')
+  submitting.value = true
   try {
-    const res = await createTenant({ ...form })
-    ElMessage.success('租户已创建，独立根CA与SUB_CA生成完成')
-    createVisible.value = false
-    await Promise.all([load(), listTenantsCached(true)])
-    showCredential({
-      appId: res.data?.apiAppId,
-      secret: res.data?.apiSecret,
-      tenantKey: res.data?.tenantKey,
-      tenantName: form.tenantName
+    const res = await createTenant({
+      uscc: form.uscc,
+      tenantName: form.tenantName,
+      subjectO: form.subjectO,
+      algorithm: form.algorithm,
+      contact: form.contact,
+      contactPhone: form.contactPhone,
+      description: form.description
     })
+    createVisible.value = false
+    ElMessage.success('租户已创建，独立根CA与SUB_CA已初始化')
+    showCredential(res.data || {})
+    await Promise.all([load(), listTenantsCached(true)])
   } finally {
-    creating.value = false
+    submitting.value = false
   }
 }
 
-async function onSuspend(row) {
-  await ElMessageBox.confirm(
-    `确定暂停租户「${row.tenantName}」吗？暂停后该租户停止签发与新验证请求，已签发证书与CRL仍可查询。`,
-    '暂停租户',
-    { type: 'warning', confirmButtonText: '确定暂停', cancelButtonText: '取消' }
-  )
-  await suspendTenant(row.tenantKey)
-  ElMessage.success('租户已暂停')
-  await Promise.all([load(), listTenantsCached(true)])
+// ===== 发起变更（暂停/恢复/关闭/重置接入密钥） =====
+function openOp(type, row) {
+  opType.value = type
+  opTarget.value = row
+  opReason.value = ''
+  opVisible.value = true
 }
 
-async function onResume(row) {
-  await ElMessageBox.confirm(`确定恢复租户「${row.tenantName}」吗？恢复后该租户业务操作重新开放。`, '恢复租户', { type: 'warning' })
-  await resumeTenant(row.tenantKey)
-  ElMessage.success('租户已恢复')
-  await Promise.all([load(), listTenantsCached(true)])
+async function onSubmitOp() {
+  const reason = opReason.value.trim()
+  if (!reason) {
+    ElMessage.warning('请填写变更事由')
+    return
+  }
+  submitting.value = true
+  try {
+    await submitTenantOp({
+      opType: opType.value,
+      uscc: opTarget.value.uscc,
+      reason
+    })
+    ElMessage.success(`${opTitle.value}变更单已提交，等待租户审批员批准`)
+    opVisible.value = false
+    await afterSubmit()
+  } finally {
+    submitting.value = false
+  }
 }
 
-async function onClose(row) {
-  // 关闭不可逆：二次输入租户名称确认
-  const { value } = await ElMessageBox.prompt(
-    `关闭租户「${row.tenantName}」后其根CA停用、不可再签发（不可逆）。请输入租户名称以确认：`,
-    '关闭租户',
-    {
-      type: 'error',
-      confirmButtonText: '确定关闭',
-      cancelButtonText: '取消',
-      inputPlaceholder: `输入 ${row.tenantName}`,
-      inputValidator: v => (String(v).trim() === row.tenantName ? true : '租户名称输入不一致')
-    }
-  )
-  if (String(value).trim() !== row.tenantName) return
-  await closeTenant(row.tenantKey)
-  ElMessage.success('租户已关闭')
-  await Promise.all([load(), listTenantsCached(true)])
+// 提交后刷新列表；租户状态在审批通过执行后才会变化
+async function afterSubmit() {
+  await load()
 }
 
 onMounted(load)
@@ -488,6 +520,12 @@ onMounted(load)
 .font-medium {
   font-weight: 500;
   color: #1e293b;
+}
+.dialog-tip {
+  margin-bottom: 14px;
+}
+.op-desc {
+  margin-bottom: 12px;
 }
 .cred-desc {
   margin-top: 12px;

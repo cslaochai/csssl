@@ -36,8 +36,8 @@
         <el-table-column prop="templateName" label="名称" min-width="140" />
         <el-table-column label="归属" width="110">
           <template #default="{ row }">
-            <el-tag v-if="!row.tenantKey" size="small" type="info">全局</el-tag>
-            <el-tag v-else size="small" type="warning">{{ tenantNames[row.tenantKey] || row.tenantKey }}</el-tag>
+            <el-tag v-if="!row.tenantUscc" size="small" type="info">全局</el-tag>
+            <el-tag v-else size="small" type="warning">{{ tenantNames[row.tenantUscc] || row.tenantUscc }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="类型" width="100">
@@ -84,14 +84,23 @@
           <el-input v-model="form.templateName" placeholder="如 租户通信证书" />
         </el-form-item>
         <el-form-item v-if="!editing" label="归属">
-          <template v-if="isGlobal">
-            <el-radio-group v-model="form.tenantScope">
-              <el-radio-button value="GLOBAL">全局模板</el-radio-button>
-              <el-radio-button value="ORG">当前租户域（{{ tenantDomain }}）</el-radio-button>
-            </el-radio-group>
-            <div class="tenant-tip">全局模板归属传空（全域可用）；选择租户域则仅 {{ tenantDomain }} 域可见。</div>
-          </template>
-          <el-tag v-else size="small" type="warning">租户 SECURITY_ADMIN 建模板自动归本域：{{ tenantDomain }}</el-tag>
+          <el-radio-group v-model="form.tenantScope">
+            <el-radio-button value="GLOBAL">全局模板</el-radio-button>
+            <el-radio-button value="ORG">指定租户</el-radio-button>
+          </el-radio-group>
+          <el-select
+            v-if="form.tenantScope === 'ORG'"
+            v-model="form.tenantUscc"
+            placeholder="选择租户"
+            style="width: 100%; margin-top: 8px"
+          >
+            <el-option
+              v-for="o in tenantOptions"
+              :key="o.uscc"
+              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+              :value="o.uscc"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="证书类型" required>
           <el-radio-group v-model="form.certType">
@@ -144,7 +153,7 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item label="编码">{{ detail?.templateCode }}</el-descriptions-item>
         <el-descriptions-item label="名称">{{ detail?.templateName }}</el-descriptions-item>
-        <el-descriptions-item label="归属">{{ tenantNames[detail?.tenantKey] || detail?.tenantKey || '全局模板' }}</el-descriptions-item>
+        <el-descriptions-item label="归属">{{ tenantNames[detail?.tenantUscc] || detail?.tenantUscc || '全局模板' }}</el-descriptions-item>
         <el-descriptions-item label="证书类型">{{ detail ? typeText(detail.certType) : '' }}</el-descriptions-item>
         <el-descriptions-item label="算法">{{ detail?.algorithm }}</el-descriptions-item>
         <el-descriptions-item label="有效期(天)">{{ detail?.validityDays }}</el-descriptions-item>
@@ -163,14 +172,12 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { pageTemplates, createTemplate, updateTemplate, deleteTemplate, tenantNameMap } from '@/api/system'
-import { currentTenant, isGlobalUser } from '@/lib/tenant'
+import { pageTemplates, createTemplate, updateTemplate, deleteTemplate, tenantNameMap, listTenantsCached } from '@/api/system'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
-const isGlobal = ref(isGlobalUser())
-const tenantDomain = ref(currentTenant())
 const tenantNames = ref({})
+const tenantOptions = ref([])
 
 const loading = ref(false)
 const rows = ref([])
@@ -186,7 +193,8 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const form = reactive({
   id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2',
-  validityDays: 365, keyUsageList: [], extKeyUsage: '', policyOid: '', description: '', tenantScope: 'GLOBAL'
+  validityDays: 365, keyUsageList: [], extKeyUsage: '', policyOid: '', description: '',
+  tenantScope: 'GLOBAL', tenantUscc: ''
 })
 
 function typeText(t) {
@@ -249,8 +257,9 @@ function handleCurrentChange(val) {
 function openCreate() {
   editing.value = false
   fillForm({ id: null, templateCode: '', templateName: '', certType: 'SERVER', algorithm: 'SM2', validityDays: 365, keyUsage: '', extKeyUsage: '', policyOid: '', description: '' })
-  // 全局账号默认建全局模板（tenant_key=NULL，各租户可见）；租户账号恒归本租户
-  form.tenantScope = isGlobal.value ? 'GLOBAL' : 'ORG'
+  // 缺省建全局模板；归属指定租户时按 tenantOptions 选择
+  form.tenantScope = 'GLOBAL'
+  form.tenantUscc = tenantOptions.value.find(o => o.status === 'ACTIVE')?.uscc || ''
   dialogVisible.value = true
 }
 
@@ -280,9 +289,13 @@ async function onSave() {
     policyOid: form.policyOid || '',
     description: form.description || ''
   }
-  // 建模板归属口径显式传：全局模板 tenantKey=''；租户域=当前域（租户用户由后端强制本域）
+  // 建模板归属口径显式传：全局模板 tenantUscc=''；指定租户=所选租户（租户账号由后端锁本域）
   if (!editing.value) {
-    payload.tenantKey = !isGlobal.value || form.tenantScope === 'ORG' ? tenantDomain.value : ''
+    if (form.tenantScope === 'ORG' && !form.tenantUscc) {
+      ElMessage.warning('请选择模板归属租户')
+      return
+    }
+    payload.tenantUscc = form.tenantScope === 'ORG' ? form.tenantUscc : ''
   }
   submitting.value = true
   try {
@@ -310,13 +323,6 @@ async function onDelete(row) {
 onMounted(async () => {
   load()
   tenantNames.value = await tenantNameMap()
+  tenantOptions.value = await listTenantsCached()
 })
 </script>
-
-<style scoped>
-.tenant-tip {
-  font-size: 12px;
-  color: #909399;
-  line-height: 1.6;
-}
-</style>

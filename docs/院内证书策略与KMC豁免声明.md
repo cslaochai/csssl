@@ -1,8 +1,8 @@
 # csssl 院内证书策略声明（CP/CPS 摘要）与 KMC 豁免声明
 
 > 文件性质：csssl 院内 CA 建设合规声明材料，用于密评预审 / 等保评估 / 内部审计对标的书面依据。
-> 对标标准：《GM/T 0034-2014 基于SM2密码算法的证书认证系统密码及其相关安全技术规范》《GM/T 0015-2012 数字证书格式》
-> 版本：v1.0　日期：2026-10-27　签发主体：长沙麓康医院信息科（csssl 工程）
+> 对标标准：《GM/T 0034-2014 基于SM2密码算法的证书认证系统密码及其相关安全技术规范》《GM/T 0015-2023 数字证书格式》（替代 2012 版）
+> 版本：v1.1　日期：2026-11-01　签发主体：长沙麓康医院信息科（csssl 工程）
 
 ---
 
@@ -49,6 +49,7 @@
 - subjectAlternativeName：按申请提交（DNS/IP）。
 - cRLDistributionPoints（CDP）：证书内置 CRL 下载地址（publicBaseUrl/ca/public/crl）。
 - authorityInfoAccess（AIA）：证书内置 OCSP 地址（publicBaseUrl/ca/public/ocsp）。
+- 统一社会信用代码（非关键扩展，UTF8String，18 位，遵循 GB 32100）：租户根CA 签发时写入，SUB_CA 与终端证书逐级继承，保证整条证书链可核对租户法人身份；存量 default 域不写该扩展（逐字节兼容）。扩展定义见 GM/T 0015-2023 附录A.3（UniformSocialCreditIdentifier），OID 取电子政务证书代码标识弧 `1.2.156.10260.4.1.6`，对外对接前须与该标准附录A.3、GM/T 0006-2023 第8章原文核对（不一致时仅需改 `CertUtil.USCC_EXTENSION_OID` 一处）。
 
 ### 2.3 签发流程（RA 用户注册，对应 §5.2.2）
 

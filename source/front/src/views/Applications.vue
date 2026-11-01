@@ -7,6 +7,16 @@
         <el-card ref="queryCardRef" class="query-card" shadow="never">
           <div class="query-wrap">
             <el-form :model="query" inline>
+              <el-form-item label="租户">
+                <el-select v-model="query.tenantUscc" placeholder="全部" clearable style="width: 280px" @change="handleSearch">
+                  <el-option
+                    v-for="o in tenantOptions"
+                    :key="o.uscc"
+                    :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+                    :value="o.uscc"
+                  />
+                </el-select>
+              </el-form-item>
               <el-form-item label="状态">
                 <el-select v-model="query.status" placeholder="全部" clearable style="width: 130px"
                            @change="handleSearch">
@@ -33,7 +43,6 @@
               </el-form-item>
             </el-form>
             <div class="query-actions">
-              <el-tag size="small" type="info" effect="plain">当前域：{{ tenantDomain }}</el-tag>
               <el-button v-perm="'app:submit'" type="primary" @click="openSubmit">提交申请</el-button>
             </div>
           </div>
@@ -46,7 +55,10 @@
             <el-table-column label="申请人类别" width="100">
               <template #default="{ row }">{{ row.applicantType === 'INSTITUTION' ? '单位' : '个人' }}</template>
             </el-table-column>
-            <el-table-column prop="applicantName" label="申请人/租户" min-width="140" show-overflow-tooltip/>
+            <el-table-column prop="applicantName" label="申请人" min-width="140" show-overflow-tooltip/>
+            <el-table-column label="所属租户" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ tenantNames[row.tenantUscc] || row.tenantUscc || '-' }}</template>
+            </el-table-column>
             <el-table-column label="模板" width="100">
               <template #default="{ row }">{{ templateName(row.templateId) }}</template>
             </el-table-column>
@@ -114,6 +126,16 @@
         <el-card class="query-card" shadow="never">
           <div class="query-wrap">
             <el-form :model="opQuery" inline>
+              <el-form-item label="租户">
+                <el-select v-model="opQuery.tenantUscc" placeholder="全部" clearable style="width: 280px" @change="handleOpSearch">
+                  <el-option
+                    v-for="o in tenantOptions"
+                    :key="o.uscc"
+                    :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+                    :value="o.uscc"
+                  />
+                </el-select>
+              </el-form-item>
               <el-form-item label="状态">
                 <el-select v-model="opQuery.status" placeholder="全部" clearable style="width: 130px"
                            @change="handleOpSearch">
@@ -148,9 +170,7 @@
                 <el-button :icon="Refresh" @click="handleOpReset">重置</el-button>
               </el-form-item>
             </el-form>
-            <div class="query-actions">
-              <el-tag size="small" type="info" effect="plain">当前域：{{ tenantDomain }}</el-tag>
-            </div>
+            <div class="query-actions"></div>
           </div>
         </el-card>
 
@@ -163,6 +183,9 @@
               </template>
             </el-table-column>
             <el-table-column prop="certSubjectCn" label="证书主体" min-width="160" show-overflow-tooltip/>
+            <el-table-column label="所属租户" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ tenantNames[row.tenantUscc] || row.tenantUscc || '-' }}</template>
+            </el-table-column>
             <el-table-column prop="certSerialHex" label="序列号" class-name="cell-mono" min-width="150"
                              show-overflow-tooltip/>
             <el-table-column label="操作原因" min-width="130">
@@ -215,6 +238,16 @@
     <!-- 提交申请 -->
     <el-dialog v-model="submitVisible" title="提交证书申请（录入员代录）" width="680px" :close-on-click-modal="false">
       <el-form :model="submitForm" label-width="150px">
+        <el-form-item label="目标租户" required>
+          <el-select v-model="submitTenant" style="width: 100%" placeholder="选择租户" @change="onSubmitTenantChange">
+            <el-option
+              v-for="o in tenantOptions"
+              :key="o.uscc"
+              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+              :value="o.uscc"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="申请人类别" required>
           <el-radio-group v-model="submitForm.applicantType">
             <el-radio-button value="INSTITUTION">单位</el-radio-button>
@@ -235,9 +268,8 @@
           <el-input v-model="submitCn" placeholder="如 张三 / his.yibao.local"/>
         </el-form-item>
         <el-form-item label="主体O" required>
-          <el-input v-model="submitO" :disabled="isTenantDomain"
-                    :placeholder="isTenantDomain ? '取租户受控主体（自动）' : '如 长沙麓康医院'"/>
-          <div v-if="isTenantDomain" class="dn-tip">租户域「{{ tenantDomain }}」：O 由租户档案受控，禁手填防冒名。</div>
+          <el-input v-model="submitO" disabled placeholder="取所选租户受控主体（自动）"/>
+          <div class="dn-tip">O 由所选租户档案受控，禁手填防冒名。</div>
         </el-form-item>
         <el-form-item label="主体OU">
           <el-input v-model="submitOu" placeholder="选填：员工编号等不变信息（科室等易变属性勿填）"/>
@@ -326,7 +358,8 @@
             detail?.applicantType === 'INSTITUTION' ? '单位' : '个人'
           }}
         </el-descriptions-item>
-        <el-descriptions-item label="申请人/租户">{{ detail?.applicantName }}</el-descriptions-item>
+        <el-descriptions-item label="申请人">{{ detail?.applicantName }}</el-descriptions-item>
+        <el-descriptions-item label="所属租户">{{ tenantNames[detail?.tenantUscc] || detail?.tenantUscc || '-' }}</el-descriptions-item>
         <el-descriptions-item label="证书模板">{{
             detail ? templateName(detail.templateId) : ''
           }}
@@ -355,7 +388,7 @@
 </template>
 
 <script setup>
-import {computed, onMounted, reactive, ref} from 'vue'
+import {onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {ArrowDown, Refresh, Search} from '@element-plus/icons-vue'
 import {
@@ -370,9 +403,9 @@ import {
   pageTemplates,
   rejectApplication,
   rejectCertOp,
-  submitApplication
+  submitApplication,
+  tenantNameMap
 } from '@/api/system'
-import {currentTenant} from '@/lib/tenant'
 import {hasPerm} from '@/lib/perm'
 import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
 import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
@@ -381,7 +414,7 @@ const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const templates = ref([])
-const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, status: '', keyword: ''})
+const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, tenantUscc: '', status: '', keyword: ''})
 
 // 页签：证书申请 / 证书操作审批
 const activeTab = ref('apply')
@@ -390,7 +423,7 @@ const activeTab = ref('apply')
 const opLoading = ref(false)
 const opRows = ref([])
 const opTotal = ref(0)
-const opQuery = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, status: '', opType: '', keyword: ''})
+const opQuery = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, tenantUscc: '', status: '', opType: '', keyword: ''})
 const opReviewVisible = ref(false)
 const opReviewAction = ref('approve')
 const opReviewComment = ref('')
@@ -434,12 +467,12 @@ function opStatusTag(s) {
 // 两卡式列表页：表格只设最大高度，超高内部滚动
 const {queryCardRef, footerRef, tableMaxHeight} = useTableMaxHeight()
 
-// 租户域：列表/审批/签发请求由 request 封装自动附带 tenantKey=currentTenant()
-const tenantDomain = ref(currentTenant())
-// 主体 DN 的 O 由受理租户受控（前端拼 DN；subjectO 从租户注册表取，租户域禁手填防冒名）；
+// 租户域由页面显式选择：列表可留空=跨租户只读，提交/审批/签发票据按行归属租户
+const tenantOptions = ref([])
+const tenantNames = ref({})
+const submitTenant = ref('')
+// 主体 DN 的 O 由受理租户受控（前端拼 DN；subjectO 从租户注册表取，禁手填防冒名）；
 // OU 选填，口径=员工编号等不变信息，科室等易变属性不进 DN
-const tenantSubjectO = ref('')
-const isTenantDomain = computed(() => !!tenantDomain.value)
 const submitCn = ref('')
 const submitO = ref('')
 const submitOu = ref('')
@@ -487,6 +520,7 @@ async function load() {
     const res = await pageApplications({
       pageNo: query.pageNo,
       pageSize: query.pageSize,
+      tenantUscc: query.tenantUscc || undefined,
       status: query.status || undefined,
       keyword: query.keyword || undefined
     })
@@ -505,6 +539,7 @@ function handleSearch() {
 }
 
 function handleReset() {
+  query.tenantUscc = ''
   query.status = ''
   query.keyword = ''
   handleSearch()
@@ -521,13 +556,24 @@ function handleCurrentChange(val) {
   load()
 }
 
+function submitSubjectOOf(uscc) {
+  return tenantOptions.value.find(o => o.uscc === uscc)?.subjectO || ''
+}
+
+function onSubmitTenantChange() {
+  submitO.value = submitSubjectOOf(submitTenant.value)
+}
+
 function openSubmit() {
   Object.assign(submitForm, {
     applicantType: 'PERSON', applicantName: '', templateId: null,
     subjectDn: '', san: '', publicKeyPem: '', description: ''
   })
+  submitTenant.value = query.tenantUscc
+      || tenantOptions.value.find(o => o.status === 'ACTIVE')?.uscc
+      || tenantOptions.value[0]?.uscc || ''
   submitCn.value = ''
-  submitO.value = tenantSubjectO.value || ''
+  submitO.value = submitSubjectOOf(submitTenant.value)
   submitOu.value = ''
   submitVisible.value = true
 }
@@ -536,12 +582,12 @@ async function onSubmit() {
   const cn = submitCn.value.trim()
   const o = submitO.value.trim()
   const ou = submitOu.value.trim()
-  if (!cn || !o) {
-    ElMessage.warning('请填写主体CN与主体O')
+  if (!submitTenant.value) {
+    ElMessage.warning('请选择目标租户')
     return
   }
-  if (isTenantDomain.value && !tenantSubjectO.value) {
-    ElMessage.warning('未取到受理租户的受控主体O，请先在租户管理确认租户档案')
+  if (!cn || !o) {
+    ElMessage.warning('请填写主体CN（主体O 取所选租户受控主体）')
     return
   }
   submitForm.subjectDn = `CN=${cn},O=${o}` + (ou ? `,OU=${ou}` : '')
@@ -551,7 +597,7 @@ async function onSubmit() {
   }
   submitting.value = true
   try {
-    await submitApplication({...submitForm})
+    await submitApplication({...submitForm}, submitTenant.value)
     ElMessage.success('申请已提交，等待审核员审批')
     submitVisible.value = false
     load()
@@ -577,10 +623,10 @@ async function onReviewConfirm() {
   submitting.value = true
   try {
     if (reviewAction.value === 'approve') {
-      await approveApplication(reviewTarget.id, reviewComment.value)
+      await approveApplication(reviewTarget.id, reviewComment.value, reviewTarget.tenantUscc)
       ElMessage.success('已批准，可进入签发环节')
     } else {
-      await rejectApplication(reviewTarget.id, reviewComment.value)
+      await rejectApplication(reviewTarget.id, reviewComment.value, reviewTarget.tenantUscc)
       ElMessage.success('已驳回')
     }
     reviewVisible.value = false
@@ -594,7 +640,7 @@ async function onIssue(row) {
   await ElMessageBox.confirm(`按申请单 ${row.applyNo} 签发证书？私钥由申请方自持，CA 不落盘。`, '提示', {type: 'warning'})
   submitting.value = true
   try {
-    const res = await issueApplication(row.id)
+    const res = await issueApplication(row.id, row.tenantUscc)
     ElMessage.success(`签发成功，证书 id=${res.data.id}（序列号 ${res.data.serialHex}）`)
     load()
   } finally {
@@ -604,7 +650,7 @@ async function onIssue(row) {
 
 async function onCancel(row) {
   await ElMessageBox.confirm(`确定撤销申请单 ${row.applyNo} 吗？`, '提示', {type: 'warning'})
-  await cancelApplication(row.id)
+  await cancelApplication(row.id, row.tenantUscc)
   ElMessage.success('申请已撤销')
   load()
 }
@@ -657,6 +703,7 @@ async function loadOps() {
     const res = await pageCertOps({
       pageNo: opQuery.pageNo,
       pageSize: opQuery.pageSize,
+      tenantUscc: opQuery.tenantUscc || undefined,
       status: opQuery.status || undefined,
       opType: opQuery.opType || undefined,
       keyword: opQuery.keyword || undefined
@@ -676,6 +723,7 @@ function handleOpSearch() {
 }
 
 function handleOpReset() {
+  opQuery.tenantUscc = ''
   opQuery.status = ''
   opQuery.opType = ''
   opQuery.keyword = ''
@@ -727,10 +775,10 @@ async function onOpReviewConfirm() {
   submitting.value = true
   try {
     if (opReviewAction.value === 'approve') {
-      await approveCertOp(opReviewTarget.value.id, opReviewComment.value)
+      await approveCertOp(opReviewTarget.value.id, opReviewComment.value, opReviewTarget.value.tenantUscc)
       ElMessage.success('已批准并执行（证书状态已流转，CRL/OCSP 同步生效）')
     } else {
-      await rejectCertOp(opReviewTarget.value.id, opReviewComment.value)
+      await rejectCertOp(opReviewTarget.value.id, opReviewComment.value, opReviewTarget.value.tenantUscc)
       ElMessage.success('已驳回')
     }
     opReviewVisible.value = false
@@ -742,18 +790,16 @@ async function onOpReviewConfirm() {
 
 async function onOpCancel(row) {
   await ElMessageBox.confirm(`确定撤销操作单 ${row.opNo} 吗？`, '提示', {type: 'warning'})
-  await cancelCertOp(row.id)
+  await cancelCertOp(row.id, row.tenantUscc)
   ElMessage.success('操作单已撤销')
   loadOps()
 }
 
 onMounted(async () => {
   loadTemplates()
+  tenantOptions.value = await listTenantsCached()
+  tenantNames.value = await tenantNameMap()
   load()
-  if (tenantDomain.value) {
-    const hit = (await listTenantsCached()).find(o => o.tenantKey === tenantDomain.value)
-    tenantSubjectO.value = hit?.subjectO || ''
-  }
 })
 </script>
 

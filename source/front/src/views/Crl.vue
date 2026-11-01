@@ -7,6 +7,16 @@
         <el-card ref="queryCardRef" class="query-card" shadow="never">
           <div class="query-wrap">
             <el-form :model="query" inline>
+              <el-form-item label="租户">
+                <el-select v-model="tenantDomain" placeholder="选择租户" style="width: 300px" @change="onTenantChange">
+                  <el-option
+                    v-for="o in tenantOptions"
+                    :key="o.uscc"
+                    :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+                    :value="o.uscc"
+                  />
+                </el-select>
+              </el-form-item>
               <el-form-item label="状态">
                 <el-select v-model="query.status" clearable placeholder="全部" style="width: 130px" @change="handleSearch">
                   <el-option label="已吊销" value="REVOKED" />
@@ -34,7 +44,6 @@
               </el-form-item>
             </el-form>
             <div class="query-actions">
-              <el-tag size="small" type="info" effect="plain">当前域：{{ tenantDomain }}</el-tag>
               <el-button v-perm="'crl:download'" type="primary" :icon="Download" :loading="crlLoading" @click="onDownloadCrl">下载 CRL</el-button>
             </div>
           </div>
@@ -148,14 +157,14 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Refresh, Search } from '@element-plus/icons-vue'
-import { getCrlView, pageCrlRecords, downloadCrl, getDeltaCrl } from '@/api/system'
+import { getCrlView, pageCrlRecords, downloadCrl, getDeltaCrl, listTenantsCached } from '@/api/system'
 import { downloadText } from '@/lib/download'
-import { currentTenant } from '@/lib/tenant'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
-// 全量/dCRL 均按租户域取数（api 缺省 tenantKey=currentTenant()，页面随域切换重建）
-const tenantDomain = ref(currentTenant())
+// CRL 按租户独立发布：页面内显式选择租户域
+const tenantDomain = ref('')
+const tenantOptions = ref([])
 
 const activeTab = ref('full')
 const loading = ref(false)
@@ -205,7 +214,8 @@ async function loadRecords() {
       pageSize: query.pageSize,
       status: query.status || undefined,
       reason: query.reason || undefined,
-      keyword: query.keyword.trim() || undefined
+      keyword: query.keyword.trim() || undefined,
+      tenantUscc: tenantDomain.value || undefined
     })
     rows.value = res.data?.records || []
     total.value = res.data?.total || 0
@@ -218,7 +228,7 @@ async function loadRecords() {
 
 async function loadView() {
   try {
-    const res = await getCrlView()
+    const res = await getCrlView(tenantDomain.value)
     crlPem.value = res.data.crlPem || ''
     meta.value = {
       issuerCn: res.data.issuerCn,
@@ -257,7 +267,7 @@ function handleCurrentChange(val) {
 async function loadDelta() {
   deltaLoading.value = true
   try {
-    const res = await getDeltaCrl()
+    const res = await getDeltaCrl(tenantDomain.value)
     delta.value = res.data || {}
     deltaLoaded.value = true
   } catch (e) {
@@ -296,9 +306,23 @@ async function onDownloadDelta() {
   }
 }
 
-onMounted(() => {
-  loadRecords()
-  loadView()
+async function onTenantChange() {
+  query.pageNo = 1
+  crlPem.value = ''
+  meta.value = {}
+  delta.value = {}
+  deltaLoaded.value = false
+  await Promise.all([loadRecords(), loadView()])
+  if (activeTab.value === 'delta') await loadDelta()
+}
+
+onMounted(async () => {
+  tenantOptions.value = await listTenantsCached()
+  const active = tenantOptions.value.find(t => t.status === 'ACTIVE') || tenantOptions.value[0]
+  tenantDomain.value = active?.uscc || ''
+  if (tenantDomain.value) {
+    await Promise.all([loadRecords(), loadView()])
+  }
 })
 </script>
 

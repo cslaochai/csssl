@@ -6,6 +6,7 @@ import com.csssl.config.CssslProperties;
 import com.csssl.dto.ApiApplicationSubmitDTO;
 import com.csssl.dto.ApplicationSubmitDTO;
 import com.csssl.entity.*;
+import com.csssl.enums.CertApplicationStatusEnum;
 import com.csssl.mapper.CaCertMapper;
 import com.csssl.mapper.CertApplicationMapper;
 import com.csssl.mapper.CertTemplateMapper;
@@ -25,7 +26,7 @@ import java.util.List;
 /**
  * 对外证书申请 API（HIS 等外部系统直连 RA）。
  *
- * <p>数据域铁律：租户一律取 {@link ApiClient#getTenantKey()}（由 HMAC 鉴权后的 appId 反查），
+ * <p>数据域铁律：租户一律取 {@link ApiClient#getTenantUscc()}（由 HMAC 鉴权后的 appId 反查），
  * 请求 URL 与请求体都不接受租户参数；客户端只能看到自己（同 appId）提交的申请单。</p>
  *
  * <p>幂等：同租户同 appId 下 externalRequestId 唯一，请求体 SHA-256 作为指纹；
@@ -54,14 +55,8 @@ public class CaApiService {
         if (status == null) {
             return "未知";
         }
-        return switch (status) {
-            case CertApplicationService.ST_PENDING -> "待审核";
-            case CertApplicationService.ST_APPROVED -> "已批准";
-            case CertApplicationService.ST_REJECTED -> "已驳回";
-            case CertApplicationService.ST_ISSUED -> "已签发";
-            case CertApplicationService.ST_CANCELLED -> "已撤销";
-            default -> status;
-        };
+        CertApplicationStatusEnum s = CertApplicationStatusEnum.fromCode(status);
+        return s == null ? status : s.getLabel();
     }
 
     private static String certStatusText(String status) {
@@ -108,7 +103,7 @@ public class CaApiService {
      * 信任材料：根/中间证书 PEM 与 CRL/OCSP 地址（按 appId 绑定租户生成，调用方无需知道租户标识）。
      */
     public ApiTrustVO trust(ApiClient client) {
-        String tenant = client.getTenantKey();
+        String tenant = client.getTenantUscc();
         String base = props.getPublicBaseUrl().replaceAll("/+$", "");
         ApiTrustVO vo = new ApiTrustVO();
         vo.setRootPem(caService.exportRootPem(tenant));
@@ -123,9 +118,9 @@ public class CaApiService {
      * 可用模板：全局模板 ∪ 本租户模板，排除 SUB_CA（二级CA不走 RA）。
      */
     public List<ApiTemplateVO> templates(ApiClient client, String certType) {
-        String tenant = client.getTenantKey();
+        String tenant = client.getTenantUscc();
         LambdaQueryWrapper<CertTemplate> qw = new LambdaQueryWrapper<CertTemplate>()
-                .and(w -> w.isNull(CertTemplate::getTenantKey).or().eq(CertTemplate::getTenantKey, tenant))
+                .and(w -> w.isNull(CertTemplate::getTenantUscc).or().eq(CertTemplate::getTenantUscc, tenant))
                 .ne(CertTemplate::getCertType, "SUB_CA");
         if (certType != null && !certType.isBlank()) {
             String type = certType.trim().toUpperCase();
@@ -146,7 +141,7 @@ public class CaApiService {
      * 提交申请：幂等命中即返回首次结果；否则经 RA 同一套校验落 PENDING 单。
      */
     public ApiApplicationVO submit(ApiClient client, ApiApplicationSubmitDTO body, String requestHash, String ip) {
-        String tenant = client.getTenantKey();
+        String tenant = client.getTenantUscc();
         CertApplication existing = findExternal(tenant, client.getAppId(), body.getExternalRequestId());
         if (existing != null) {
             return replayOrConflict(existing, requestHash);
@@ -154,7 +149,7 @@ public class CaApiService {
         CertTemplate tpl = resolveTemplate(tenant, body.getTemplateCode());
 
         ApplicationSubmitDTO dto = new ApplicationSubmitDTO();
-        dto.setTenantKey(tenant);
+        dto.setTenantUscc(tenant);
         dto.setApplicantType(body.getApplicantType());
         dto.setApplicantName(body.getApplicantName());
         dto.setSubjectDn(body.getSubjectDn());
@@ -193,7 +188,7 @@ public class CaApiService {
      * 按 externalRequestId 查询（仅本客户端提交的单）
      */
     public ApiApplicationVO detailByExternalRequestId(ApiClient client, String externalRequestId) {
-        CertApplication app = findExternal(client.getTenantKey(), client.getAppId(), externalRequestId);
+        CertApplication app = findExternal(client.getTenantUscc(), client.getAppId(), externalRequestId);
         if (app == null) {
             throw new ApiException(404, "申请单不存在（externalRequestId=" + externalRequestId + "）");
         }
@@ -205,15 +200,15 @@ public class CaApiService {
      */
     public ApiApplicationVO cancel(ApiClient client, String applyNo, String reason, String ip) {
         CertApplication app = requireApplication(client, applyNo);
-        if (CertApplicationService.ST_CANCELLED.equals(app.getStatus())) {
+        if (CertApplicationStatusEnum.CANCELLED.is(app.getStatus())) {
             return toVo(app, false);
         }
-        if (!CertApplicationService.ST_PENDING.equals(app.getStatus())
-                && !CertApplicationService.ST_APPROVED.equals(app.getStatus())) {
-            throw new ApiException(409, "申请单当前状态为 " + app.getStatus() + "，不可撤销");
+        if (!CertApplicationStatusEnum.PENDING.is(app.getStatus())
+                && !CertApplicationStatusEnum.APPROVED.is(app.getStatus())) {
+            throw new ApiException(409, "申请单当前状态为 " + applicationStatusText(app.getStatus()) + "，不可撤销");
         }
         CertApplication cancelled = applicationService.cancel(app.getId(), apiUsername(client), null, ip,
-                client.getTenantKey(), reason);
+                client.getTenantUscc(), reason);
         return toVo(cancelled, false);
     }
 
@@ -222,10 +217,10 @@ public class CaApiService {
      */
     public CertificateDownload download(ApiClient client, String applyNo, boolean includeChain) {
         CertApplication app = requireApplication(client, applyNo);
-        if (!CertApplicationService.ST_ISSUED.equals(app.getStatus()) || app.getIssuedCertId() == null) {
-            throw new ApiException(409, "申请单当前状态为 " + app.getStatus() + "，证书尚未签发");
+        if (!CertApplicationStatusEnum.ISSUED.is(app.getStatus()) || app.getIssuedCertId() == null) {
+            throw new ApiException(409, "申请单当前状态为 " + applicationStatusText(app.getStatus()) + "，证书尚未签发");
         }
-        CaCert cert = requireCertOfTenant(app.getIssuedCertId(), client.getTenantKey());
+        CaCert cert = requireCertOfTenant(app.getIssuedCertId(), client.getTenantUscc());
         X509Certificate leaf;
         try {
             leaf = PemUtil.parseCert(cert.getCertPem());
@@ -234,7 +229,7 @@ public class CaApiService {
         }
         String pem = cert.getCertPem();
         if (includeChain) {
-            pem = certService.certPem(cert.getId()) + caService.exportRootPem(client.getTenantKey());
+            pem = certService.certPem(cert.getId()) + caService.exportRootPem(client.getTenantUscc());
         }
         return new CertificateDownload(pem, cert.getSerialHex(), fingerprint(leaf), TS.format(cert.getValidTo()));
     }
@@ -245,7 +240,7 @@ public class CaApiService {
     public ApiCertStatusVO certStatus(ApiClient client, String serialHex) {
         String serial = normalizeSerial(serialHex);
         CaCert cert = certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getTenantKey, client.getTenantKey())
+                .eq(CaCert::getTenantUscc, client.getTenantUscc())
                 .eq(CaCert::getSerialHex, serial)
                 .last("LIMIT 1"));
         if (cert == null) {
@@ -268,8 +263,8 @@ public class CaApiService {
     private CertTemplate resolveTemplate(String tenant, String templateCode) {
         List<CertTemplate> rows = templateMapper.selectList(new LambdaQueryWrapper<CertTemplate>()
                 .eq(CertTemplate::getTemplateCode, templateCode)
-                .and(w -> w.isNull(CertTemplate::getTenantKey).or().eq(CertTemplate::getTenantKey, tenant))
-                .orderByDesc(CertTemplate::getTenantKey));
+                .and(w -> w.isNull(CertTemplate::getTenantUscc).or().eq(CertTemplate::getTenantUscc, tenant))
+                .orderByDesc(CertTemplate::getTenantUscc));
         if (rows.isEmpty()) {
             throw new ApiException(422, "模板不存在或对本租户不可用：" + templateCode);
         }
@@ -282,7 +277,7 @@ public class CaApiService {
 
     private CertApplication findExternal(String tenant, String appId, String externalRequestId) {
         return applicationMapper.selectOne(new LambdaQueryWrapper<CertApplication>()
-                .eq(CertApplication::getTenantKey, tenant)
+                .eq(CertApplication::getTenantUscc, tenant)
                 .eq(CertApplication::getExternalSystem, appId)
                 .eq(CertApplication::getExternalRequestId, externalRequestId)
                 .last("LIMIT 1"));
@@ -290,7 +285,7 @@ public class CaApiService {
 
     private CertApplication requireApplication(ApiClient client, String applyNo) {
         CertApplication app = applicationMapper.selectOne(new LambdaQueryWrapper<CertApplication>()
-                .eq(CertApplication::getTenantKey, client.getTenantKey())
+                .eq(CertApplication::getTenantUscc, client.getTenantUscc())
                 .eq(CertApplication::getExternalSystem, client.getAppId())
                 .eq(CertApplication::getApplyNo, applyNo)
                 .last("LIMIT 1"));
@@ -302,8 +297,8 @@ public class CaApiService {
 
     private CaCert requireCertOfTenant(Long certId, String tenant) {
         CaCert cert = certService.findById(certId);
-        String rowTenant = cert.getTenantKey() == null || cert.getTenantKey().isBlank()
-                ? CaTenant.PRIMARY_TENANT_KEY : cert.getTenantKey();
+        String rowTenant = cert.getTenantUscc() == null || cert.getTenantUscc().isBlank()
+                ? CaTenant.PRIMARY_TENANT_USCC : cert.getTenantUscc();
         if (!tenant.equals(rowTenant)) {
             throw new ApiException(403, "证书不属于当前客户端租户");
         }
@@ -333,7 +328,7 @@ public class CaApiService {
         vo.setReviewedByName(app.getReviewedByName());
         vo.setReviewComment(app.getReviewComment());
         vo.setIdempotentReplay(replay);
-        if (CertApplicationService.ST_ISSUED.equals(app.getStatus()) && app.getIssuedCertId() != null) {
+        if (CertApplicationStatusEnum.ISSUED.is(app.getStatus()) && app.getIssuedCertId() != null) {
             CaCert cert = certMapper.selectById(app.getIssuedCertId());
             if (cert != null) {
                 vo.setIssuedAt(cert.getCreatedAt());

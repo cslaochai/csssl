@@ -1,6 +1,5 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { currentTenant } from '@/lib/tenant'
 
 // CSSSL 后端 context-path 为 /ssl（vite 代理 /ssl → http://localhost:8092）
 const request = axios.create({
@@ -43,37 +42,12 @@ function httpStatusFallback(status) {
   return map[status] || `请求失败（${status}）`
 }
 
-// 全域业务接口路径：GET 自动附加 ?tenantKey=（当前租户域）；POST 后端口径统一从 @RequestParam（query）读，
-// 部分 DTO 另收 body.tenantKey 做兜底——因此 POST 同时补 query 与 body 两处；
-// /admin/tenants（租户管理本身）与 /admin/users（归属需显式口径）不参与自动注入
-const TENANT_BIZ_RE = /^\/admin\/(ca|certs|cert-ops|applications|templates|audit|crl)(\/|$)/
-
+// 租户域一律由调用页显式传 tenantUscc：列表不传=跨租户只读，写操作不传由后端 fail-closed。
 request.interceptors.request.use(
   config => {
     const token = localStorage.getItem('token')
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`
-    }
-    const url = config.url || ''
-    if (TENANT_BIZ_RE.test(url) && !url.startsWith('/admin/tenants')) {
-      const tenant = currentTenant()
-      const method = (config.method || '').toLowerCase()
-      if (tenant && method === 'get') {
-        const params = config.params || {}
-        if (params.tenantKey === undefined) {
-          config.params = { ...params, tenantKey: tenant }
-        }
-      } else if (tenant && method === 'post') {
-        // 调用方显式带 tenantKey（含空串=全局口径）时不覆盖
-        if (config.params?.tenantKey === undefined) {
-          config.params = { ...(config.params || {}), tenantKey: tenant }
-        }
-        const data = config.data
-        const isPlain = data === undefined || data === null || (typeof data === 'object' && !Array.isArray(data))
-        if (isPlain && !(data && 'tenantKey' in data)) {
-          config.data = { ...(data || {}), tenantKey: tenant }
-        }
-      }
     }
     return config
   },
@@ -122,7 +96,7 @@ request.interceptors.response.use(
           localStorage.removeItem('role')
           localStorage.removeItem('roleName')
           localStorage.removeItem('perms')
-          localStorage.removeItem('tenantKey')
+          localStorage.removeItem('tenantUscc')
           localStorage.removeItem('caDomain')
           if (!redirectingToLogin) {
             redirectingToLogin = true

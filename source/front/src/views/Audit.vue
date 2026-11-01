@@ -4,6 +4,16 @@
     <el-card ref="queryCardRef" class="query-card" shadow="never">
       <div class="query-wrap">
         <el-form :model="query" inline>
+          <el-form-item label="租户">
+            <el-select v-model="tenantDomain" placeholder="全部" clearable style="width: 300px" @change="handleSearch">
+              <el-option
+                v-for="o in tenantOptions"
+                :key="o.uscc"
+                :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
+                :value="o.uscc"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="操作类型">
             <el-select v-model="action" placeholder="全部" clearable style="width: 160px" @change="handleSearch">
               <el-option v-for="item in actions" :key="item.value" :label="item.label" :value="item.value" />
@@ -15,7 +25,6 @@
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-tag size="small" type="info" effect="plain">当前域：{{ tenantDomain }}</el-tag>
           <el-button v-perm="'audit:chain'" type="warning" plain @click="openChain">链对账</el-button>
           <el-button v-perm="'audit:export'" type="primary" plain :loading="exporting" @click="onExport">导出归档CSV</el-button>
         </div>
@@ -28,8 +37,8 @@
         <el-table-column prop="username" label="操作人" width="130" />
         <el-table-column label="租户" width="110">
           <template #default="{ row }">
-            <el-tag v-if="!row.tenantKey" size="small" type="info">全局</el-tag>
-            <span v-else class="mono-cell">{{ tenantNames[row.tenantKey] || row.tenantKey }}</span>
+            <el-tag v-if="!row.tenantUscc" size="small" type="info">全局</el-tag>
+            <span v-else class="mono-cell">{{ tenantNames[row.tenantUscc] || row.tenantUscc }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="130">
@@ -67,7 +76,7 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item label="时间">{{ detail?.createdAt }}</el-descriptions-item>
         <el-descriptions-item label="操作人">{{ detail?.username }}</el-descriptions-item>
-        <el-descriptions-item label="租户">{{ tenantNames[detail?.tenantKey] || detail?.tenantKey || '全局' }}</el-descriptions-item>
+        <el-descriptions-item label="租户">{{ tenantNames[detail?.tenantUscc] || detail?.tenantUscc || '全局' }}</el-descriptions-item>
         <el-descriptions-item label="操作类型">{{ detail ? actionText(detail.action) : '' }}</el-descriptions-item>
         <el-descriptions-item label="对象">{{ detail?.target || '-' }}</el-descriptions-item>
         <el-descriptions-item label="来源IP">{{ detail?.ip || '-' }}</el-descriptions-item>
@@ -175,14 +184,14 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { Refresh, Search } from '@element-plus/icons-vue'
-import { pageAudit, verifyAuditLog, exportAuditCsv, chainVerify, tenantNameMap } from '@/api/system'
+import { pageAudit, verifyAuditLog, exportAuditCsv, chainVerify, tenantNameMap, listTenantsCached } from '@/api/system'
 import { downloadText } from '@/lib/download'
-import { currentTenant } from '@/lib/tenant'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
 import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
 
-// 列表/导出/对账请求由 request 封装自动附带 tenantKey=currentTenant()（租户域过滤）
-const tenantDomain = ref(currentTenant())
+// 审计为监督职能：租户筛选可留空=跨租户全量只读
+const tenantDomain = ref('')
+const tenantOptions = ref([])
 const tenantNames = ref({})
 
 const loading = ref(false)
@@ -241,10 +250,16 @@ const actions = [
   { value: 'TEMPLATE_CREATE', label: '创建模板' },
   { value: 'TEMPLATE_UPDATE', label: '更新模板' },
   { value: 'TEMPLATE_DELETE', label: '删除模板' },
-  { value: 'TENANT_CREATE', label: '创建租户' },
-  { value: 'TENANT_SUSPEND', label: '暂停租户' },
-  { value: 'TENANT_RESUME', label: '恢复租户' },
-  { value: 'TENANT_CLOSE', label: '关闭租户' }
+  { value: 'TENANT_OP_SUBMIT', label: '发起租户变更单' },
+  { value: 'TENANT_OP_APPROVE', label: '批准租户变更单' },
+  { value: 'TENANT_OP_REJECT', label: '驳回租户变更单' },
+  { value: 'TENANT_OP_CANCEL', label: '撤回租户变更单' },
+  { value: 'TENANT_OP_RECEIPT', label: '领取接入凭证回执' },
+  { value: 'TENANT_CREATE', label: '新建租户' },
+  { value: 'TENANT_SUSPEND', label: '暂停租户（执行）' },
+  { value: 'TENANT_RESUME', label: '恢复租户（执行）' },
+  { value: 'TENANT_CLOSE', label: '关闭租户（执行）' },
+  { value: 'TENANT_CREDENTIAL_RESET', label: '重置接入密钥（执行）' }
 ]
 
 function actionText(a) {
@@ -275,7 +290,7 @@ async function onVerify(row) {
 async function onExport() {
   exporting.value = true
   try {
-    const res = await exportAuditCsv()
+    const res = await exportAuditCsv(tenantDomain.value || undefined)
     const data = res.data
     downloadText(data.csv, `audit-export-${new Date().toISOString().slice(0, 10)}.csv`)
     exportSign.value = data.sign
@@ -309,7 +324,8 @@ async function load() {
     const res = await pageAudit({
       pageNo: query.pageNo,
       pageSize: query.pageSize,
-      action: action.value || undefined
+      action: action.value || undefined,
+      tenantUscc: tenantDomain.value || undefined
     })
     rows.value = res.data.records || []
     total.value = res.data.total || 0
@@ -327,6 +343,7 @@ function handleSearch() {
 
 function handleReset() {
   action.value = ''
+  tenantDomain.value = ''
   handleSearch()
 }
 
@@ -344,6 +361,7 @@ function handleCurrentChange(val) {
 onMounted(async () => {
   load()
   tenantNames.value = await tenantNameMap()
+  tenantOptions.value = await listTenantsCached()
 })
 </script>
 

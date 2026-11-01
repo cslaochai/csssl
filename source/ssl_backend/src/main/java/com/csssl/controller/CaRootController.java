@@ -27,11 +27,11 @@ import java.util.List;
 
 /**
  * 根CA管理接口（需登录）：状态查询、初始化、根密钥封存/解封、Shamir(3,5) 门限分持、证书导出。
- * 路线A多租户：全部接受 tenantKey 参数（缺省=平台主租户，存量调用零破坏）；
+ * 路线A多租户：全部接受 tenantUscc 参数（缺省=平台主租户，存量调用零破坏）；
  * 读操作要求租户存在（存量单根标识 default 不依赖租户表记录，保证首启顺序无关），写操作额外要求租户 ACTIVE。
  *
  * <p>数据域强制（effectiveTenant 口径）：租户 ADMIN/租户 KEY_ADMIN 一律锁本租户（显式请求别租户 403）；
- * 全局 ADMIN/KEY_ADMIN 须显式传 tenantKey，缺省只落平台主租户——跨租户密钥域操作必须逐租户显式传参，
+ * 全局 ADMIN/KEY_ADMIN 须显式传 tenantUscc，缺省只落平台主租户——跨租户密钥域操作必须逐租户显式传参，
  * 不存在"全部租户"写旁路。fail-closed：SUSPENDED/CLOSED 租户只读放行（status/download/shares 查看），
  * init/seal/unseal/migrate/unseal-shares 等密钥形态写操作经 checkTenantForWrite 拒绝。</p>
  */
@@ -46,9 +46,9 @@ public class CaRootController {
 
     /** 根CA状态（含 SUB_CA 与根密钥封存/门限状态）；租户用户锁本租户 */
     @GetMapping("/status")
-    public Result<CaStatusVO> status(@RequestParam(required = false) String tenantKey,
+    public Result<CaStatusVO> status(@RequestParam(required = false) String tenantUscc,
                                      HttpServletRequest request) {
-        String tenant = TenantScope.effectiveTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.effectiveTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForRead(tenant);
         return Result.success("查询成功", caService.status(tenant));
     }
@@ -56,9 +56,9 @@ public class CaRootController {
     /** 初始化根CA（幂等：已存在则原样返回；私钥丢失则吊销旧根并重建；系统管理员/密钥管理员） */
     @PreAuthorize("hasAuthority('ca:init')")
     @PostMapping("/init")
-    public Result<CaStatusVO> init(@RequestParam(required = false) String tenantKey,
+    public Result<CaStatusVO> init(@RequestParam(required = false) String tenantUscc,
                                    HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForWrite(tenant);
         String username = UserUtils.requireLoginUser().getUsername();
         CaStatusVO vo = caService.initRoot(tenant);
@@ -71,9 +71,9 @@ public class CaRootController {
     /** 封存根私钥（离线化/清除门限解封缓存）：日常签发由 SUB_CA 承担；系统管理员/密钥管理员 */
     @PreAuthorize("hasAuthority('ca:seal')")
     @PostMapping("/seal")
-    public Result<CaStatusVO> seal(@RequestParam(required = false) String tenantKey,
+    public Result<CaStatusVO> seal(@RequestParam(required = false) String tenantUscc,
                                    HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForWrite(tenant);
         String username = UserUtils.requireLoginUser().getUsername();
         caService.sealRootKey(tenant);
@@ -86,9 +86,9 @@ public class CaRootController {
     /** 解封根私钥（旧模式恢复在线态；门限分持态请走份额解封接口；系统管理员/密钥管理员） */
     @PreAuthorize("hasAuthority('ca:unseal')")
     @PostMapping("/unseal")
-    public Result<CaStatusVO> unseal(@RequestParam(required = false) String tenantKey,
+    public Result<CaStatusVO> unseal(@RequestParam(required = false) String tenantUscc,
                                      HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForWrite(tenant);
         String username = UserUtils.requireLoginUser().getUsername();
         caService.unsealRootKey(tenant);
@@ -102,9 +102,9 @@ public class CaRootController {
     /** 门限份额状态（5 份各自存在性 + 阈值）；租户用户锁本租户 */
     @PreAuthorize("hasAuthority('ca:share:view')")
     @GetMapping("/shares")
-    public Result<RootSharesVO> shares(@RequestParam(required = false) String tenantKey,
+    public Result<RootSharesVO> shares(@RequestParam(required = false) String tenantUscc,
                                        HttpServletRequest request) {
-        String tenant = TenantScope.effectiveTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.effectiveTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForRead(tenant);
         return Result.success("查询成功", caService.shareState(tenant));
     }
@@ -115,9 +115,9 @@ public class CaRootController {
      */
     @PreAuthorize("hasAuthority('ca:share:migrate')")
     @PostMapping("/shares/migrate")
-    public Result<RootSharesVO> migrateShares(@RequestParam(required = false) String tenantKey,
+    public Result<RootSharesVO> migrateShares(@RequestParam(required = false) String tenantUscc,
                                               HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForWrite(tenant);
         String username = UserUtils.requireLoginUser().getUsername();
         RootSharesVO state = caService.migrateRootShares(tenant);
@@ -131,9 +131,9 @@ public class CaRootController {
     @PreAuthorize("hasAuthority('ca:share:download')")
     @GetMapping("/shares/{index}")
     public Result<RootShareVO> downloadShare(@PathVariable int index,
-                                             @RequestParam(required = false) String tenantKey,
+                                             @RequestParam(required = false) String tenantUscc,
                                              HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForRead(tenant);
         if (index < 1 || index > CaService.SHARE_TOTAL) {
             throw new IllegalArgumentException("份额编号无效（有效范围 1~" + CaService.SHARE_TOTAL + "）");
@@ -153,10 +153,10 @@ public class CaRootController {
     /** 份额解封：提交任意 3 份门限份额重组根私钥（仅内存，用后请封存清除） */
     @PreAuthorize("hasAuthority('ca:share:unseal')")
     @PostMapping("/unseal-shares")
-    public Result<CaStatusVO> unsealShares(@RequestParam(required = false) String tenantKey,
+    public Result<CaStatusVO> unsealShares(@RequestParam(required = false) String tenantUscc,
                                            @Valid @RequestBody ShareUnsealDTO body,
                                            HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForWrite(tenant);
         List<String> shares = body.getShares();
         String username = UserUtils.requireLoginUser().getUsername();
@@ -170,9 +170,9 @@ public class CaRootController {
     /** 导出根证书 PEM（供各子系统信任链配置） */
     @PreAuthorize("hasAuthority('ca:root:download')")
     @GetMapping("/root/download")
-    public String downloadRoot(@RequestParam(required = false) String tenantKey,
+    public String downloadRoot(@RequestParam(required = false) String tenantUscc,
                                HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForRead(tenant);
         String username = UserUtils.requireLoginUser().getUsername();
         auditService.record(username, "CERT_DOWNLOAD", tag(tenant, "ROOT"),
@@ -183,9 +183,9 @@ public class CaRootController {
     /** 导出当前 SUB_CA 证书 PEM（中间CA链配置） */
     @PreAuthorize("hasAuthority('ca:subca:download')")
     @GetMapping("/subca/download")
-    public String downloadSubCa(@RequestParam(required = false) String tenantKey,
+    public String downloadSubCa(@RequestParam(required = false) String tenantUscc,
                                 HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkTenantForRead(tenant);
         String username = UserUtils.requireLoginUser().getUsername();
         auditService.record(username, "CERT_DOWNLOAD", tag(tenant, "SUB_CA"),
@@ -194,23 +194,23 @@ public class CaRootController {
     }
 
     /** 读操作：非 default 租户必须已登记（default 不查表，保证启动首序与存量行为不变） */
-    private void checkTenantForRead(String tenantKey) {
-        if (!CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
-            tenantService.get(tenantKey);
+    private void checkTenantForRead(String tenantUscc) {
+        if (!CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)) {
+            tenantService.get(tenantUscc);
         }
     }
 
     /** 写操作：非 default 租户还须 ACTIVE（SUSPENDED/CLOSED 拒绝密钥形态变更与重建） */
-    private void checkTenantForWrite(String tenantKey) {
-        if (!CaTenant.LEGACY_TENANT_KEY.equals(tenantKey)) {
-            tenantService.requireActive(tenantKey);
+    private void checkTenantForWrite(String tenantUscc) {
+        if (!CaTenant.LEGACY_NAMESPACE.equals(tenantUscc)) {
+            tenantService.requireActive(tenantUscc);
         }
     }
 
-    /** 审计 target：默认域沿用原 target 文案（兼容存量检索），新租户加 tenantKey 前缀 */
-    private String tag(String tenantKey, String legacyTarget) {
+    /** 审计 target：默认域沿用原 target 文案（兼容存量检索），新租户加 tenantUscc 前缀 */
+    private String tag(String tenantUscc, String legacyTarget) {
         String base = legacyTarget == null ? "" : legacyTarget;
-        return CaTenant.LEGACY_TENANT_KEY.equals(tenantKey) ? base : tenantKey + ":" + base;
+        return CaTenant.LEGACY_NAMESPACE.equals(tenantUscc) ? base : tenantUscc + ":" + base;
     }
 
     private String clientIp(HttpServletRequest request) {

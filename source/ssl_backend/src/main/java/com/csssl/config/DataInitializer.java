@@ -48,7 +48,7 @@ public class DataInitializer implements ApplicationRunner {
             admin.setPassword(BCrypt.hashpw("123456", BCrypt.gensalt()));
             admin.setRealName("系统管理员");
             admin.setRoleCode("ADMIN");
-            admin.setTenantKey(null); // 默认管理员=全局账号（tenant_key NULL：跨租户总览，租户域操作仍须显式传 tenantKey）
+            admin.setTenantUscc(null); // 默认管理员=全局账号（tenant_uscc NULL：跨租户总览，租户域操作仍须显式传 tenantUscc）
             admin.setStatus(1);
             admin.setCreatedAt(LocalDateTime.now());
             userMapper.insert(admin);
@@ -123,7 +123,7 @@ public class DataInitializer implements ApplicationRunner {
 
     /**
      * 内置证书模板（编码唯一，重复启动幂等；KeyUsage/EKU/策略OID 锁定，签发按模板）。
-     * 内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：tenant_key=NULL，所有租户可见。
+     * 内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：tenant_uscc=NULL，所有租户可见。
      */
     private void initTemplates() {
         insertIfAbsent("SERVER_COMM", "租户通信证书", "SERVER", "SM2", 730,
@@ -144,7 +144,7 @@ public class DataInitializer implements ApplicationRunner {
             return;
         }
         CertTemplate tpl = new CertTemplate();
-        tpl.setTenantKey(null); // 内置模板=全局模板（ssl_cert_template.tenant_key NULL：所有租户可见集内）
+        tpl.setTenantUscc(null); // 内置模板=全局模板（ssl_cert_template.tenant_uscc NULL：所有租户可见集内）
         tpl.setTemplateCode(code);
         tpl.setTemplateName(name);
         tpl.setCertType(certType);

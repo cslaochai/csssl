@@ -1,10 +1,9 @@
 import request from './request'
-import { currentTenant } from '@/lib/tenant'
 
 /**
  * CSSSL · CA根认证中心 API 封装（与后端 /ssl context-path 对齐）。
- * 多租户（路线A）：/admin 全域业务接口的租户域参数由 request 拦截器按 currentTenant() 自动附加；
- * 根CA/CRL 等按域操作在本文件中显式带 tenantKey（缺省取当前域）。
+ * 租户不是登录主体：账号一律为平台账号，租户域由调用页按操作显式传入 tenantUscc；
+ * 列表类接口不传=跨租户只读，写操作不传由后端 fail-closed 拒绝。
  */
 
 // ===== 登录鉴权 =====
@@ -22,36 +21,49 @@ export function changePassword(data) {
   return request.post('/auth/changePassword', data)
 }
 
-// ===== 租户管理（多租户域，仅全局 ADMIN） =====
+// ===== 租户管理（多租户域；新建直接执行，暂停/恢复/关闭/重置密钥走变更单双人复核） =====
 export function listTenants() {
   return request.get('/admin/tenants')
+}
+/** 新建租户（直接执行：建租户即建独立根CA+SUB_CA 并发放接入凭证；返回一次性凭证回执） */
+export function createTenant(data) {
+  return request.post('/admin/tenants', data)
 }
 /** 租户分页查询：{pageNo,pageSize,keyword,status}（keyword 命中 标识/名称/主体O） */
 export function pageTenants(params) {
   return request.get('/admin/tenants/page', { params })
 }
-export function getTenant(tenantKey) {
-  return request.get(`/admin/tenants/${tenantKey}`)
-}
-/** 创建即生成该租户独立根CA+SUB_CA，可能耗时数秒 */
-export function createTenant(data) {
-  return request.post('/admin/tenants', data)
-}
-export function suspendTenant(tenantKey) {
-  return request.post(`/admin/tenants/${tenantKey}/suspend`)
-}
-export function resumeTenant(tenantKey) {
-  return request.post(`/admin/tenants/${tenantKey}/resume`)
-}
-export function closeTenant(tenantKey) {
-  return request.post(`/admin/tenants/${tenantKey}/close`)
-}
-/** 生成/重置租户接入凭证（App ID + 密钥；已有则轮换，旧密钥立即失效，secret 仅返回一次） */
-export function resetTenantApiCredential(tenantKey) {
-  return request.post(`/admin/tenants/${tenantKey}/api-credential/reset`)
+export function getTenant(tenantUscc) {
+  return request.get(`/admin/tenants/${tenantUscc}`)
 }
 
-/** 租户列表模块级缓存（顶栏/各页租户下拉共用；失败返回空数组不阻断页面） */
+// ===== 租户变更单（暂停/恢复/关闭/重置接入密钥：发起→他人审批→批准即执行） =====
+/** 变更单分页查询：{pageNo,pageSize,status,opType,keyword} */
+export function pageTenantOps(params) {
+  return request.get('/admin/tenant-ops', { params })
+}
+/** 发起变更单：{opType,uscc,reason}；新建租户不走变更单（见 createTenant） */
+export function submitTenantOp(data) {
+  return request.post('/admin/tenant-ops', data)
+}
+/** 审批批准（不得与发起人同一人；批准即执行） */
+export function approveTenantOp(id, comment) {
+  return request.post(`/admin/tenant-ops/${id}/approve`, { comment })
+}
+/** 审批驳回（意见必填） */
+export function rejectTenantOp(id, comment) {
+  return request.post(`/admin/tenant-ops/${id}/reject`, { comment })
+}
+/** 撤回（仅发起人本人、仅待审批） */
+export function cancelTenantOp(id) {
+  return request.post(`/admin/tenant-ops/${id}/cancel`)
+}
+/** 领取接入凭证回执（仅发起人本人、一次性；密钥仅返回本次响应） */
+export function takeTenantOpReceipt(id) {
+  return request.get(`/admin/tenant-ops/${id}/receipt`)
+}
+
+/** 租户列表模块级缓存（各页租户下拉共用；失败返回空数组不阻断页面） */
 let tenantsCache = null
 export async function listTenantsCached(force = false) {
   if (tenantsCache && !force) return tenantsCache
@@ -59,8 +71,6 @@ export async function listTenantsCached(force = false) {
     const res = await listTenants()
     const d = res.data
     tenantsCache = Array.isArray(d) ? d : d?.records || []
-    // 顶栏租户下拉常驻 Layout，缓存刷新后广播，避免新增/停用租户后要整页刷新才可见
-    window.dispatchEvent(new Event('tenants-updated'))
   } catch (e) {
     tenantsCache = tenantsCache || []
   }
@@ -71,43 +81,43 @@ export async function listTenantsCached(force = false) {
 export async function tenantNameMap() {
   const map = {}
   for (const t of await listTenantsCached()) {
-    if (t.tenantKey) map[t.tenantKey] = t.tenantName || t.tenantKey
+    if (t.uscc) map[t.uscc] = t.tenantName || t.uscc
   }
   return map
 }
 
-// ===== 根CA（按租户域） =====
-export function getCaStatus(tenantKey = currentTenant()) {
-  return request.get('/admin/ca/status', { params: { tenantKey } })
+// ===== 根CA（按租户域；tenantUscc 由所在页面显式传入） =====
+export function getCaStatus(tenantUscc) {
+  return request.get('/admin/ca/status', { params: { tenantUscc } })
 }
-export function initCa(tenantKey = currentTenant()) {
-  return request.post('/admin/ca/init', { tenantKey })
+export function initCa(tenantUscc) {
+  return request.post('/admin/ca/init', { tenantUscc })
 }
-export function downloadRootCert(tenantKey = currentTenant()) {
-  return request.get('/admin/ca/root/download', { params: { tenantKey } })
+export function downloadRootCert(tenantUscc) {
+  return request.get('/admin/ca/root/download', { params: { tenantUscc } })
 }
-export function sealRootKey(tenantKey = currentTenant()) {
-  return request.post('/admin/ca/seal', { tenantKey })
+export function sealRootKey(tenantUscc) {
+  return request.post('/admin/ca/seal', { tenantUscc })
 }
-export function unsealRootKey(tenantKey = currentTenant()) {
-  return request.post('/admin/ca/unseal', { tenantKey })
+export function unsealRootKey(tenantUscc) {
+  return request.post('/admin/ca/unseal', { tenantUscc })
 }
-export function downloadSubCaCert(tenantKey = currentTenant()) {
-  return request.get('/admin/ca/subca/download', { params: { tenantKey } })
+export function downloadSubCaCert(tenantUscc) {
+  return request.get('/admin/ca/subca/download', { params: { tenantUscc } })
 }
 
 // ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN；按租户域） =====
-export function getCaShares(tenantKey = currentTenant()) {
-  return request.get('/admin/ca/shares', { params: { tenantKey } })
+export function getCaShares(tenantUscc) {
+  return request.get('/admin/ca/shares', { params: { tenantUscc } })
 }
-export function migrateCaShares(tenantKey = currentTenant()) {
-  return request.post('/admin/ca/shares/migrate', { tenantKey })
+export function migrateCaShares(tenantUscc) {
+  return request.post('/admin/ca/shares/migrate', { tenantUscc })
 }
-export function downloadCaShare(index, tenantKey = currentTenant()) {
-  return request.get(`/admin/ca/shares/${index}`, { params: { tenantKey } })
+export function downloadCaShare(index, tenantUscc) {
+  return request.get(`/admin/ca/shares/${index}`, { params: { tenantUscc } })
 }
-export function unsealCaShares(shares, tenantKey = currentTenant()) {
-  return request.post('/admin/ca/unseal-shares', { shares, tenantKey })
+export function unsealCaShares(shares, tenantUscc) {
+  return request.post('/admin/ca/unseal-shares', { shares, tenantUscc })
 }
 
 // ===== 证书管理 =====
@@ -117,15 +127,15 @@ export function pageCerts(params) {
 export function getCert(id) {
   return request.get(`/admin/certs/${id}`)
 }
-export function issueCert(data) {
-  return request.post('/admin/certs', data)
+export function issueCert(data, tenantUscc) {
+  return request.post('/admin/certs', data, { params: { tenantUscc } })
 }
-export function issueCertByCsr(data) {
-  return request.post('/admin/certs/csr', data)
+export function issueCertByCsr(data, tenantUscc) {
+  return request.post('/admin/certs/csr', data, { params: { tenantUscc } })
 }
 /** 公钥直签（RA 场景）：申请方自持私钥，提交 Subject DN + 公钥 PEM + 模板/CN/SAN */
-export function issueCertByPublicKey(data) {
-  return request.post('/admin/certs/public-key', data)
+export function issueCertByPublicKey(data, tenantUscc) {
+  return request.post('/admin/certs/public-key', data, { params: { tenantUscc } })
 }
 export function downloadCertPem(id) {
   return request.get(`/admin/certs/${id}/cert.pem`)
@@ -133,25 +143,25 @@ export function downloadCertPem(id) {
 export function downloadKeyPem(id) {
   return request.get(`/admin/certs/${id}/key.pem`)
 }
-/** 证书概览（按租户域）；全局用户可传指定域，租户用户由后端锁本域 */
-export function getOverview(tenantKey = currentTenant()) {
-  return request.get('/admin/overview', { params: { tenantKey } })
+/** 证书概览（按租户域）；不传 tenantUscc 时后端按平台主租户兜底 */
+export function getOverview(tenantUscc) {
+  return request.get('/admin/overview', { params: { tenantUscc } })
 }
 
 // ===== CRL 吊销列表（按租户域） =====
-export function getCrlView(tenantKey = currentTenant()) {
-  return request.get('/admin/crl', { params: { tenantKey } })
+export function getCrlView(tenantUscc) {
+  return request.get('/admin/crl', { params: { tenantUscc } })
 }
-/** 吊销记录分页查询：{pageNo,pageSize,keyword,status,reason}（tenantKey 由请求层自动注入） */
+/** 吊销记录分页查询：{pageNo,pageSize,keyword,status,reason,tenantUscc?}（不传租户=跨租户只读） */
 export function pageCrlRecords(params) {
   return request.get('/admin/crl/records', { params })
 }
-export function downloadCrl(tenantKey = currentTenant()) {
-  return request.get('/admin/crl/download', { params: { tenantKey } })
+export function downloadCrl(tenantUscc) {
+  return request.get('/admin/crl/download', { params: { tenantUscc } })
 }
 /** 增量 CRL（dCRL）：{deltaPem, thisUpdate, nextUpdate, entryCount, crlNumber, baseCrlNumber} */
-export function getDeltaCrl(tenantKey = currentTenant()) {
-  return request.get('/admin/crl/delta', { params: { tenantKey } })
+export function getDeltaCrl(tenantUscc) {
+  return request.get('/admin/crl/delta', { params: { tenantUscc } })
 }
 
 // ===== 审计日志 =====
@@ -222,37 +232,37 @@ export function deleteTemplate(id) {
 export function pageApplications(params) {
   return request.get('/admin/applications', { params })
 }
-export function submitApplication(data) {
-  return request.post('/admin/applications', data)
+export function submitApplication(data, tenantUscc) {
+  return request.post('/admin/applications', data, { params: { tenantUscc } })
 }
-export function approveApplication(id, comment) {
-  return request.post(`/admin/applications/${id}/approve`, { comment })
+export function approveApplication(id, comment, tenantUscc) {
+  return request.post(`/admin/applications/${id}/approve`, { comment }, { params: { tenantUscc } })
 }
-export function rejectApplication(id, comment) {
-  return request.post(`/admin/applications/${id}/reject`, { comment })
+export function rejectApplication(id, comment, tenantUscc) {
+  return request.post(`/admin/applications/${id}/reject`, { comment }, { params: { tenantUscc } })
 }
-export function issueApplication(id) {
-  return request.post(`/admin/applications/${id}/issue`)
+export function issueApplication(id, tenantUscc) {
+  return request.post(`/admin/applications/${id}/issue`, null, { params: { tenantUscc } })
 }
-export function cancelApplication(id) {
-  return request.post(`/admin/applications/${id}/cancel`)
+export function cancelApplication(id, tenantUscc) {
+  return request.post(`/admin/applications/${id}/cancel`, null, { params: { tenantUscc } })
 }
 
 // ===== 证书操作审批单（吊销/挂起/解除挂起双人复核，批准即执行进 CRL） =====
-export function submitCertOp(data) {
-  return request.post('/admin/cert-ops', data)
+export function submitCertOp(data, tenantUscc) {
+  return request.post('/admin/cert-ops', data, { params: { tenantUscc } })
 }
 export function pageCertOps(params) {
   return request.get('/admin/cert-ops', { params })
 }
-export function approveCertOp(id, comment) {
-  return request.post(`/admin/cert-ops/${id}/approve`, { comment })
+export function approveCertOp(id, comment, tenantUscc) {
+  return request.post(`/admin/cert-ops/${id}/approve`, { comment }, { params: { tenantUscc } })
 }
-export function rejectCertOp(id, comment) {
-  return request.post(`/admin/cert-ops/${id}/reject`, { comment })
+export function rejectCertOp(id, comment, tenantUscc) {
+  return request.post(`/admin/cert-ops/${id}/reject`, { comment }, { params: { tenantUscc } })
 }
-export function cancelCertOp(id) {
-  return request.post(`/admin/cert-ops/${id}/cancel`)
+export function cancelCertOp(id, tenantUscc) {
+  return request.post(`/admin/cert-ops/${id}/cancel`, null, { params: { tenantUscc } })
 }
 
 // ===== 导出（PKCS#12 软件证书 / 审计归档 CSV） =====
@@ -260,8 +270,8 @@ export function cancelCertOp(id) {
 export function exportCertP12(id, password) {
   return request.post(`/admin/certs/${id}/export/p12`, { password }, { responseType: 'blob' })
 }
-export function exportAuditCsv() {
-  return request.get('/admin/audit/export')
+export function exportAuditCsv(tenantUscc) {
+  return request.get('/admin/audit/export', { params: { tenantUscc } })
 }
 
 // ===== TSA 可信时间戳（公开） =====
@@ -270,7 +280,7 @@ export function getTsaPublicKey() {
 }
 
 // ===== 公开验证端点（按租户域，无需登录） =====
-/** 证书在线验证三态：POST /ca/public/{tenantKey}/verify，body {certPem, purpose} */
-export function verifyCertPublic(tenantKey, data) {
-  return request.post(`/ca/public/${tenantKey}/verify`, data)
+/** 证书在线验证三态：POST /ca/public/{tenantUscc}/verify，body {certPem, purpose} */
+export function verifyCertPublic(tenantUscc, data) {
+  return request.post(`/ca/public/${tenantUscc}/verify`, data)
 }

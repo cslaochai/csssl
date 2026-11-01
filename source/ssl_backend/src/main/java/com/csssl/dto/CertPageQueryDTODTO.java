@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 证书分页查询（certType/status 精确、keyword 命中 CN/序列号、tenantKey 域过滤）。
+ * 证书分页查询（certType/status 精确、keyword 命中 CN/序列号、tenantUscc 域过滤）。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -29,5 +29,5 @@ public class CertPageQueryDTODTO extends PageParam {
     /**
      * 租户数据域过滤
      */
-    private String tenantKey;
+    private String tenantUscc;
 }

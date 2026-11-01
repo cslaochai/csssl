@@ -10,17 +10,17 @@
         type="success"
         :closable="false"
         show-icon
-        title="在线验证走公开端点 POST /ssl/ca/public/{tenantKey}/verify（JSON：{certPem, purpose}），粘贴证书 PEM 即可返回 good / revoked / unknown 三态；该端点无需登录。"
+        title="在线验证走公开端点 POST /ssl/ca/public/{tenantUscc}/verify（JSON：{certPem, purpose}），粘贴证书 PEM 即可返回 good / revoked / unknown 三态；该端点无需登录。"
         style="margin-bottom: 14px"
       />
       <el-form label-width="110px" style="max-width: 720px">
         <el-form-item label="租户域">
-          <el-select v-model="tenantKey" style="width: 240px" placeholder="选择租户域">
+          <el-select v-model="tenantUscc" style="width: 240px" placeholder="选择租户域">
             <el-option
               v-for="o in tenantOptions"
-              :key="o.tenantKey"
-              :label="o.tenantName ? `${o.tenantKey}（${o.tenantName}）` : o.tenantKey"
-              :value="o.tenantKey"
+              :key="o.uscc"
+              :label="o.tenantName ? `${o.uscc}（${o.tenantName}）` : o.uscc"
+              :value="o.uscc"
             />
           </el-select>
         </el-form-item>
@@ -78,13 +78,13 @@
         type="warning"
         :closable="false"
         show-icon
-        title="OCSP 标准接口为二进制（DER）协议，浏览器不代为发起协议交互——下方按所选租户域与证书序列号生成可直接执行的 openssl/curl 查询与解析示例（URL 模板含 {tenantKey}）。"
+        title="OCSP 标准接口为二进制（DER）协议，浏览器不代为发起协议交互——下方按所选租户域与证书序列号生成可直接执行的 openssl/curl 查询与解析示例（URL 模板含 {tenantUscc}）。"
         style="margin-bottom: 14px"
       />
       <el-descriptions :column="1" border size="small" style="margin-bottom: 16px">
-        <el-descriptions-item label="状态查询端点（OCSP，POST，DER）">/ssl/ca/public/{tenantKey}/ocsp（Content-Type: application/ocsp-request）</el-descriptions-item>
-        <el-descriptions-item label="状态查询端点（OCSP，GET，base64url）">/ssl/ca/public/{tenantKey}/ocsp/{请求DER的base64url}</el-descriptions-item>
-        <el-descriptions-item label="租户证书/CRL 公开端点">/ssl/ca/public/{tenantKey}/root · /subca · /crl · /crl/delta</el-descriptions-item>
+        <el-descriptions-item label="状态查询端点（OCSP，POST，DER）">/ssl/ca/public/{tenantUscc}/ocsp（Content-Type: application/ocsp-request）</el-descriptions-item>
+        <el-descriptions-item label="状态查询端点（OCSP，GET，base64url）">/ssl/ca/public/{tenantUscc}/ocsp/{请求DER的base64url}</el-descriptions-item>
+        <el-descriptions-item label="租户证书/CRL 公开端点">/ssl/ca/public/{tenantUscc}/root · /subca · /crl · /crl/delta</el-descriptions-item>
         <el-descriptions-item label="返回状态">good / revoked / unknown（挂起证书返回 on-hold 扩展）</el-descriptions-item>
       </el-descriptions>
 
@@ -105,7 +105,7 @@
         </el-form-item>
       </el-form>
 
-      <div class="section-title" style="margin: 6px 0 10px">查询示例（按租户域 {{ tenantNames[tenantKey] || tenantKey }} 自动填充）</div>
+      <div class="section-title" style="margin: 6px 0 10px">查询示例（按租户域 {{ tenantNames[tenantUscc] || tenantUscc }} 自动填充）</div>
       <pre class="cmd-block">{{ sampleScript }}</pre>
       <div style="margin-top: 12px">
         <el-button type="primary" plain @click="onCopy">复制示例</el-button>
@@ -120,10 +120,9 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { downloadText } from '@/lib/download'
 import { verifyCertPublic, listTenantsCached, tenantNameMap } from '@/api/system'
-import { currentTenant } from '@/lib/tenant'
 
-// ===== 在线验证（POST /ca/public/{tenantKey}/verify） =====
-const tenantKey = ref(currentTenant())
+// ===== 在线验证（POST /ca/public/{tenantUscc}/verify） =====
+const tenantUscc = ref('')
 const tenantNames = ref({})
 const tenantOptions = ref([])
 const certPem = ref('')
@@ -135,6 +134,9 @@ const resultTenant = ref('')
 onMounted(async () => {
   tenantOptions.value = await listTenantsCached()
   tenantNames.value = await tenantNameMap()
+  // 缺省选中首个启用租户，避免空域提交
+  const active = tenantOptions.value.find(o => o.status === 'ACTIVE') || tenantOptions.value[0]
+  tenantUscc.value = active?.uscc || ''
 })
 
 const resultState = computed(() => {
@@ -180,12 +182,12 @@ async function onVerify() {
   }
   verifying.value = true
   try {
-    const res = await verifyCertPublic(tenantKey.value, {
+    const res = await verifyCertPublic(tenantUscc.value, {
       certPem: certPem.value.trim(),
       purpose: purpose.value || undefined
     })
     result.value = res.data
-    resultTenant.value = tenantKey.value
+    resultTenant.value = tenantUscc.value
   } catch (e) {
     result.value = null
     // 租户无根/证书不属该域等错误由拦截器提示
@@ -194,23 +196,23 @@ async function onVerify() {
   }
 }
 
-// ===== DER 协议示例（URL 模板含 {tenantKey}） =====
+// ===== DER 协议示例（URL 模板含 {tenantUscc}） =====
 const serialHex = ref('')
 const issuer = ref('subca')
 
-const OCSP_URL = computed(() => `http://<CA主机>:8092/ssl/ca/public/${tenantKey.value}/ocsp`)
-const ISSUER_URL = computed(() => `http://<CA主机>:8092/ssl/ca/public/${tenantKey.value}/${issuer.value}`)
+const OCSP_URL = computed(() => `http://<CA主机>:8092/ssl/ca/public/${tenantUscc.value}/ocsp`)
+const ISSUER_URL = computed(() => `http://<CA主机>:8092/ssl/ca/public/${tenantUscc.value}/${issuer.value}`)
 const SERIAL = computed(() => (serialHex.value.trim() ? `0x${serialHex.value.trim().replace(/^0x/i, '')}` : '0x<证书序列号HEX>'))
 
 const sampleScript = computed(() => `#!/usr/bin/env bash
-# CSSSL OCSP（RFC 6960 DER）自助查询示例 —— 租户域 ${tenantKey.value}
+# CSSSL OCSP（RFC 6960 DER）自助查询示例 —— 租户域 ${tenantUscc.value}
 set -euo pipefail
 
 OCSP_URL="${OCSP_URL.value}"
 ISSUER_PEM="${issuer.value}.pem"
 SERIAL="${SERIAL.value}"
 
-# 1) 获取该租户签发者证书（二级CA 或根CA）：/ssl/ca/public/{tenantKey}/root|subca
+# 1) 获取该租户签发者证书（二级CA 或根CA）：/ssl/ca/public/{tenantUscc}/root|subca
 curl -s "${ISSUER_URL.value}" -o "$ISSUER_PEM"
 
 # 2) 一步法：openssl 自带 OCSP 客户端（构造 DER 请求并解析响应）
@@ -225,7 +227,7 @@ curl -s -X POST "$OCSP_URL" \\
 openssl ocsp -issuer "$ISSUER_PEM" -respin resp.der -noverify -text
 
 # 结果判读：响应中 "Cert ID: ... Serial Nr: ... good/revoked/unknown"
-# CRL 通道：curl -s "http://<CA主机>:8092/ssl/ca/public/${tenantKey.value}/crl" -o crl.pem
+# CRL 通道：curl -s "http://<CA主机>:8092/ssl/ca/public/${tenantUscc.value}/crl" -o crl.pem
 # 浏览器直连（GET）：先将 req.der 做 base64url 编码（openssl base64 | tr '+/' '-_' | tr -d '=\\n'），
 # 再访问 ${OCSP_URL.value}/<编码结果>`
 )
@@ -240,7 +242,7 @@ async function onCopy() {
 }
 
 function onDownload() {
-  downloadText(sampleScript.value, `ocsp-query-${tenantKey.value}.sh`)
+  downloadText(sampleScript.value, `ocsp-query-${tenantUscc.value}.sh`)
   ElMessage.success('示例脚本已下载')
 }
 </script>

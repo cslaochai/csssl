@@ -46,7 +46,7 @@ public class ApiClientAdminController {
                                             HttpServletRequest request) {
         LoginUser user = requireGlobalAdmin();
         return Result.success("登记成功，请立即保存 secret（仅展示一次）",
-                clientService.create(body.getTenantKey(), body.getClientName(), body.getIpAllowlist(),
+                clientService.create(body.getTenantUscc(), body.getClientName(), body.getIpAllowlist(),
                         body.getClientCertSha256(), user.getUsername(), clientIp(request)));
     }
 
@@ -73,7 +73,7 @@ public class ApiClientAdminController {
 
     private LoginUser requireGlobalAdmin() {
         LoginUser user = UserUtils.requireLoginUser();
-        if (user.getTenantKey() != null) {
+        if (user.getTenantUscc() != null) {
             throw new SecurityException("权限不足：API 客户端管理仅限全局系统管理员");
         }
         return user;

@@ -10,7 +10,7 @@ public class ApiClientSecretVO {
 
     private Long id;
     private String appId;
-    private String tenantKey;
+    private String tenantUscc;
     private String tenantName;
     private String clientName;
     private String secret;

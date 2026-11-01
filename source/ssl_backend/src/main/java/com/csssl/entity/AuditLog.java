@@ -29,7 +29,7 @@ public class AuditLog {
     /**
      * 操作归属租户（全局操作记 default；租户维度过滤由后续波次接入）
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 操作：LOGIN/LOGOUT/CA_INIT/CERT_ISSUE/CERT_CSR_ISSUE/CERT_REVOKE/CERT_DOWNLOAD/CRL_DOWNLOAD

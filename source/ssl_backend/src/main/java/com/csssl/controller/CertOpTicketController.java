@@ -7,6 +7,7 @@ import com.csssl.dto.CertOpPageQueryDTO;
 import com.csssl.dto.CertOpSubmitDTO;
 import com.csssl.entity.CaCertOpTicket;
 import com.csssl.entity.LoginUser;
+import com.csssl.enums.CertOpTypeEnum;
 import com.csssl.service.CertOpTicketService;
 import com.csssl.service.PermissionService;
 import com.csssl.util.PermissionCatalog;
@@ -38,19 +39,19 @@ public class CertOpTicketController {
     private final CertOpTicketService ticketService;
     private final PermissionService permissionService;
 
-    /** 操作单分页查询（登录即可查看；租户用户强制本租户，全局用户可按 ?tenantKey= 过滤，不传=全量只读） */
+    /** 操作单分页查询（登录即可查看；租户用户强制本租户，全局用户可按 ?tenantUscc= 过滤，不传=全量只读） */
     @GetMapping
     public Result<Page<CaCertOpTicket>> page(@Valid CertOpPageQueryDTO query, HttpServletRequest request) {
         return Result.success("查询成功", ticketService.page(query.getPageNo(), query.getPageSize(),
                 query.getStatus(), query.getOpType(), query.getKeyword(),
-                TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantKey(), query.getTenantKey())));
+                TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), query.getTenantUscc())));
     }
 
     /** 操作单详情（租户用户访问他租户单按不存在处理） */
     @GetMapping("/{id}")
     public Result<CaCertOpTicket> detail(@PathVariable Long id, HttpServletRequest request) {
         return Result.success("查询成功",
-                ticketService.detailVisible(id, UserUtils.requireLoginUser().getTenantKey()));
+                ticketService.detailVisible(id, UserUtils.requireLoginUser().getTenantUscc()));
     }
 
     /**
@@ -59,21 +60,21 @@ public class CertOpTicketController {
      */
     @PostMapping
     public Result<CaCertOpTicket> submit(@Valid @RequestBody CertOpSubmitDTO body,
-                                         @RequestParam(required = false) String tenantKey,
+                                         @RequestParam(required = false) String tenantUscc,
                                          HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        if (CertOpTicketService.OP_REVOKE.equals(body.getOpType())) {
+        CertOpTypeEnum opType = CertOpTypeEnum.fromCode(body.getOpType());
+        if (opType == CertOpTypeEnum.REVOKE) {
             permissionService.require(request, PermissionCatalog.CERT_REVOKE);
-        } else if (CertOpTicketService.OP_SUSPEND.equals(body.getOpType())
-                || CertOpTicketService.OP_UNSUSPEND.equals(body.getOpType())) {
+        } else if (opType == CertOpTypeEnum.SUSPEND || opType == CertOpTypeEnum.UNSUSPEND) {
             permissionService.require(request, PermissionCatalog.CERT_SUSPEND);
-        } else if (CertOpTicketService.OP_RENEW.equals(body.getOpType())) {
+        } else if (opType == CertOpTypeEnum.RENEW) {
             permissionService.require(request, PermissionCatalog.CERT_RENEW);
-        } else if (CertOpTicketService.OP_REKEY.equals(body.getOpType())) {
+        } else if (opType == CertOpTypeEnum.REKEY) {
             permissionService.require(request, PermissionCatalog.CERT_REKEY);
         }
-        String effTenant = TenantScope.requireExplicitTenant(loginUser.getTenantKey(),
-                tenantKey == null || tenantKey.isBlank() ? body.getTenantKey() : tenantKey);
+        String effTenant = TenantScope.requireExplicitTenant(loginUser.getTenantUscc(),
+                tenantUscc == null || tenantUscc.isBlank() ? body.getTenantUscc() : tenantUscc);
         return Result.success("操作单已提交，待审批", ticketService.submit(body.getOpType(), body.getCertId(),
                 body.getReason(), body.getValidityDays(),
                 loginUser.getUsername(), loginUser.getRealName(), clientIp(request), effTenant));
@@ -84,35 +85,35 @@ public class CertOpTicketController {
     @PostMapping("/{id}/approve")
     public Result<CaCertOpTicket> approve(@PathVariable Long id,
                                           @Valid @RequestBody(required = false) ApplicationAuditDTO body,
-                                          @RequestParam(required = false) String tenantKey,
+                                          @RequestParam(required = false) String tenantUscc,
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         String comment = body == null ? null : body.getComment();
         return Result.success("已批准并执行", ticketService.approve(id, comment,
                 loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantKey(), tenantKey)));
+                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc)));
     }
 
     /** 审批驳回（不得与发起人同一人；意见必填；证书状态不变） */
     @PreAuthorize("hasAuthority('cert:op:approve')")
     @PostMapping("/{id}/reject")
     public Result<CaCertOpTicket> reject(@PathVariable Long id, @Valid @RequestBody ApplicationAuditDTO body,
-                                         @RequestParam(required = false) String tenantKey,
+                                         @RequestParam(required = false) String tenantUscc,
                                          HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("已驳回", ticketService.reject(id, body.getComment(),
                 loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantKey(), tenantKey)));
+                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc)));
     }
 
     /** 撤销操作单（仅发起人本人或系统管理员；仅待审批可撤） */
     @PostMapping("/{id}/cancel")
-    public Result<CaCertOpTicket> cancel(@PathVariable Long id, @RequestParam(required = false) String tenantKey,
+    public Result<CaCertOpTicket> cancel(@PathVariable Long id, @RequestParam(required = false) String tenantUscc,
                                          HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("已撤销", ticketService.cancel(id,
                 loginUser.getUsername(), loginUser.getRoleCode(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantKey(), tenantKey)));
+                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc)));
     }
 
     private String clientIp(HttpServletRequest request) {

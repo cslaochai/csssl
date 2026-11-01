@@ -31,5 +31,5 @@ public class CertOpSubmitDTO {
     /**
      * 租户数据域（全局用户显式传入）
      */
-    private String tenantKey;
+    private String tenantUscc;
 }

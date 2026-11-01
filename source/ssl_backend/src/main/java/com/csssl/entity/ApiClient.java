@@ -30,7 +30,7 @@ public class ApiClient {
     /**
      * 绑定租户（请求数据域唯一来源，不信任调用方传参）
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 客户端名称（审计展示）

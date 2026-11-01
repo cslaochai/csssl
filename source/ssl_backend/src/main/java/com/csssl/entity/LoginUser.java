@@ -43,7 +43,7 @@ public class LoginUser implements UserDetails {
     /**
      * 租户数据域：null/空=全局用户（跨租户账号）；非空=租户用户，一律锁定本租户
      */
-    private final String tenantKey;
+    private final String tenantUscc;
 
     /**
      * 是否法定内置角色（builtin=1）
@@ -55,12 +55,12 @@ public class LoginUser implements UserDetails {
      */
     private final List<String> permissions;
 
-    public LoginUser(String username, String realName, String roleCode, String tenantKey,
+    public LoginUser(String username, String realName, String roleCode, String tenantUscc,
                      boolean builtin, List<String> permissions) {
         this.username = username;
         this.realName = realName;
         this.roleCode = (roleCode == null || roleCode.isBlank()) ? null : roleCode.trim().toUpperCase();
-        this.tenantKey = (tenantKey == null || tenantKey.isBlank()) ? null : tenantKey.trim();
+        this.tenantUscc = (tenantUscc == null || tenantUscc.isBlank()) ? null : tenantUscc.trim();
         this.builtin = builtin;
         this.permissions = permissions == null ? List.of() : List.copyOf(permissions);
     }

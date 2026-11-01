@@ -11,9 +11,9 @@ import lombok.Data;
 public class ApplicationSubmitDTO {
 
     /**
-     * 受理租户（缺省走 ?tenantKey= / 登录域归一）
+     * 受理租户（缺省走 ?tenantUscc= / 登录域归一）
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 申请人类别（证书主体类型）：INSTITUTION-单位（系统/法人等非个人主体） / PERSON-个人（自然人）；与租户租户域无关

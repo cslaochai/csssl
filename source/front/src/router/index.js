@@ -63,24 +63,36 @@ const routes = [
         meta: { title: '时间戳TSA', perm: 'menu:tsa', roles: ALL_ROLES, group: 'business', icon: 'Clock' }
       },
       {
+        path: 'root-ca',
+        name: 'root-ca',
+        component: () => import('@/views/RootCa.vue'),
+        meta: { title: '根CA管理', perm: 'menu:root-ca', roles: ['ADMIN', 'KEY_ADMIN'], group: 'business', icon: 'Key' }
+      },
+      {
         path: 'tenants',
         name: 'tenants',
         component: () => import('@/views/Tenants.vue'),
-        // 租户管理：全局账号可见；启停/凭证归租户管理员，系统管理员只读巡检
+        // 租户管理：新建租户直接执行（建独立根CA+SUB_CA、发接入凭证），系统管理员只读巡检
         meta: {
           title: '租户管理',
           perm: 'menu:tenants',
-          roles: ['ADMIN', 'TENANT_ADMIN'],
-          globalOnly: true,
-          group: 'platform',
+          roles: ['ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER'],
+          group: 'tenant',
           icon: 'OfficeBuilding'
         }
       },
       {
-        path: 'root-ca',
-        name: 'root-ca',
-        component: () => import('@/views/RootCa.vue'),
-        meta: { title: '根CA管理', perm: 'menu:root-ca', roles: ['ADMIN', 'KEY_ADMIN'], group: 'platform', icon: 'Key' }
+        path: 'tenant-ops',
+        name: 'tenant-ops',
+        component: () => import('@/views/TenantOps.vue'),
+        // 生命周期变更单：租户管理员发起，租户审批员批准执行（发起人不得自批）
+        meta: {
+          title: '租户变更审批',
+          perm: 'menu:tenant-ops',
+          roles: ['ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER'],
+          group: 'tenant',
+          icon: 'DocumentChecked'
+        }
       },
       {
         path: 'templates',
@@ -103,7 +115,6 @@ const routes = [
           title: '角色配置',
           perm: 'menu:roles',
           roles: ['ADMIN', 'USER_ADMIN'],
-          globalOnly: true,
           group: 'platform',
           icon: 'Avatar'
         }
@@ -112,7 +123,7 @@ const routes = [
         path: 'audit',
         name: 'audit',
         component: () => import('@/views/Audit.vue'),
-        meta: { title: '审计日志', perm: 'menu:audit', roles: ['AUDITOR', 'ADMIN'], group: 'bottom', icon: 'Memo' }
+        meta: { title: '审计日志', perm: 'menu:audit', roles: ['AUDITOR', 'ADMIN'], group: 'platform', icon: 'Memo' }
       }
     ]
   },

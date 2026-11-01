@@ -44,9 +44,9 @@ import java.util.List;
  *
  * <p>路线A数据域口径（effectiveTenant，服务端强制）：
  * <ul>
- *   <li>建号：全局 ADMIN 可传 tenantKey 建租户用户（含租户 ADMIN，租户主由全局任命）或不传=全局用户；
+ *   <li>建号：全局 ADMIN 可传 tenantUscc 建租户用户（含租户 ADMIN，租户主由全局任命）或不传=全局用户；
  *       租户 ADMIN 只能建本租户用户，且不可建/改 ADMIN 角色，不可建全局用户；越域请求 403。</li>
- *   <li>列表：租户用户只见本租户；全局用户可按 ?tenantKey= 过滤，不传=全部
+ *   <li>列表：租户用户只见本租户；全局用户可按 ?tenantUscc= 过滤，不传=全部
  *       ——这是唯一允许的跨租户"读"口（全局 ADMIN 总览），不构成写旁路。</li>
  *   <li>改角色/停用/重置口令：目标用户必须落在操作者数据域（租户 ADMIN 改别租户/全局用户→403）；
  *       审计记录带目标用户租户。</li>
@@ -62,18 +62,18 @@ public class AdminUserController {
     private final AuditService auditService;
     private final TenantService tenantService;
 
-    /** 用户列表（分页 + 角色/租户筛选；租户用户强制本租户，全局用户 tenantKey 缺省=跨租户总览只读） */
+    /** 用户列表（分页 + 角色/租户筛选；租户用户强制本租户，全局用户 tenantUscc 缺省=跨租户总览只读） */
     @PreAuthorize("hasAuthority('user:list')")
     @GetMapping
     public Result<Page<SysUser>> page(@Valid UserPageQueryDTO query, HttpServletRequest request) {
         // readTenantScope：租户用户锁本租户（传别租户 403）；全局用户不传=null=全部（唯一跨租户读口）
-        String scope = TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantKey(), query.getTenantKey());
+        String scope = TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), query.getTenantUscc());
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         if (query.getRoleCode() != null && !query.getRoleCode().isBlank()) {
             qw.eq(SysUser::getRoleCode, query.getRoleCode());
         }
         if (scope != null) {
-            qw.eq(SysUser::getTenantKey, scope);
+            qw.eq(SysUser::getTenantUscc, scope);
         }
         qw.orderByAsc(SysUser::getId);
         Page<SysUser> page = userMapper.selectPage(new Page<>(query.getPageNo(), query.getPageSize()), qw);
@@ -82,7 +82,7 @@ public class AdminUserController {
     }
 
     /**
-     * 创建管理账号：全局 ADMIN 可建全局/各租户账号（tenantKey 显式指定，缺省=全局）；
+     * 创建管理账号：全局 ADMIN 可建全局/各租户账号（tenantUscc 显式指定，缺省=全局）；
      * 租户 ADMIN 仅可建本租户 OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN，
      * 不可建 ADMIN（租户主由全局 ADMIN 任命）、不可建全局用户；越域 403。
      */
@@ -105,17 +105,17 @@ public class AdminUserController {
         }
         requireAssignableRole(role);
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String myTenant = loginUser.getTenantKey();
-        String reqTenant = blankToNull(body.getTenantKey());
+        String myTenant = loginUser.getTenantUscc();
+        String reqTenant = blankToNull(body.getTenantUscc());
         String targetTenant;
         if (myTenant != null) {
-            // 租户 ADMIN：一律落本租户；请求 tenantKey 与本人租户不一致=越域 403；不可任命租户主（ADMIN）
+            // 租户 ADMIN：一律落本租户；请求 tenantUscc 与本人租户不一致=越域 403；不可任命租户主（ADMIN）
             targetTenant = TenantScope.effectiveTenant(myTenant, reqTenant);
             if (RoleCodeEnum.ADMIN.name().equals(role)) {
                 throw new SecurityException("权限不足：租户管理员不可创建 ADMIN 角色账号（租户主由全局 ADMIN 任命）");
             }
         } else {
-            // 全局 ADMIN：显式 tenantKey=建该租户用户（租户须存在）；缺省=全局用户（tenant_key NULL）
+            // 全局 ADMIN：显式 tenantUscc=建该租户用户（租户须存在）；缺省=全局用户（tenant_uscc NULL）
             targetTenant = reqTenant;
             if (targetTenant != null) {
                 tenantService.get(targetTenant);
@@ -129,7 +129,7 @@ public class AdminUserController {
         user.setRealName(body.getRealName() == null || body.getRealName().isBlank()
                 ? username.trim() : body.getRealName().trim());
         user.setRoleCode(role);
-        user.setTenantKey(targetTenant);
+        user.setTenantUscc(targetTenant);
         user.setStatus(1);
         user.setFailedAttempts(0);
         user.setTokenVersion(0);
@@ -158,13 +158,13 @@ public class AdminUserController {
         }
         LoginUser loginUser = UserUtils.requireLoginUser();
         String operator = loginUser.getUsername();
-        String myTenant = loginUser.getTenantKey();
+        String myTenant = loginUser.getTenantUscc();
 
 
         String ip = clientIp(request);
-        String targetTenant = user.getTenantKey();
+        String targetTenant = user.getTenantUscc();
         if (myTenant != null) {
-            // 租户 ADMIN：目标必须为本租户用户（全局用户 tenant_key=NULL 亦不可触碰）
+            // 租户 ADMIN：目标必须为本租户用户（全局用户 tenant_uscc=NULL 亦不可触碰）
             if (targetTenant == null || !myTenant.equals(targetTenant)) {
                 throw new SecurityException("权限不足：不能操作其他租户或全局账号");
             }
@@ -242,12 +242,12 @@ public class AdminUserController {
         return Result.success("更新成功", user);
     }
 
-    /** 审计租户归位：目标账号租户优先；全局账号（tenant_key NULL）按操作者域，操作者亦全局则 default */
+    /** 审计租户归位：目标账号租户优先；全局账号（tenant_uscc NULL）按操作者域，操作者亦全局则 default */
     private static String auditTenant(String targetUserTenant, String operatorTenant) {
         if (targetUserTenant != null && !targetUserTenant.isBlank()) {
             return targetUserTenant;
         }
-        return operatorTenant == null || operatorTenant.isBlank() ? CaTenant.PRIMARY_TENANT_KEY : operatorTenant;
+        return operatorTenant == null || operatorTenant.isBlank() ? CaTenant.PRIMARY_TENANT_USCC : operatorTenant;
     }
 
     private boolean isSupportedRole(String role) {

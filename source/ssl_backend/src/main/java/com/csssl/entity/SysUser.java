@@ -44,7 +44,7 @@ public class SysUser {
     /**
      * 归属租户；NULL=全局管理员（跨租户，兼容存量账号）
      */
-    private String tenantKey;
+    private String tenantUscc;
 
     /**
      * 1-启用 0-禁用

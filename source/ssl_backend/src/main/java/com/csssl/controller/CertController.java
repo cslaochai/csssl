@@ -29,9 +29,9 @@ import org.springframework.web.bind.annotation.*;
  *
  * <p>路线A数据域（服务端强制，effectiveTenant 口径）：
  * <ul>
- *   <li>列表：租户用户强制本租户过滤；全局用户可按 ?tenantKey= 过滤，不传=跨租户全量只读（唯一读口，无写旁路）。</li>
+ *   <li>列表：租户用户强制本租户过滤；全局用户可按 ?tenantUscc= 过滤，不传=跨租户全量只读（唯一读口，无写旁路）。</li>
  *   <li>签发三口（issue/csr/public-key）：受理域=effectiveTenant（租户用户锁本租户、越域 403；
- *       全局用户显式 ?tenantKey=，缺省 default），并调用 CertService 带 tenantKey 首参正式版。</li>
+ *       全局用户显式 ?tenantUscc=，缺省 default），并调用 CertService 带 tenantUscc 首参正式版。</li>
  *   <li>行级读（detail/cert.pem/key.pem/p12）：租户用户仅本租户证书行（越域 403）；全局用户跨租户只读放行。</li>
  *   <li>行级写：更新/重签不走直接端点（防单人执行，管理员也绕不过）：统一提交证书操作单
  *       （CertOpTicketController /admin/cert-ops），由持 cert:op:approve 的他人审批后执行。
@@ -55,7 +55,7 @@ public class CertController {
     @GetMapping("/certs")
     public Result<Page<CertVO>> page(@Valid CertPageQueryDTODTO query, HttpServletRequest request) {
         // 租户用户锁本租户（显式传别租户 403）；全局用户不传=null=跨租户全量只读
-        String scope = TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantKey(), query.getTenantKey());
+        String scope = TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), query.getTenantUscc());
         return Result.success("查询成功", certService.page(query.getPageNo(), query.getPageSize(),
                 query.getCertType(), query.getStatus(), query.getKeyword(), scope));
     }
@@ -65,7 +65,7 @@ public class CertController {
      */
     @GetMapping("/certs/{id}")
     public Result<CertVO> detail(@PathVariable Long id, HttpServletRequest request) {
-        return Result.success("查询成功", certService.detailVisible(id, UserUtils.requireLoginUser().getTenantKey()));
+        return Result.success("查询成功", certService.detailVisible(id, UserUtils.requireLoginUser().getTenantUscc()));
     }
 
     /**
@@ -74,9 +74,9 @@ public class CertController {
     @PreAuthorize("hasAuthority('cert:issue')")
     @PostMapping("/certs")
     public Result<CertVO> issue(@RequestBody IssueCertRequestDTO req,
-                                @RequestParam(required = false) String tenantKey,
+                                @RequestParam(required = false) String tenantUscc,
                                 HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), tenant, request);
         String username = UserUtils.requireLoginUser().getUsername();
         return Result.success("签发成功", certService.issue(tenant, req, username, clientIp(request)));
@@ -88,9 +88,9 @@ public class CertController {
     @PreAuthorize("hasAuthority('cert:issue')")
     @PostMapping("/certs/csr")
     public Result<CertVO> issueFromCsr(@RequestBody CsrIssueRequestDTO req,
-                                       @RequestParam(required = false) String tenantKey,
+                                       @RequestParam(required = false) String tenantUscc,
                                        HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), tenant, request);
         String username = UserUtils.requireLoginUser().getUsername();
         return Result.success("CSR签发成功", certService.issueFromCsr(tenant,
@@ -104,9 +104,9 @@ public class CertController {
     @PreAuthorize("hasAuthority('cert:issue')")
     @PostMapping("/certs/public-key")
     public Result<CertVO> issueWithPublicKey(@RequestBody PublicKeyIssueDTO req,
-                                             @RequestParam(required = false) String tenantKey,
+                                             @RequestParam(required = false) String tenantUscc,
                                              HttpServletRequest request) {
-        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey);
+        String tenant = TenantScope.requireExplicitTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc);
         checkSubCaAndTemplate(req.getTemplateId(), req.getCertType(), tenant, request);
         String username = UserUtils.requireLoginUser().getUsername();
         return Result.success("公钥签发成功", certService.issueWithPublicKey(tenant, req, null, username, clientIp(request)));
@@ -119,10 +119,10 @@ public class CertController {
     @GetMapping("/certs/{id}/cert.pem")
     public String downloadCert(@PathVariable Long id, HttpServletRequest request) {
         CaCert row = certService.findById(id);
-        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantKey(), row.getTenantKey());
+        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantUscc(), row.getTenantUscc());
         String username = UserUtils.requireLoginUser().getUsername();
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
-                "下载证书：" + row.getSubjectCn(), clientIp(request), TenantScope.tenantOfRow(row.getTenantKey()));
+                "下载证书：" + row.getSubjectCn(), clientIp(request), TenantScope.tenantOfRow(row.getTenantUscc()));
         return certService.certPem(id);
     }
 
@@ -133,10 +133,10 @@ public class CertController {
     @GetMapping("/certs/{id}/key.pem")
     public String downloadKey(@PathVariable Long id, HttpServletRequest request) {
         CaCert row = certService.findById(id);
-        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantKey(), row.getTenantKey());
+        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantUscc(), row.getTenantUscc());
         String username = UserUtils.requireLoginUser().getUsername();
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
-                "下载私钥：" + row.getSubjectCn(), clientIp(request), TenantScope.tenantOfRow(row.getTenantKey()));
+                "下载私钥：" + row.getSubjectCn(), clientIp(request), TenantScope.tenantOfRow(row.getTenantUscc()));
         return certService.keyPem(id);
     }
 
@@ -151,13 +151,13 @@ public class CertController {
                                             @Valid @RequestBody(required = false) CertExportP12DTO body,
                                             HttpServletRequest request) {
         CaCert row = certService.findById(id);
-        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantKey(), row.getTenantKey());
+        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantUscc(), row.getTenantUscc());
         String password = body == null ? null : body.getPassword();
         byte[] p12 = certService.exportP12(id, password);
         String username = UserUtils.requireLoginUser().getUsername();
         auditService.record(username, "CERT_DOWNLOAD", String.valueOf(id),
                 "导出PKCS#12（口令加密）：" + row.getSubjectCn(), clientIp(request),
-                TenantScope.tenantOfRow(row.getTenantKey()));
+                TenantScope.tenantOfRow(row.getTenantUscc()));
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("application/x-pkcs12"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + id + ".p12\"")
@@ -168,9 +168,9 @@ public class CertController {
      * 概览统计（仪表盘；按当前租户域过滤，租户用户锁本租户）
      */
     @GetMapping("/overview")
-    public Result<CertOverviewVO> overview(@RequestParam(required = false) String tenantKey,
+    public Result<CertOverviewVO> overview(@RequestParam(required = false) String tenantUscc,
                                            HttpServletRequest request) {
-        return Result.success("查询成功", certService.overview(TenantScope.effectiveTenant(UserUtils.requireLoginUser().getTenantKey(), tenantKey)));
+        return Result.success("查询成功", certService.overview(TenantScope.effectiveTenant(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc)));
     }
 
     /**

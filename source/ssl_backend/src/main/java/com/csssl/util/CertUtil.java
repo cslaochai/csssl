@@ -1,6 +1,9 @@
 package com.csssl.util;
 
 import org.bouncycastle.asn1.ASN1Integer;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.DERUTF8String;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.style.BCStyle;
 import org.bouncycastle.asn1.x509.AccessDescription;
@@ -93,14 +96,31 @@ public final class CertUtil {
         return new BigInteger(bytes);
     }
 
+    /**
+     * 统一社会信用代码证书扩展 OID（GM/T 0015-2023 新增 UniformSocialCreditIdentifier，非关键，值为 UTF8String）。
+     * 取电子政务数字证书格式规范（局字486）5.1.2.2 已定义的代码标识弧 1.2.156.10260.4.1 的下一序号
+     * （.1~.5 依次为个人身份标识码/社会保险号/工商注册号/组织机构代码/税务登记号）。
+     * 对外对接前须与 GM/T 0015-2023 附录A.3、GM/T 0006-2023 第8章原文核对，对方另有指定时只改此一处。
+     */
+    public static final String USCC_EXTENSION_OID = "1.2.156.10260.4.1.6";
+
     /** 根CA自签证书（默认域：主体 O 固定 CSSSL，保持存量根DN逐字节兼容） */
     public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String algorithm, int validityDays) {
-        return selfSignRoot(rootKey, cn, "CSSSL", algorithm, validityDays);
+        return selfSignRoot(rootKey, cn, "CSSSL", algorithm, validityDays, null);
     }
 
     /** 根CA自签证书（多租户版：主体 O 取自租户注册表 subject_o，租户受控） */
     public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String organization,
                                                String algorithm, int validityDays) {
+        return selfSignRoot(rootKey, cn, organization, algorithm, validityDays, null);
+    }
+
+    /**
+     * 根CA自签证书（带统一社会信用代码）：uscc 为空则不写该扩展（存量 default 域零变化）。
+     * 扩展只写在租户根上，SUB_CA 与终端证书签发时由 {@link #usccOf} 从签发CA继承，整条链携带同一租户代码。
+     */
+    public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String organization,
+                                               String algorithm, int validityDays, String uscc) {
         try {
             X500Name subject = new X500Name("CN=" + escapeX500(cn) + ",O=" + escapeX500(organization));
             BigInteger serial = randomSerial();
@@ -117,12 +137,41 @@ public final class CertUtil {
                     utils.createSubjectKeyIdentifier(rootKey.getPublic()));
             builder.addExtension(Extension.authorityKeyIdentifier, false,
                     utils.createAuthorityKeyIdentifier(rootKey.getPublic()));
+            addUsccExtension(builder, uscc);
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm(algorithm))
                     .setProvider("BC").build(rootKey.getPrivate());
             X509CertificateHolder holder = builder.build(signer);
             return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
         } catch (Exception e) {
             throw new IllegalStateException("根CA自签失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 写入统一社会信用代码扩展（非关键）：空值跳过；位数不对直接拒签，避免把脏数据签进证书 */
+    private static void addUsccExtension(X509v3CertificateBuilder builder, String uscc) {
+        if (uscc == null || uscc.isBlank()) {
+            return;
+        }
+        if (uscc.length() != 18) {
+            throw new IllegalArgumentException("统一社会信用代码应为 18 位，实际 " + uscc.length() + " 位：" + uscc);
+        }
+        try {
+            builder.addExtension(new ASN1ObjectIdentifier(USCC_EXTENSION_OID), false, new DERUTF8String(uscc));
+        } catch (Exception e) {
+            throw new IllegalStateException("统一社会信用代码扩展写入失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 读取签发CA证书上的统一社会信用代码扩展（无则 null），供下级证书继承 */
+    private static String usccOf(X509Certificate caCert) {
+        byte[] ext = caCert.getExtensionValue(USCC_EXTENSION_OID);
+        if (ext == null) {
+            return null;
+        }
+        try {
+            return DERUTF8String.getInstance(ASN1OctetString.getInstance(ext).getOctets()).getString();
+        } catch (Exception e) {
+            throw new IllegalStateException("签发CA的统一社会信用代码扩展解析失败: " + e.getMessage(), e);
         }
     }
 
@@ -332,6 +381,9 @@ public final class CertUtil {
                                 AccessDescription.id_ad_ocsp,
                                 new GeneralName(GeneralName.uniformResourceIdentifier, ocspUrl))));
             }
+
+            // 租户信用代码继承：签发CA（租户根）带统一社会信用代码扩展时，SUB_CA 与终端证书一并带上
+            addUsccExtension(builder, usccOf(caCert));
 
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithmForKey(caKey))
                     .setProvider("BC").build(caKey);
