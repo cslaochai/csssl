@@ -24,19 +24,19 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(cssslProperties.getSecurity().getJwt().getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 令牌解析结果（uid/tv 供拦截器回查会话版本号，实现吊销；tenant 为签发时租户域快照，权威值以拦截器回库为准；realName 为登录时真实姓名快照） */
-    public record TokenClaims(String username, String role, Long uid, Integer tokenVersion, String tenant, String realName) {
+    /** 令牌解析结果（uid/tv 供拦截器回查会话版本号，实现吊销；company 为签发时公司域快照，权威值以拦截器回库为准；realName 为登录时真实姓名快照） */
+    public record TokenClaims(String username, String role, Long uid, Integer tokenVersion, String company, String realName) {
     }
 
     /**
      * 签发会话令牌：subject=username，携带角色与 uid/tv（tv=签发时的 token_version）。
      * 口令/角色/状态变更后库里 token_version+1，旧令牌即刻与库中版本不符而被拒。
      *
-     * <p>tenantUscc（租户数据域）写入 claim 'o'；全局用户（tenantUscc 为空）不写该声明。
-     * 'o' 仅作签发时快照，拦截器以回库的 ssl_sys_user.tenant_uscc 为准写入请求属性。
+     * <p>companyUscc（公司数据域）写入 claim 'o'；全局用户（companyUscc 为空）不写该声明。
+     * 'o' 仅作签发时快照，拦截器以回库的 ssl_sys_user.company_uscc 为准写入请求属性。
      * realName 写入 claim 'rn'（登录时真实姓名快照），业务落库时直接取令牌中的姓名，避免每次写库再查用户表。</p>
      */
-    public String createToken(String username, String role, Long uid, Integer tokenVersion, String tenantUscc, String realName) {
+    public String createToken(String username, String role, Long uid, Integer tokenVersion, String companyUscc, String realName) {
         long exp = cssslProperties.getSecurity().getJwt().getExpiration();
         var builder = Jwts.builder()
                 .subject(username)
@@ -48,8 +48,8 @@ public class JwtUtil {
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + exp))
                 .signWith(signingKey());
-        if (tenantUscc != null && !tenantUscc.isBlank()) {
-            builder.claim("o", tenantUscc);
+        if (companyUscc != null && !companyUscc.isBlank()) {
+            builder.claim("o", companyUscc);
         }
         return builder.compact();
     }

@@ -3,13 +3,13 @@ package com.csssl.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.dto.ApplicationAuditDTO;
-import com.csssl.dto.TenantOpPageQueryDTO;
-import com.csssl.dto.TenantOpSubmitDTO;
-import com.csssl.entity.CaTenantOpTicket;
+import com.csssl.dto.CompanyOpPageQueryDTO;
+import com.csssl.dto.CompanyOpSubmitDTO;
+import com.csssl.entity.CompanyOpTicket;
 import com.csssl.entity.LoginUser;
-import com.csssl.service.TenantOpTicketService;
+import com.csssl.service.CompanyOpTicketService;
 import com.csssl.util.UserUtils;
-import com.csssl.vo.TenantOpReceiptVO;
+import com.csssl.vo.CompanyOpReceiptVO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,21 +22,21 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 租户生命周期变更审批单接口（暂停/恢复/关闭/重置接入密钥走单双人复核）：
- * 发起=持 tenant:op:apply 的租户管理员，审批=持 tenant:op:approve 的租户审批员（不得与发起人同一人），
- * 批准即执行。新建租户不属敏感变更，已改为 {@link TenantController} 直接执行，本接口不再接受 CREATE 新单。
- * 全部端点仅限全局账号（租户账号不参与平台级租户生命周期）。
+ * 公司生命周期变更审批单接口（暂停/恢复/关闭/重置接入密钥走单双人复核）：
+ * 发起=持 company:op:apply 的公司管理员，审批=持 company:op:approve 的公司审批员（不得与发起人同一人），
+ * 批准即执行。新建公司不属敏感变更，已改为 {@link CompanyController} 直接执行，本接口不再接受 CREATE 新单。
+ * 全部端点仅限全局账号（公司账号不参与平台级公司生命周期）。
  */
 @RestController
-@RequestMapping("/admin/tenant-ops")
+@RequestMapping("/admin/company-ops")
 @RequiredArgsConstructor
-public class TenantOpTicketController {
+public class CompanyOpTicketController {
 
-    private final TenantOpTicketService ticketService;
+    private final CompanyOpTicketService ticketService;
 
     /** 变更单分页查询（全局账号；只读，系统管理员可巡检） */
     @GetMapping
-    public Result<Page<CaTenantOpTicket>> page(@Valid TenantOpPageQueryDTO query) {
+    public Result<Page<CompanyOpTicket>> page(@Valid CompanyOpPageQueryDTO query) {
         requireGlobal();
         return Result.success("查询成功", ticketService.page(query.getPageNo(), query.getPageSize(),
                 query.getStatus(), query.getOpType(), query.getKeyword()));
@@ -44,24 +44,24 @@ public class TenantOpTicketController {
 
     /** 变更单详情 */
     @GetMapping("/{id}")
-    public Result<CaTenantOpTicket> detail(@PathVariable Long id) {
+    public Result<CompanyOpTicket> detail(@PathVariable Long id) {
         requireGlobal();
         return Result.success("查询成功", ticketService.detail(id));
     }
 
     /** 发起变更单（不执行，仅落待审批） */
-    @PreAuthorize("hasAuthority('tenant:op:apply')")
+    @PreAuthorize("hasAuthority('company:op:apply')")
     @PostMapping
-    public Result<CaTenantOpTicket> submit(@Valid @RequestBody TenantOpSubmitDTO body, HttpServletRequest request) {
+    public Result<CompanyOpTicket> submit(@Valid @RequestBody CompanyOpSubmitDTO body, HttpServletRequest request) {
         LoginUser user = requireGlobal();
         return Result.success("变更单已提交，待审批", ticketService.submit(body,
                 user.getUsername(), user.getRealName(), clientIp(request)));
     }
 
     /** 审批批准（不得与发起人同一人；批准即执行：状态流转/密钥轮换） */
-    @PreAuthorize("hasAuthority('tenant:op:approve')")
+    @PreAuthorize("hasAuthority('company:op:approve')")
     @PostMapping("/{id}/approve")
-    public Result<CaTenantOpTicket> approve(@PathVariable Long id,
+    public Result<CompanyOpTicket> approve(@PathVariable Long id,
                                             @Valid @RequestBody(required = false) ApplicationAuditDTO body,
                                             HttpServletRequest request) {
         LoginUser user = requireGlobal();
@@ -70,10 +70,10 @@ public class TenantOpTicketController {
                 user.getUsername(), user.getRealName(), clientIp(request)));
     }
 
-    /** 审批驳回（不得与发起人同一人；意见必填；租户状态不变） */
-    @PreAuthorize("hasAuthority('tenant:op:approve')")
+    /** 审批驳回（不得与发起人同一人；意见必填；公司状态不变） */
+    @PreAuthorize("hasAuthority('company:op:approve')")
     @PostMapping("/{id}/reject")
-    public Result<CaTenantOpTicket> reject(@PathVariable Long id, @Valid @RequestBody ApplicationAuditDTO body,
+    public Result<CompanyOpTicket> reject(@PathVariable Long id, @Valid @RequestBody ApplicationAuditDTO body,
                                            HttpServletRequest request) {
         LoginUser user = requireGlobal();
         return Result.success("已驳回", ticketService.reject(id, body.getComment(),
@@ -82,24 +82,24 @@ public class TenantOpTicketController {
 
     /** 撤回变更单（仅发起人本人；仅待审批可撤） */
     @PostMapping("/{id}/cancel")
-    public Result<CaTenantOpTicket> cancel(@PathVariable Long id, HttpServletRequest request) {
+    public Result<CompanyOpTicket> cancel(@PathVariable Long id, HttpServletRequest request) {
         LoginUser user = requireGlobal();
         return Result.success("已撤回", ticketService.cancel(id, user.getUsername(), clientIp(request)));
     }
 
     /** 领取接入凭证回执（仅发起人本人、仅已执行、一次性；密钥不落库） */
     @GetMapping("/{id}/receipt")
-    public Result<TenantOpReceiptVO> receipt(@PathVariable Long id, HttpServletRequest request) {
+    public Result<CompanyOpReceiptVO> receipt(@PathVariable Long id, HttpServletRequest request) {
         LoginUser user = requireGlobal();
         return Result.success("回执已领取（密钥仅展示一次）",
                 ticketService.takeReceipt(id, user.getUsername(), clientIp(request)));
     }
 
-    /** 租户生命周期属平台级操作：仅全局账号可参与 */
+    /** 公司生命周期属平台级操作：仅全局账号可参与 */
     private LoginUser requireGlobal() {
         LoginUser user = UserUtils.requireLoginUser();
-        if (user.getTenantUscc() != null) {
-            throw new SecurityException("权限不足：租户变更仅限全局账号");
+        if (user.getCompanyUscc() != null) {
+            throw new SecurityException("权限不足：公司变更仅限全局账号");
         }
         return user;
     }

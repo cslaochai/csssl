@@ -18,8 +18,8 @@ import java.util.List;
 /**
  * 外部系统 API 客户端管理（仅全局账号）：登记/轮换/启停，secret 仅登记与轮换响应展示一次。
  *
- * <p>接入凭证归租户管理员（apiclient:manage），系统管理员只读巡检、不得登记或轮换；
- * 客户端绑定的租户在登记时确定，外部请求 URL 不携带租户标识。</p>
+ * <p>接入凭证归公司管理员（apiclient:manage），系统管理员只读巡检、不得登记或轮换；
+ * 客户端绑定的公司在登记时确定，外部请求 URL 不携带公司标识。</p>
  */
 @RestController
 @RequestMapping("/admin/api-clients")
@@ -46,7 +46,7 @@ public class ApiClientAdminController {
                                             HttpServletRequest request) {
         LoginUser user = requireGlobalAdmin();
         return Result.success("登记成功，请立即保存 secret（仅展示一次）",
-                clientService.create(body.getTenantUscc(), body.getClientName(), body.getIpAllowlist(),
+                clientService.create(body.getCompanyUscc(), body.getClientName(), body.getIpAllowlist(),
                         body.getClientCertSha256(), user.getUsername(), clientIp(request)));
     }
 
@@ -73,7 +73,7 @@ public class ApiClientAdminController {
 
     private LoginUser requireGlobalAdmin() {
         LoginUser user = UserUtils.requireLoginUser();
-        if (user.getTenantUscc() != null) {
+        if (user.getCompanyUscc() != null) {
             throw new SecurityException("权限不足：API 客户端管理仅限全局系统管理员");
         }
         return user;

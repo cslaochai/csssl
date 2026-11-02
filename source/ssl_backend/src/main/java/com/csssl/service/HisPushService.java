@@ -4,6 +4,7 @@ import com.csssl.config.CssslProperties;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CertApplication;
 import com.csssl.enums.CertApplicationStatusEnum;
+import com.csssl.util.SignUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,10 @@ import java.util.UUID;
  * <p>外部系统（HIS）只保留「提交申请」与「吊销证书」两个出站能力，没有查询权限，
  * 所以审核/驳回/签发/撤销必须由 CA 主动推送。只推送 API 渠道（externalSystem 非空）提交的申请单；
  * 推送失败只记日志，不影响 CA 侧已提交的业务动作——外部系统可凭 applyNo 人工核对后重试。</p>
+ *
+ * <p><b>签名</b>：每个推送都带 {@code X-Ca-Timestamp} / {@code X-Ca-Nonce} / {@code X-Ca-Signature}，
+ * 签名串为 {@code timestamp \n nonce \n sha256Hex(body)} 的 HMAC-SHA256（hex）。
+ * 密钥未配置时<b>拒绝推送</b>——无签名的推送可被伪造，等于替 HIS 装上攻击者指定的证书。</p>
  */
 @Slf4j
 @Service
@@ -34,6 +39,11 @@ import java.util.UUID;
 public class HisPushService {
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /** 推送签名头（HIS 侧按同名头取值验签） */
+    public static final String HEADER_TIMESTAMP = "X-Ca-Timestamp";
+    public static final String HEADER_NONCE = "X-Ca-Nonce";
+    public static final String HEADER_SIGNATURE = "X-Ca-Signature";
 
     private final CssslProperties props;
     private final ObjectMapper objectMapper;
@@ -59,14 +69,28 @@ public class HisPushService {
             log.warn("[状态推送] 未配置 csssl.his-push.callback-url，跳过推送 applyNo={}", app.getApplyNo());
             return;
         }
+        String secret = cfg.getSecret();
+        if (secret == null || secret.isBlank()) {
+            log.warn("[状态推送] 未配置 csssl.his-push.secret（推送签名密钥），拒绝推送 applyNo={}；"
+                    + "无签名报文可被伪造，需先与 HIS 约定同一密钥", app.getApplyNo());
+            return;
+        }
         try {
             String body = objectMapper.writeValueAsString(payloadOf(app));
+            String ts = String.valueOf(System.currentTimeMillis());
+            String nonce = UUID.randomUUID().toString().replace("-", "");
+            String signature = SignUtil.hmacHex(secret,
+                    ts + "\n" + nonce + "\n" + SignUtil.sha256Hex(body.getBytes(StandardCharsets.UTF_8)));
+            warnIfInsecure(url);
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(cfg.getTimeoutMs()))
                     .build();
             HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                     .timeout(Duration.ofMillis(cfg.getTimeoutMs()))
                     .header("Content-Type", "application/json;charset=UTF-8")
+                    .header(HEADER_TIMESTAMP, ts)
+                    .header(HEADER_NONCE, nonce)
+                    .header(HEADER_SIGNATURE, signature)
                     .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                     .build();
             HttpResponse<String> response = client.send(request,
@@ -128,6 +152,20 @@ public class HisPushService {
     private static String statusText(String status) {
         CertApplicationStatusEnum s = CertApplicationStatusEnum.fromCode(status);
         return s == null ? status : s.getLabel();
+    }
+
+    /**
+     * 回调地址非 https 时告警：报文里带证书 PEM 与主体信息，明文传输等于对外泄露一份资产清单。
+     * 本机回环不告警，避免本地联调刷屏。
+     */
+    private void warnIfInsecure(String url) {
+        if (url.startsWith("https://")) {
+            return;
+        }
+        if (url.startsWith("http://localhost") || url.startsWith("http://127.0.0.1")) {
+            return;
+        }
+        log.warn("[状态推送] 回调地址非 https，报文与证书 PEM 将以明文传输：{}", url);
     }
 
     private static String abbreviate(String text) {

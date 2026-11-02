@@ -4,11 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaCertOpTicket;
-import com.csssl.entity.CaTenant;
+import com.csssl.entity.CaCompany;
 import com.csssl.enums.CertOpTypeEnum;
 import com.csssl.enums.TicketStatusEnum;
 import com.csssl.mapper.CaCertOpTicketMapper;
-import com.csssl.util.TenantScope;
+import com.csssl.util.CompanyScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,10 +39,10 @@ public class CertOpTicketService {
     private final CaService caService;
 
     /**
-     * 分页查询（tenantScope 非空=仅该租户；null=全量只读，由控制器按数据域收敛）
+     * 分页查询（companyScope 非空=仅该公司；null=全量只读，由控制器按数据域收敛）
      */
     public Page<CaCertOpTicket> page(long pageNo, long pageSize, String status, String opType,
-                                     String keyword, String tenantScope) {
+                                     String keyword, String companyScope) {
         LambdaQueryWrapper<CaCertOpTicket> qw = new LambdaQueryWrapper<>();
         if (status != null && !status.isBlank()) {
             qw.eq(CaCertOpTicket::getStatus, status);
@@ -55,39 +55,39 @@ public class CertOpTicketService {
                     .like(CaCertOpTicket::getCertSerialHex, keyword).or()
                     .like(CaCertOpTicket::getOpNo, keyword));
         }
-        if (tenantScope != null && !tenantScope.isBlank()) {
-            qw.eq(CaCertOpTicket::getTenantUscc, tenantScope);
+        if (companyScope != null && !companyScope.isBlank()) {
+            qw.eq(CaCertOpTicket::getCompanyUscc, companyScope);
         }
         qw.orderByDesc(CaCertOpTicket::getCreatedAt);
         return ticketMapper.selectPage(new Page<>(pageNo, pageSize), qw);
     }
 
     /**
-     * 详情（租户用户访问他租户单按不存在处理，不泄露存在性）
+     * 详情（公司用户访问他公司单按不存在处理，不泄露存在性）
      */
-    public CaCertOpTicket detailVisible(Long id, String operatorTenant) {
+    public CaCertOpTicket detailVisible(Long id, String operatorCompany) {
         CaCertOpTicket ticket = ticketMapper.selectById(id);
         if (ticket == null) {
             throw new IllegalArgumentException("操作单不存在（id=" + id + "）");
         }
-        TenantScope.requireRowVisible(operatorTenant, ticket.getTenantUscc());
+        CompanyScope.requireRowVisible(operatorCompany, ticket.getCompanyUscc());
         return ticket;
     }
 
     /**
      * 发起操作单（不执行，仅落 PENDING 待审批）。
-     * 校验：操作类型合法、目标证书存在且在本租户域、状态与操作类型匹配、无同证书同类型待审批单、
+     * 校验：操作类型合法、目标证书存在且在本公司域、状态与操作类型匹配、无同证书同类型待审批单、
      * 根CA/二级CA不走操作单（平台级处置）、吊销/挂起必填原因、更新/重签必填新有效期。
      */
     public CaCertOpTicket submit(String opTypeCode, Long certId, String reason, Integer validityDays,
-                                 String username, String realName, String ip, String effTenant) {
+                                 String username, String realName, String ip, String effCompany) {
         CertOpTypeEnum opType = CertOpTypeEnum.fromCode(opTypeCode);
         if (opType == null) {
             throw new IllegalArgumentException("操作类型仅支持 REVOKE-吊销 / SUSPEND-挂起 / UNSUSPEND-解除挂起 / RENEW-证书更新 / REKEY-密钥更新");
         }
         CaCert cert = certService.findById(certId);
-        TenantScope.requireRowVisible(effTenant, cert.getTenantUscc());
-        requireTenantMatch(cert.getTenantUscc(), effTenant);
+        CompanyScope.requireRowVisible(effCompany, cert.getCompanyUscc());
+        requireCompanyMatch(cert.getCompanyUscc(), effCompany);
         if ("ROOT".equals(cert.getCertType())
                 || (opType == CertOpTypeEnum.REKEY && "SUB_CA".equals(cert.getCertType()))) {
             throw new IllegalArgumentException("根CA/二级CA不走操作单流程（CA 密钥处置属系统维护，不在本流程内）");
@@ -108,12 +108,12 @@ public class CertOpTicketService {
         if (needDays && (validityDays == null || validityDays < 1)) {
             throw new IllegalArgumentException("新有效期天数不能为空（更新/重签必填）");
         }
-        if (opType == CertOpTypeEnum.REKEY && !caService.issuedKeyExists(tenantOf(cert), cert.getSerialHex())) {
+        if (opType == CertOpTypeEnum.REKEY && !caService.issuedKeyExists(companyOf(cert), cert.getSerialHex())) {
             throw new IllegalArgumentException("该证书私钥由申请方自持（CSR/公钥签发），CA 侧无法重签，请申请方重新走 RA 申请");
         }
 
         CaCertOpTicket ticket = new CaCertOpTicket();
-        ticket.setTenantUscc(CaTenant.LEGACY_NAMESPACE.equals(cert.getTenantUscc()) ? null : cert.getTenantUscc());
+        ticket.setCompanyUscc(CaCompany.LEGACY_NAMESPACE.equals(cert.getCompanyUscc()) ? null : cert.getCompanyUscc());
         ticket.setOpNo("CO" + OP_NO_TS.format(LocalDateTime.now()) + String.format("%04d", RANDOM.nextInt(10000)));
         ticket.setOpType(opType.getCode());
         ticket.setCertId(certId);
@@ -130,7 +130,7 @@ public class CertOpTicketService {
         auditService.record(username, "CO_SUBMIT", ticket.getOpNo(),
                 "发起证书操作单：" + opType.getLabel() + " " + cert.getSubjectCn()
                         + (needDays ? "（新有效期 " + validityDays + " 天）" : needReason ? "（原因：" + reason + "）" : ""),
-                ip, tenantOf(cert));
+                ip, companyOf(cert));
         log.info("[证书操作单][{}] 发起 {} id={} cn={}", ticket.getOpNo(), opType.getCode(), certId, cert.getSubjectCn());
         return ticket;
     }
@@ -141,9 +141,9 @@ public class CertOpTicketService {
      * 执行前重验证书当前状态（发起后状态可能已变化）。
      */
     @Transactional(rollbackFor = Exception.class)
-    public CaCertOpTicket approve(Long id, String comment, String username, String realName, String ip, String effTenant) {
+    public CaCertOpTicket approve(Long id, String comment, String username, String realName, String ip, String effCompany) {
         CaCertOpTicket ticket = checkPending(id);
-        requireTenantMatch(ticket.getTenantUscc(), effTenant);
+        requireCompanyMatch(ticket.getCompanyUscc(), effCompany);
         checkReviewerDiff(ticket, username);
         CertOpTypeEnum opType = CertOpTypeEnum.fromCode(ticket.getOpType());
         if (opType == null) {
@@ -157,8 +157,8 @@ public class CertOpTicketService {
             case REVOKE -> certService.revoke(cert.getId(), ticket.getReason(), operator, ip);
             case SUSPEND -> certService.suspend(cert.getId(), ticket.getReason(), operator, ip);
             case UNSUSPEND -> certService.unsuspend(cert.getId(), operator, ip);
-            case RENEW -> certService.renew(effTenant, cert.getId(), ticket.getValidityDays(), operator, ip);
-            case REKEY -> certService.rekey(effTenant, cert.getId(), ticket.getValidityDays(), operator, ip);
+            case RENEW -> certService.renew(effCompany, cert.getId(), ticket.getValidityDays(), operator, ip);
+            case REKEY -> certService.rekey(effCompany, cert.getId(), ticket.getValidityDays(), operator, ip);
         }
 
         ticket.setStatus(TicketStatusEnum.EXECUTED.getCode());
@@ -170,7 +170,7 @@ public class CertOpTicketService {
         ticketMapper.updateById(ticket);
         auditService.record(username, "CO_APPROVE", ticket.getOpNo(),
                 "批准并执行证书操作单：" + opType.getLabel() + " " + ticket.getCertSubjectCn()
-                        + "（发起人 " + ticket.getRequestedByName() + "）", ip, ticket.getTenantUscc());
+                        + "（发起人 " + ticket.getRequestedByName() + "）", ip, ticket.getCompanyUscc());
         log.info("[证书操作单][{}] 批准并执行 {} cn={} 审批人={}", ticket.getOpNo(), ticket.getOpType(),
                 ticket.getCertSubjectCn(), username);
         return ticket;
@@ -179,9 +179,9 @@ public class CertOpTicketService {
     /**
      * 审批驳回（不得与发起人同一人；意见必填；单据落 REJECTED，证书状态不变）
      */
-    public CaCertOpTicket reject(Long id, String comment, String username, String realName, String ip, String effTenant) {
+    public CaCertOpTicket reject(Long id, String comment, String username, String realName, String ip, String effCompany) {
         CaCertOpTicket ticket = checkPending(id);
-        requireTenantMatch(ticket.getTenantUscc(), effTenant);
+        requireCompanyMatch(ticket.getCompanyUscc(), effCompany);
         checkReviewerDiff(ticket, username);
         if (comment == null || comment.isBlank()) {
             throw new IllegalArgumentException("驳回必须填写审批意见");
@@ -193,19 +193,19 @@ public class CertOpTicketService {
         ticket.setReviewComment(comment.trim());
         ticketMapper.updateById(ticket);
         auditService.record(username, "CO_REJECT", ticket.getOpNo(),
-                "驳回证书操作单：" + opText(ticket.getOpType()) + " " + ticket.getCertSubjectCn(), ip, ticket.getTenantUscc());
+                "驳回证书操作单：" + opText(ticket.getOpType()) + " " + ticket.getCertSubjectCn(), ip, ticket.getCompanyUscc());
         return ticket;
     }
 
     /**
      * 撤销操作单：仅发起人本人，且仅 PENDING 可撤销（审批人可驳回兜底，无需管理员旁路）
      */
-    public CaCertOpTicket cancel(Long id, String username, String role, String ip, String effTenant) {
+    public CaCertOpTicket cancel(Long id, String username, String role, String ip, String effCompany) {
         CaCertOpTicket ticket = ticketMapper.selectById(id);
         if (ticket == null) {
             throw new IllegalArgumentException("操作单不存在（id=" + id + "）");
         }
-        requireTenantMatch(ticket.getTenantUscc(), effTenant);
+        requireCompanyMatch(ticket.getCompanyUscc(), effCompany);
         if (!Objects.equals(ticket.getRequestedBy(), username)) {
             throw new SecurityException("仅操作单发起人本人可撤销（当前操作人：" + username + "）");
         }
@@ -215,7 +215,7 @@ public class CertOpTicketService {
         ticket.setStatus(TicketStatusEnum.CANCELLED.getCode());
         ticketMapper.updateById(ticket);
         auditService.record(username, "CO_CANCEL", ticket.getOpNo(),
-                "撤销证书操作单：" + opText(ticket.getOpType()) + " " + ticket.getCertSubjectCn(), ip, ticket.getTenantUscc());
+                "撤销证书操作单：" + opText(ticket.getOpType()) + " " + ticket.getCertSubjectCn(), ip, ticket.getCompanyUscc());
         return ticket;
     }
 
@@ -248,10 +248,10 @@ public class CertOpTicketService {
         }
     }
 
-    private void requireTenantMatch(String rowTenant, String effTenant) {
-        String expected = rowTenant == null || rowTenant.isBlank() ? CaTenant.PRIMARY_TENANT_USCC : rowTenant;
-        if (!expected.equals(effTenant)) {
-            throw new SecurityException("权限不足：操作单归属租户 " + expected + "，与当前操作域 " + effTenant + " 不一致");
+    private void requireCompanyMatch(String rowCompany, String effCompany) {
+        String expected = rowCompany == null || rowCompany.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : rowCompany;
+        if (!expected.equals(effCompany)) {
+            throw new SecurityException("权限不足：操作单归属公司 " + expected + "，与当前操作域 " + effCompany + " 不一致");
         }
     }
 
@@ -275,8 +275,8 @@ public class CertOpTicketService {
         return ticket;
     }
 
-    private String tenantOf(CaCert cert) {
-        return TenantScope.tenantOfRow(cert.getTenantUscc());
+    private String companyOf(CaCert cert) {
+        return CompanyScope.companyOfRow(cert.getCompanyUscc());
     }
 
     private String opText(String opType) {

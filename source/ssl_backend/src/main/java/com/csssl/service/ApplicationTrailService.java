@@ -19,11 +19,11 @@ public class ApplicationTrailService {
     private final ApplicationTrailMapper trailMapper;
 
     /** 记录一步轨迹 */
-    public void record(String tenantUscc, Long applicationId, String applyNo, String step,
+    public void record(String companyUscc, Long applicationId, String applyNo, String step,
                        String operatorUsername, String operatorRealName, String operatorRole,
                        String fromStatus, String toStatus, String comment) {
         ApplicationTrail t = new ApplicationTrail();
-        t.setTenantUscc(tenantUscc == null || tenantUscc.isBlank() ? "default" : tenantUscc);
+        t.setCompanyUscc(companyUscc == null || companyUscc.isBlank() ? "default" : companyUscc);
         t.setApplicationId(applicationId);
         t.setApplyNo(applyNo);
         t.setStep(step);

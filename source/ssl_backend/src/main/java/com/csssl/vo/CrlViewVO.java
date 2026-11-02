@@ -9,16 +9,16 @@ import java.util.List;
 
 /**
  * CRL 吊销列表视图：吊销记录 + 当前全量 CRL 元信息（管理页）。
- * default 域时 tenantUscc 保持 null（字段不输出，存量 URL 响应体逐字节兼容）。
+ * default 域时 companyUscc 保持 null（字段不输出，存量 URL 响应体逐字节兼容）。
  */
 @Data
 public class CrlViewVO {
 
     /**
-     * 归属租户域（仅非 default 域输出）
+     * 归属公司域（仅非 default 域输出）
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 吊销记录列表

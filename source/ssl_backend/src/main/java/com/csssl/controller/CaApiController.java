@@ -9,22 +9,16 @@ import com.csssl.entity.ApiClient;
 import com.csssl.service.CaApiService;
 import com.csssl.vo.ApiApplicationVO;
 import com.csssl.vo.ApiCertStatusVO;
-import com.csssl.vo.ApiTemplateVO;
-import com.csssl.vo.ApiTrustVO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 /**
  * 对外证书申请 API v1（供 HIS / EMR 等外部系统直连）。
  *
  * <p>鉴权由 {@link CaApiAuthFilter} 完成（HMAC-SHA256 + 防重放 + 限流 + IP/证书白名单）；
- * URL 不携带租户标识——租户由 appId 反查，调用方无法指定其他租户的数据域。</p>
+ * URL 不携带公司标识——公司由 appId 反查，调用方无法指定其他公司的数据域。</p>
  */
 @RestController
 @RequestMapping("/ca/api/v1")
@@ -41,27 +35,9 @@ public class CaApiController {
     }
 
     /**
-     * 信任材料：根/中间证书 PEM 与 CRL/OCSP 地址
-     */
-    @GetMapping("/trust")
-    public Result<ApiTrustVO> trust(@RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client) {
-        return Result.success("查询成功", apiService.trust(client));
-    }
-
-    /**
-     * 可用模板（全局 ∪ 本租户，排除 SUB_CA）
-     */
-    @GetMapping("/templates")
-    public Result<List<ApiTemplateVO>> templates(
-            @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
-            @RequestParam(required = false) String certType) {
-        return Result.success("查询成功", apiService.templates(client, certType));
-    }
-
-    /**
      * 提交证书申请（externalRequestId 幂等）
      */
-    @PostMapping("/applications")
+    @PostMapping("/apply/sign")
     public Result<ApiApplicationVO> submit(
             @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
             @RequestAttribute(CaApiAuthFilter.ATTR_BODY_SHA256) String bodyHash,
@@ -72,52 +48,9 @@ public class CaApiController {
     }
 
     /**
-     * 按申请单号查询状态
-     */
-    @GetMapping("/applications/{applyNo}")
-    public Result<ApiApplicationVO> detail(
-            @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
-            @PathVariable String applyNo) {
-        return Result.success("查询成功", apiService.detail(client, applyNo));
-    }
-
-    /**
-     * 按外部申请 ID 查询状态
-     */
-    @GetMapping("/applications")
-    public Result<ApiApplicationVO> byExternalRequestId(
-            @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
-            @RequestParam String externalRequestId) {
-        return Result.success("查询成功", apiService.detailByExternalRequestId(client, externalRequestId));
-    }
-
-    /**
-     * 下载证书：chain=true（默认）=叶子+SUB_CA+根，false=仅叶子；ISSUED 前返回 409
-     */
-    @GetMapping("/applications/{applyNo}/certificate")
-    public ResponseEntity<String> download(
-            @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
-            @PathVariable String applyNo,
-            @RequestParam(defaultValue = "true") boolean chain) {
-        CaApiService.CertificateDownload d = apiService.download(client, applyNo, chain);
-        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("application/x-pem-file;charset=UTF-8"));
-        if (d.serialHex() != null) {
-            builder.header("X-Serial-Hex", d.serialHex());
-        }
-        if (d.fingerprintSha256() != null) {
-            builder.header("X-Fingerprint-Sha256", d.fingerprintSha256());
-        }
-        if (d.notAfter() != null) {
-            builder.header("X-Not-After", d.notAfter());
-        }
-        return builder.body(d.pem());
-    }
-
-    /**
      * 撤销申请（仅提交方；PENDING/APPROVED 可撤，已撤销幂等返回）。申请单号放在请求体内，URL 不暴露参数。
      */
-    @PostMapping("/applications/cancel")
+    @PostMapping("/apply/cancel")
     public Result<ApiApplicationVO> cancel(
             @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
             @Valid @RequestBody ApiCancelDTO body,
@@ -127,7 +60,10 @@ public class CaApiController {
     }
 
     /**
-     * 吊销已签发证书（序列号与原因放在请求体内）：外部系统吊销后同步 CA，避免 CA 侧证书仍有效。
+     * 吊销已签发证书（序列号、医生身份与原因放在请求体内）：外部系统吊销后同步 CA，避免 CA 侧证书仍有效。
+     *
+     * <p>一次请求只吊销一张，且必须落到指定医生：证书须是本 appId 提交的申请单签出的客户端证书，
+     * 且请求携带的工号 / HIS 员工主键与申请单记录一致，否则 403。服务端证书与 SUB_CA 不受理。</p>
      */
     @PostMapping("/certificates/revoke")
     public Result<ApiCertStatusVO> revoke(
@@ -135,15 +71,5 @@ public class CaApiController {
             @Valid @RequestBody ApiCertRevokeDTO body,
             HttpServletRequest request) {
         return Result.success("已吊销", apiService.revoke(client, body, clientIp(request)));
-    }
-
-    /**
-     * 按序列号查询证书状态（便捷接口；实时性要求高时以 OCSP 为准）
-     */
-    @GetMapping("/certificates/{serialHex}/status")
-    public Result<ApiCertStatusVO> certStatus(
-            @RequestAttribute(CaApiAuthFilter.ATTR_CLIENT) ApiClient client,
-            @PathVariable String serialHex) {
-        return Result.success("查询成功", apiService.certStatus(client, serialHex));
     }
 }

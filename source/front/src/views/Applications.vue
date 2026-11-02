@@ -7,18 +7,19 @@
         <el-card ref="queryCardRef" class="query-card" shadow="never">
           <div class="query-wrap">
             <el-form :model="query" inline>
-              <el-form-item label="租户">
-                <el-select v-model="query.tenantUscc" placeholder="全部" clearable style="width: 280px" @change="handleSearch">
+              <el-form-item label="公司">
+                <el-select v-model="query.companyUscc" clearable placeholder="全部" style="width: 280px"
+                           @change="handleSearch">
                   <el-option
-                    v-for="o in tenantOptions"
-                    :key="o.uscc"
-                    :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
-                    :value="o.uscc"
+                      v-for="o in companyOptions"
+                      :key="o.uscc"
+                      :label="o.companyName ? `${o.companyName}（${o.uscc}）` : o.uscc"
+                      :value="o.uscc"
                   />
                 </el-select>
               </el-form-item>
               <el-form-item label="状态">
-                <el-select v-model="query.status" placeholder="全部" clearable style="width: 130px"
+                <el-select v-model="query.status" clearable placeholder="全部" style="width: 130px"
                            @change="handleSearch">
                   <el-option label="待审核" value="PENDING"/>
                   <el-option label="已批准" value="APPROVED"/>
@@ -30,15 +31,15 @@
               <el-form-item label="关键字">
                 <el-input
                     v-model="query.keyword"
-                    placeholder="申请人/申请单号"
                     clearable
+                    placeholder="申请人/申请单号"
                     style="width: 220px"
-                    @keyup.enter="handleSearch"
                     @clear="handleSearch"
+                    @keyup.enter="handleSearch"
                 />
               </el-form-item>
               <el-form-item>
-                <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+                <el-button :icon="Search" type="primary" @click="handleSearch">搜索</el-button>
                 <el-button :icon="Refresh" @click="handleReset">重置</el-button>
               </el-form-item>
             </el-form>
@@ -51,42 +52,45 @@
         <!-- 表格卡 -->
         <el-card class="table-card" shadow="never">
           <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-            <el-table-column prop="applyNo" label="申请单号" class-name="cell-mono" width="180" show-overflow-tooltip/>
+            <el-table-column class-name="cell-mono" label="申请单号" prop="applyNo" show-overflow-tooltip width="180"/>
             <el-table-column label="申请人类别" width="100">
               <template #default="{ row }">{{ row.applicantType === 'INSTITUTION' ? '单位' : '个人' }}</template>
             </el-table-column>
-            <el-table-column prop="applicantName" label="申请人" min-width="140" show-overflow-tooltip/>
-            <el-table-column label="所属租户" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }">{{ tenantNames[row.tenantUscc] || row.tenantUscc || '-' }}</template>
+            <el-table-column label="申请人" min-width="140" prop="applicantName" show-overflow-tooltip/>
+            <el-table-column label="所属公司" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ companyNames[row.companyUscc] || row.companyUscc || '-' }}</template>
             </el-table-column>
             <el-table-column label="模板" width="100">
               <template #default="{ row }">{{ templateName(row.templateId) }}</template>
             </el-table-column>
-            <el-table-column prop="subjectDn" label="主体DN" min-width="180" show-overflow-tooltip/>
+            <el-table-column label="主体DN" min-width="180" prop="subjectDn" show-overflow-tooltip/>
             <el-table-column label="提交人" width="120">
               <template #default="{ row }">{{ row.appliedByName || row.appliedBy }}</template>
+            </el-table-column>
+            <el-table-column label="指派审批人" show-overflow-tooltip width="120">
+              <template #default="{ row }">{{ row.assigneeRealName || row.assigneeUsername || '-' }}</template>
             </el-table-column>
             <el-table-column label="审核人" width="100">
               <template #default="{ row }">{{ row.reviewedByName }}</template>
             </el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }">
-                <el-tag size="small" :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
+                <el-tag :type="statusTag(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column align="right" label="操作" width="230" fixed="right">
+            <el-table-column align="right" fixed="right" label="操作" width="230">
               <template #default="{ row }">
                 <el-button
                     v-for="a in visibleRowActions(row)"
                     :key="a.label"
+                    :type="a.type || 'primary'"
                     link
                     size="small"
-                    :type="a.type || 'primary'"
                     @click="a.run()"
                 >{{ a.label }}
                 </el-button>
                 <el-dropdown v-if="moreRowActions(row).length" trigger="click" @command="cmd => cmd.run()">
-                  <el-button link type="primary" size="small">
+                  <el-button link size="small" type="primary">
                     更多
                     <el-icon class="el-icon--right">
                       <ArrowDown/>
@@ -106,7 +110,6 @@
               </template>
             </el-table-column>
           </el-table>
-          <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的申请记录</div>
           <div ref="footerRef" class="list-footer">
             <el-pagination
                 v-model:current-page="query.pageNo"
@@ -126,18 +129,19 @@
         <el-card class="query-card" shadow="never">
           <div class="query-wrap">
             <el-form :model="opQuery" inline>
-              <el-form-item label="租户">
-                <el-select v-model="opQuery.tenantUscc" placeholder="全部" clearable style="width: 280px" @change="handleOpSearch">
+              <el-form-item label="公司">
+                <el-select v-model="opQuery.companyUscc" clearable placeholder="全部" style="width: 280px"
+                           @change="handleOpSearch">
                   <el-option
-                    v-for="o in tenantOptions"
-                    :key="o.uscc"
-                    :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
-                    :value="o.uscc"
+                      v-for="o in companyOptions"
+                      :key="o.uscc"
+                      :label="o.companyName ? `${o.companyName}（${o.uscc}）` : o.uscc"
+                      :value="o.uscc"
                   />
                 </el-select>
               </el-form-item>
               <el-form-item label="状态">
-                <el-select v-model="opQuery.status" placeholder="全部" clearable style="width: 130px"
+                <el-select v-model="opQuery.status" clearable placeholder="全部" style="width: 130px"
                            @change="handleOpSearch">
                   <el-option label="待审批" value="PENDING"/>
                   <el-option label="已执行" value="EXECUTED"/>
@@ -146,7 +150,7 @@
                 </el-select>
               </el-form-item>
               <el-form-item label="操作类型">
-                <el-select v-model="opQuery.opType" placeholder="全部" clearable style="width: 130px"
+                <el-select v-model="opQuery.opType" clearable placeholder="全部" style="width: 130px"
                            @change="handleOpSearch">
                   <el-option label="吊销" value="REVOKE"/>
                   <el-option label="挂起" value="SUSPEND"/>
@@ -158,15 +162,15 @@
               <el-form-item label="关键字">
                 <el-input
                     v-model="opQuery.keyword"
-                    placeholder="主体CN / 序列号 / 单号"
                     clearable
+                    placeholder="主体CN / 序列号 / 单号"
                     style="width: 220px"
-                    @keyup.enter="handleOpSearch"
                     @clear="handleOpSearch"
+                    @keyup.enter="handleOpSearch"
                 />
               </el-form-item>
               <el-form-item>
-                <el-button type="primary" :icon="Search" @click="handleOpSearch">搜索</el-button>
+                <el-button :icon="Search" type="primary" @click="handleOpSearch">搜索</el-button>
                 <el-button :icon="Refresh" @click="handleOpReset">重置</el-button>
               </el-form-item>
             </el-form>
@@ -176,17 +180,17 @@
 
         <el-card class="table-card" shadow="never">
           <el-table v-loading="opLoading" :data="opRows" :max-height="tableMaxHeight" stripe style="width: 100%">
-            <el-table-column prop="opNo" label="操作单号" class-name="cell-mono" width="180" show-overflow-tooltip/>
+            <el-table-column class-name="cell-mono" label="操作单号" prop="opNo" show-overflow-tooltip width="180"/>
             <el-table-column label="操作类型" width="100">
               <template #default="{ row }">
-                <el-tag size="small" :type="opTypeTag(row.opType)">{{ opTypeText(row.opType) }}</el-tag>
+                <el-tag :type="opTypeTag(row.opType)" size="small">{{ opTypeText(row.opType) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="certSubjectCn" label="证书主体" min-width="160" show-overflow-tooltip/>
-            <el-table-column label="所属租户" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }">{{ tenantNames[row.tenantUscc] || row.tenantUscc || '-' }}</template>
+            <el-table-column label="证书主体" min-width="160" prop="certSubjectCn" show-overflow-tooltip/>
+            <el-table-column label="所属公司" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ companyNames[row.companyUscc] || row.companyUscc || '-' }}</template>
             </el-table-column>
-            <el-table-column prop="certSerialHex" label="序列号" class-name="cell-mono" min-width="150"
+            <el-table-column class-name="cell-mono" label="序列号" min-width="150" prop="certSerialHex"
                              show-overflow-tooltip/>
             <el-table-column label="操作原因" min-width="130">
               <template #default="{ row }">{{ row.reason ? reasonText(row.reason) : '无' }}</template>
@@ -199,27 +203,26 @@
             </el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }">
-                <el-tag size="small" :type="opStatusTag(row.status)">{{ opStatusText(row.status) }}</el-tag>
+                <el-tag :type="opStatusTag(row.status)" size="small">{{ opStatusText(row.status) }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="审批人" width="130">
               <template #default="{ row }">{{ row.reviewedByName }}</template>
             </el-table-column>
-            <el-table-column align="right" label="操作" width="160" fixed="right">
+            <el-table-column align="right" fixed="right" label="操作" width="160">
               <template #default="{ row }">
                 <el-button
                     v-for="a in visibleOpActions(row)"
                     :key="a.label"
+                    :type="a.type || 'primary'"
                     link
                     size="small"
-                    :type="a.type || 'primary'"
                     @click="a.run()"
                 >{{ a.label }}
                 </el-button>
               </template>
             </el-table-column>
           </el-table>
-          <div v-if="opRows.length === 0 && !opLoading" class="empty-tip">暂无匹配的操作单</div>
           <div class="list-footer">
             <el-pagination
                 v-model:current-page="opQuery.pageNo"
@@ -236,15 +239,15 @@
     </el-tabs>
 
     <!-- 提交申请 -->
-    <el-dialog v-model="submitVisible" title="提交证书申请（录入员代录）" width="680px" :close-on-click-modal="false">
+    <el-dialog v-model="submitVisible" :close-on-click-modal="false" title="提交证书申请" width="680px">
       <el-form :model="submitForm" label-width="150px">
-        <el-form-item label="目标租户" required>
-          <el-select v-model="submitTenant" style="width: 100%" placeholder="选择租户" @change="onSubmitTenantChange">
+        <el-form-item label="目标公司" required>
+          <el-select v-model="submitCompany" placeholder="选择公司" style="width: 100%" @change="onSubmitCompanyChange">
             <el-option
-              v-for="o in tenantOptions"
-              :key="o.uscc"
-              :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
-              :value="o.uscc"
+                v-for="o in companyOptions"
+                :key="o.uscc"
+                :label="o.companyName ? `${o.companyName}（${o.uscc}）` : o.uscc"
+                :value="o.uscc"
             />
           </el-select>
         </el-form-item>
@@ -254,12 +257,12 @@
             <el-radio-button value="PERSON">个人</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="申请人/租户名称" required>
+        <el-form-item label="申请人/公司名称" required>
           <el-input v-model="submitForm.applicantName"
                     :placeholder="submitForm.applicantType === 'INSTITUTION' ? '如 医保前置系统/结算经办' : '如 张三'"/>
         </el-form-item>
         <el-form-item label="证书模板" required>
-          <el-select v-model="submitForm.templateId" style="width: 100%" placeholder="选择证书模板">
+          <el-select v-model="submitForm.templateId" placeholder="选择证书模板" style="width: 100%">
             <el-option v-for="t in templates" :key="t.id" :label="`${t.templateName}（${t.templateCode}）`"
                        :value="t.id"/>
           </el-select>
@@ -268,8 +271,8 @@
           <el-input v-model="submitCn" placeholder="如 张三 / his.yibao.local"/>
         </el-form-item>
         <el-form-item label="主体O" required>
-          <el-input v-model="submitO" disabled placeholder="取所选租户受控主体（自动）"/>
-          <div class="dn-tip">O 由所选租户档案受控，禁手填防冒名。</div>
+          <el-input v-model="submitO" disabled placeholder="取所选公司受控主体（自动）"/>
+          <div class="dn-tip">O 由所选公司档案受控，禁手填防冒名。</div>
         </el-form-item>
         <el-form-item label="主体OU">
           <el-input v-model="submitOu" placeholder="选填：员工编号等不变信息（科室等易变属性勿填）"/>
@@ -278,32 +281,31 @@
           <el-input v-model="submitForm.san" placeholder="逗号分隔：DNS或IP"/>
         </el-form-item>
         <el-form-item label="公钥PEM" required>
-          <el-input v-model="submitForm.publicKeyPem" type="textarea" :rows="5"
-                    placeholder="申请方自持私钥，仅提交公钥（-----BEGIN PUBLIC KEY----- ...）"/>
+          <el-input v-model="submitForm.publicKeyPem" :rows="5" placeholder="申请方自持私钥，仅提交公钥（-----BEGIN PUBLIC KEY----- ...）"
+                    type="textarea"/>
         </el-form-item>
         <el-form-item label="用途说明">
           <el-input v-model="submitForm.description"/>
         </el-form-item>
-        <el-form-item label="指定审批人">
-          <el-select v-model="submitAssignee" style="width: 100%"
-                     placeholder="选填：预先指派审核员（便于催办）" clearable :loading="approversLoading">
-            <el-option v-for="a in approvers" :key="a.username"
+        <el-form-item label="指定审批人" required>
+          <el-select v-model="submitAssignee" :loading="approversLoading"
+                     placeholder="必选：本单只能由被指派的审批人审核" style="width: 100%">
+            <el-option v-for="a in approverOptions" :key="a.username"
                        :label="a.realName ? `${a.realName}（${a.username}）` : a.username" :value="a.username"/>
           </el-select>
-          <div class="dn-tip">提交时指派具体审批人后，对方会收到站内信待办，您也可在详情页一键催办；不指定则按角色（审核员/RA管理员）流转。</div>
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="submitVisible = false">取消</el-button>
-          <el-button type="primary" :loading="submitting" @click="onSubmit">提交</el-button>
+          <el-button :loading="submitting" type="primary" @click="onSubmit">提交</el-button>
         </div>
       </template>
     </el-dialog>
 
     <!-- 审核（批准/驳回） -->
-    <el-dialog v-model="reviewVisible" :title="reviewAction === 'approve' ? '批准申请' : '驳回申请'" width="480px"
-               :close-on-click-modal="false">
+    <el-dialog v-model="reviewVisible" :close-on-click-modal="false" :title="reviewAction === 'approve' ? '批准申请' : '驳回申请'"
+               width="480px">
       <p style="margin-bottom: 12px">
         {{
           reviewAction === 'approve' ? '批准后该申请可进入签发环节（审核人不得与提交人同一人）。' : '驳回必须填写审核意见。'
@@ -311,14 +313,14 @@
       </p>
       <el-form label-width="90px">
         <el-form-item label="审核意见">
-          <el-input v-model="reviewComment" type="textarea" :rows="3"
-                    :placeholder="reviewAction === 'approve' ? '可选' : '必填，如 材料不全'"/>
+          <el-input v-model="reviewComment" :placeholder="reviewAction === 'approve' ? '可选' : '必填，如 材料不全'" :rows="3"
+                    type="textarea"/>
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="reviewVisible = false">取消</el-button>
-          <el-button :type="reviewAction === 'approve' ? 'success' : 'danger'" :loading="submitting"
+          <el-button :loading="submitting" :type="reviewAction === 'approve' ? 'success' : 'danger'"
                      @click="onReviewConfirm">
             {{ reviewAction === 'approve' ? '批准' : '驳回' }}
           </el-button>
@@ -327,9 +329,9 @@
     </el-dialog>
 
     <!-- 操作单审批（批准=执行进 CRL；驳回=意见必填） -->
-    <el-dialog v-model="opReviewVisible" :title="opReviewAction === 'approve' ? '批准操作单（批准即执行）' : '驳回操作单'"
-               width="480px"
-               :close-on-click-modal="false">
+    <el-dialog v-model="opReviewVisible" :close-on-click-modal="false"
+               :title="opReviewAction === 'approve' ? '批准操作单（批准即执行）' : '驳回操作单'"
+               width="480px">
       <p style="margin-bottom: 12px">
         {{
           opReviewTarget ? `${opTypeText(opReviewTarget.opType)} ${opReviewTarget.certSubjectCn}（发起人 ${opReviewTarget.requestedByName || opReviewTarget.requestedBy}）` : ''
@@ -342,14 +344,14 @@
       </p>
       <el-form label-width="90px">
         <el-form-item label="审批意见">
-          <el-input v-model="opReviewComment" type="textarea" :rows="3"
-                    :placeholder="opReviewAction === 'approve' ? '可填写审批说明' : '必填，如 原因不成立'"/>
+          <el-input v-model="opReviewComment" :placeholder="opReviewAction === 'approve' ? '可填写审批说明' : '必填，如 原因不成立'" :rows="3"
+                    type="textarea"/>
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="opReviewVisible = false">取消</el-button>
-          <el-button :type="opReviewAction === 'approve' ? 'success' : 'danger'" :loading="submitting"
+          <el-button :loading="submitting" :type="opReviewAction === 'approve' ? 'success' : 'danger'"
                      @click="onOpReviewConfirm">
             {{ opReviewAction === 'approve' ? '批准并执行' : '驳回' }}
           </el-button>
@@ -359,8 +361,8 @@
 
     <!-- 详情 -->
     <el-dialog v-model="detailVisible" title="申请单详情" width="620px">
-      <el-alert v-if="detail && detail.status === 'PENDING'" type="warning" :closable="false" show-icon
-                :title="nextApproverTitle" style="margin-bottom: 12px"/>
+      <el-alert v-if="detail && detail.status === 'PENDING'" :closable="false" :title="nextApproverTitle" show-icon
+                style="margin-bottom: 12px" type="warning"/>
       <el-descriptions :column="1" border>
         <el-descriptions-item label="申请单号">{{ detail?.applyNo }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
@@ -369,7 +371,10 @@
           }}
         </el-descriptions-item>
         <el-descriptions-item label="申请人">{{ detail?.applicantName }}</el-descriptions-item>
-        <el-descriptions-item label="所属租户">{{ tenantNames[detail?.tenantUscc] || detail?.tenantUscc || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="所属公司">{{
+            companyNames[detail?.companyUscc] || detail?.companyUscc || '-'
+          }}
+        </el-descriptions-item>
         <el-descriptions-item label="证书模板">{{
             detail ? templateName(detail.templateId) : ''
           }}
@@ -392,20 +397,25 @@
           }} / {{ detail?.reviewedAt || '-' }}
         </el-descriptions-item>
         <el-descriptions-item label="审核意见">{{ detail?.reviewComment || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="指定审批人">{{ detail?.assigneeRealName ? `${detail.assigneeRealName}（${detail.assigneeUsername}）` : '未指定（按角色流转）' }}</el-descriptions-item>
+        <el-descriptions-item label="指定审批人">{{
+            detail?.assigneeRealName ? `${detail.assigneeRealName}（${detail.assigneeUsername}）` : '未指定（按角色流转）'
+          }}
+        </el-descriptions-item>
       </el-descriptions>
       <div class="trail-title">审批轨迹</div>
       <el-timeline v-if="trail.length" class="trail">
-        <el-timeline-item v-for="t in trail" :key="t.id" :timestamp="t.createdAt" :type="trailType(t.step)" :hollow="t.step === 'URGE'">
+        <el-timeline-item v-for="t in trail" :key="t.id" :hollow="t.step === 'URGE'" :timestamp="t.createdAt"
+                          :type="trailType(t.step)">
           <div class="trail-step">{{ trailStepText(t.step) }}</div>
-          <div class="trail-who">{{ t.operatorRealName || t.operatorUsername }}<span v-if="t.operatorRole">（{{ t.operatorRole }}）</span></div>
+          <div class="trail-who">{{ t.operatorRealName || t.operatorUsername }}<span
+              v-if="t.operatorRole">（{{ t.operatorRole }}）</span></div>
           <div v-if="t.comment" class="trail-comment">{{ t.comment }}</div>
         </el-timeline-item>
       </el-timeline>
-      <div v-else class="empty-tip">暂无轨迹</div>
       <template #footer>
         <div class="dialog-footer">
-          <el-button v-if="canUrge(detail)" type="warning" :loading="urging" @click="onUrge(detail)">催办审批人</el-button>
+          <el-button v-if="canUrge(detail)" :loading="urging" type="warning" @click="onUrge(detail)">催办审批人
+          </el-button>
           <el-button @click="detailVisible = false">关闭</el-button>
         </div>
       </template>
@@ -414,7 +424,7 @@
 </template>
 
 <script setup>
-import {onMounted, reactive, ref} from 'vue'
+import {computed, onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {ArrowDown, Refresh, Search} from '@element-plus/icons-vue'
 import {
@@ -422,18 +432,18 @@ import {
   approveCertOp,
   cancelApplication,
   cancelCertOp,
+  companyNameMap,
   issueApplication,
   listApprovers,
+  listCompaniesCached,
   listTrail,
-  urgeApplication,
-  listTenantsCached,
   pageApplications,
   pageCertOps,
   pageTemplates,
   rejectApplication,
   rejectCertOp,
   submitApplication,
-  tenantNameMap
+  urgeApplication
 } from '@/api/system'
 import {hasPerm} from '@/lib/perm'
 import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
@@ -443,7 +453,7 @@ const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const templates = ref([])
-const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, tenantUscc: '', status: '', keyword: ''})
+const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, companyUscc: '', status: '', keyword: ''})
 
 // 页签：证书申请 / 证书操作审批
 const activeTab = ref('apply')
@@ -452,7 +462,7 @@ const activeTab = ref('apply')
 const opLoading = ref(false)
 const opRows = ref([])
 const opTotal = ref(0)
-const opQuery = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, tenantUscc: '', status: '', opType: '', keyword: ''})
+const opQuery = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, companyUscc: '', status: '', opType: '', keyword: ''})
 const opReviewVisible = ref(false)
 const opReviewAction = ref('approve')
 const opReviewComment = ref('')
@@ -496,11 +506,11 @@ function opStatusTag(s) {
 // 两卡式列表页：表格只设最大高度，超高内部滚动
 const {queryCardRef, footerRef, tableMaxHeight} = useTableMaxHeight()
 
-// 租户域由页面显式选择：列表可留空=跨租户只读，提交/审批/签发票据按行归属租户
-const tenantOptions = ref([])
-const tenantNames = ref({})
-const submitTenant = ref('')
-// 主体 DN 的 O 由受理租户受控（前端拼 DN；subjectO 从租户注册表取，禁手填防冒名）；
+// 公司域由页面显式选择：列表可留空=跨公司只读，提交/审批/签发票据按行归属公司
+const companyOptions = ref([])
+const companyNames = ref({})
+const submitCompany = ref('')
+// 主体 DN 的 O 由受理公司受控（前端拼 DN；subjectO 从公司注册表取，禁手填防冒名）；
 // OU 选填，口径=员工编号等不变信息，科室等易变属性不进 DN
 const submitCn = ref('')
 const submitO = ref('')
@@ -517,6 +527,8 @@ const urging = ref(false)
 const approvers = ref([])
 const approversLoading = ref(false)
 const submitAssignee = ref('')
+// 提交人不得自审（后端同口径拦），不合格候选直接从下拉里去掉而不是置灰
+const approverOptions = computed(() => approvers.value.filter(a => a.username !== username))
 const submitting = ref(false)
 
 const submitForm = reactive({
@@ -555,7 +567,7 @@ async function load() {
     const res = await pageApplications({
       pageNo: query.pageNo,
       pageSize: query.pageSize,
-      tenantUscc: query.tenantUscc || undefined,
+      companyUscc: query.companyUscc || undefined,
       status: query.status || undefined,
       keyword: query.keyword || undefined
     })
@@ -574,7 +586,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-  query.tenantUscc = ''
+  query.companyUscc = ''
   query.status = ''
   query.keyword = ''
   handleSearch()
@@ -592,11 +604,11 @@ function handleCurrentChange(val) {
 }
 
 function submitSubjectOOf(uscc) {
-  return tenantOptions.value.find(o => o.uscc === uscc)?.subjectO || ''
+  return companyOptions.value.find(o => o.uscc === uscc)?.subjectO || ''
 }
 
-function onSubmitTenantChange() {
-  submitO.value = submitSubjectOOf(submitTenant.value)
+function onSubmitCompanyChange() {
+  submitO.value = submitSubjectOOf(submitCompany.value)
   loadApprovers()
 }
 
@@ -606,12 +618,14 @@ function openSubmit() {
     subjectDn: '', san: '', publicKeyPem: '', description: '',
     assigneeUsername: null, assigneeRealName: null
   })
-  submitTenant.value = query.tenantUscc
-      || tenantOptions.value.find(o => o.status === 'ACTIVE')?.uscc
-      || tenantOptions.value[0]?.uscc || ''
+  submitCompany.value = query.companyUscc
+      || companyOptions.value.find(o => o.status === 'ACTIVE')?.uscc
+      || companyOptions.value[0]?.uscc || ''
   submitCn.value = ''
-  submitO.value = submitSubjectOOf(submitTenant.value)
+  submitO.value = submitSubjectOOf(submitCompany.value)
   submitOu.value = ''
+  // 预选公司是代码赋值，不会触发 el-select 的 @change，需主动拉取审批人列表
+  loadApprovers()
   submitVisible.value = true
 }
 
@@ -619,12 +633,12 @@ async function onSubmit() {
   const cn = submitCn.value.trim()
   const o = submitO.value.trim()
   const ou = submitOu.value.trim()
-  if (!submitTenant.value) {
-    ElMessage.warning('请选择目标租户')
+  if (!submitCompany.value) {
+    ElMessage.warning('请选择目标公司')
     return
   }
   if (!cn || !o) {
-    ElMessage.warning('请填写主体CN（主体O 取所选租户受控主体）')
+    ElMessage.warning('请填写主体CN（主体O 取所选公司受控主体）')
     return
   }
   submitForm.subjectDn = `CN=${cn},O=${o}` + (ou ? `,OU=${ou}` : '')
@@ -632,11 +646,15 @@ async function onSubmit() {
     ElMessage.warning('请完整填写申请信息（含公钥PEM）')
     return
   }
-  submitForm.assigneeUsername = submitAssignee.value || null
+  if (!submitAssignee.value) {
+    ElMessage.warning('请选择审批人（本单只能由被指派的审批人审核）')
+    return
+  }
+  submitForm.assigneeUsername = submitAssignee.value
   submitForm.assigneeRealName = approvers.value.find(a => a.username === submitAssignee.value)?.realName || null
   submitting.value = true
   try {
-    await submitApplication({...submitForm}, submitTenant.value)
+    await submitApplication({...submitForm}, submitCompany.value)
     ElMessage.success('申请已提交，等待审核员审批')
     submitVisible.value = false
     load()
@@ -662,10 +680,10 @@ async function onReviewConfirm() {
   submitting.value = true
   try {
     if (reviewAction.value === 'approve') {
-      await approveApplication(reviewTarget.id, reviewComment.value, reviewTarget.tenantUscc)
+      await approveApplication(reviewTarget.id, reviewComment.value, reviewTarget.companyUscc)
       ElMessage.success('已批准，可进入签发环节')
     } else {
-      await rejectApplication(reviewTarget.id, reviewComment.value, reviewTarget.tenantUscc)
+      await rejectApplication(reviewTarget.id, reviewComment.value, reviewTarget.companyUscc)
       ElMessage.success('已驳回')
     }
     reviewVisible.value = false
@@ -679,7 +697,7 @@ async function onIssue(row) {
   await ElMessageBox.confirm(`按申请单 ${row.applyNo} 签发证书？私钥由申请方自持，CA 不落盘。`, '提示', {type: 'warning'})
   submitting.value = true
   try {
-    const res = await issueApplication(row.id, row.tenantUscc)
+    const res = await issueApplication(row.id, row.companyUscc)
     ElMessage.success(`签发成功，证书 id=${res.data.id}（序列号 ${res.data.serialHex}）`)
     load()
   } finally {
@@ -689,7 +707,7 @@ async function onIssue(row) {
 
 async function onCancel(row) {
   await ElMessageBox.confirm(`确定撤销申请单 ${row.applyNo} 吗？`, '提示', {type: 'warning'})
-  await cancelApplication(row.id, row.tenantUscc)
+  await cancelApplication(row.id, row.companyUscc)
   ElMessage.success('申请已撤销')
   load()
 }
@@ -699,15 +717,18 @@ function onDetail(row) {
   detailVisible.value = true
   trail.value = []
   try {
-    listTrail(row.id).then(res => { trail.value = res.data || [] })
-  } catch (e) {}
+    listTrail(row.id).then(res => {
+      trail.value = res.data || []
+    })
+  } catch (e) {
+  }
 }
 
 async function loadApprovers() {
-  if (!submitTenant.value) return
+  // 审批人池为平台级（不随受理公司绑定），无需传 companyUscc，后端按登录人公司安全收窄即可
   approversLoading.value = true
   try {
-    const res = await listApprovers(submitTenant.value)
+    const res = await listApprovers()
     approvers.value = res.data || []
   } catch (e) {
   } finally {
@@ -717,10 +738,10 @@ async function loadApprovers() {
 
 async function onUrge(row) {
   if (!row) return
-  await ElMessageBox.confirm(`向${row.assigneeRealName ? '审批人 ' + row.assigneeRealName : '本租户审核员'}发送催办提醒？`, '催办', { type: 'warning' })
+  await ElMessageBox.confirm(`向${row.assigneeRealName ? '审批人 ' + row.assigneeRealName : '本公司审核员'}发送催办提醒？`, '催办', {type: 'warning'})
   urging.value = true
   try {
-    await urgeApplication(row.id, row.tenantUscc)
+    await urgeApplication(row.id, row.companyUscc)
     ElMessage.success('已发送催办提醒')
     const res = await listTrail(row.id)
     trail.value = res.data || []
@@ -738,8 +759,8 @@ const nextApproverTitle = computed(() => {
   if (!d) return ''
   if (d.status === 'PENDING') {
     return d.assigneeRealName
-      ? `当前环节：等待【${d.assigneeRealName}】审批`
-      : '当前环节：等待【审核员 / RA业务管理员】审批（未指定具体人）'
+        ? `当前环节：等待【${d.assigneeRealName}】审批`
+        : '当前环节：等待【审核员 / RA业务管理员】审批（未指定具体人）'
   }
   if (d.status === 'APPROVED') return '当前环节：已批准，等待操作员签发'
   if (d.status === 'ISSUED') return '当前环节：已签发'
@@ -749,11 +770,27 @@ const nextApproverTitle = computed(() => {
 })
 
 function trailStepText(step) {
-  return { SUBMIT: '提交申请', ASSIGN: '指定审批人', APPROVE: '审核批准', REJECT: '审核驳回', ISSUE: '签发证书', CANCEL: '撤销申请', URGE: '催办' }[step] || step
+  return {
+    SUBMIT: '提交申请',
+    ASSIGN: '指定审批人',
+    APPROVE: '审核批准',
+    REJECT: '审核驳回',
+    ISSUE: '签发证书',
+    CANCEL: '撤销申请',
+    URGE: '催办'
+  }[step] || step
 }
 
 function trailType(step) {
-  return { SUBMIT: 'primary', ASSIGN: 'info', APPROVE: 'success', REJECT: 'danger', ISSUE: 'success', CANCEL: 'info', URGE: 'warning' }[step] || ''
+  return {
+    SUBMIT: 'primary',
+    ASSIGN: 'info',
+    APPROVE: 'success',
+    REJECT: 'danger',
+    ISSUE: 'success',
+    CANCEL: 'info',
+    URGE: 'warning'
+  }[step] || ''
 }
 
 // 操作列口径：前 3 个平铺，其余收进「更多」下拉（列表页统一模式）
@@ -761,10 +798,11 @@ const ACTION_VISIBLE = 3
 
 function appActions(row) {
   const acts = []
-  if (row.status === 'PENDING' && hasPerm('app:approve')) {
+  // reviewable 由后端按「本单被指派人 == 当前登录人」现算，与 approve/reject 接口同一口径；不可审的直接不给按钮
+  if (row.status === 'PENDING' && row.reviewable) {
     acts.push({label: '批准', type: 'success', run: () => openReview(row, 'approve')})
   }
-  if (row.status === 'PENDING' && hasPerm('app:reject')) {
+  if (row.status === 'PENDING' && row.reviewable) {
     acts.push({label: '驳回', type: 'danger', run: () => openReview(row, 'reject')})
   }
   if (row.status === 'APPROVED' && hasPerm('app:issue')) {
@@ -802,7 +840,7 @@ async function loadOps() {
     const res = await pageCertOps({
       pageNo: opQuery.pageNo,
       pageSize: opQuery.pageSize,
-      tenantUscc: opQuery.tenantUscc || undefined,
+      companyUscc: opQuery.companyUscc || undefined,
       status: opQuery.status || undefined,
       opType: opQuery.opType || undefined,
       keyword: opQuery.keyword || undefined
@@ -822,7 +860,7 @@ function handleOpSearch() {
 }
 
 function handleOpReset() {
-  opQuery.tenantUscc = ''
+  opQuery.companyUscc = ''
   opQuery.status = ''
   opQuery.opType = ''
   opQuery.keyword = ''
@@ -874,10 +912,10 @@ async function onOpReviewConfirm() {
   submitting.value = true
   try {
     if (opReviewAction.value === 'approve') {
-      await approveCertOp(opReviewTarget.value.id, opReviewComment.value, opReviewTarget.value.tenantUscc)
+      await approveCertOp(opReviewTarget.value.id, opReviewComment.value, opReviewTarget.value.companyUscc)
       ElMessage.success('已批准并执行（证书状态已流转，CRL/OCSP 同步生效）')
     } else {
-      await rejectCertOp(opReviewTarget.value.id, opReviewComment.value, opReviewTarget.value.tenantUscc)
+      await rejectCertOp(opReviewTarget.value.id, opReviewComment.value, opReviewTarget.value.companyUscc)
       ElMessage.success('已驳回')
     }
     opReviewVisible.value = false
@@ -889,15 +927,15 @@ async function onOpReviewConfirm() {
 
 async function onOpCancel(row) {
   await ElMessageBox.confirm(`确定撤销操作单 ${row.opNo} 吗？`, '提示', {type: 'warning'})
-  await cancelCertOp(row.id, row.tenantUscc)
+  await cancelCertOp(row.id, row.companyUscc)
   ElMessage.success('操作单已撤销')
   loadOps()
 }
 
 onMounted(async () => {
   loadTemplates()
-  tenantOptions.value = await listTenantsCached()
-  tenantNames.value = await tenantNameMap()
+  companyOptions.value = await listCompaniesCached()
+  companyNames.value = await companyNameMap()
   load()
 })
 </script>

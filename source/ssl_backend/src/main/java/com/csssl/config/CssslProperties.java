@@ -111,7 +111,7 @@ public class CssslProperties {
 
     /**
      * 外部系统直连 API（/ca/api/v1）：HMAC 鉴权、防重放、请求体与限流约束。
-     * 租户由 appId 绑定关系反查，URL 不携带租户标识。
+     * 公司由 appId 绑定关系反查，URL 不携带公司标识。
      */
     @Data
     public static class Api {
@@ -150,6 +150,13 @@ public class CssslProperties {
          * 回调地址（HIS 侧：{HIS 基地址}/api/emr/signCert/caCallback）
          */
         private String callbackUrl;
+        /**
+         * 报文签名密钥（HMAC-SHA256），HIS 侧用同一密钥验签。
+         *
+         * <p>留空则<b>拒绝推送</b>：无签名的推送报文可被任意伪造，等于把"随便一张证书"塞给 HIS，
+         * 属于反向的公钥替换攻击。宁可推送停摆暴露问题，也不能让 HIS 装来源不明的证书。
+         */
+        private String secret = "";
         /**
          * 单次推送超时（毫秒）
          */

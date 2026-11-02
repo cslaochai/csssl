@@ -16,7 +16,11 @@ csssl:
   # 申请单状态变更推送 HIS：132 部署时 HIS 后端映射到宿主 8009（容器内 8080）
   his-push:
     enabled: ${SSL_HIS_PUSH_ENABLED:true}
-    callback-url: ${SSL_HIS_PUSH_URL:http://host.docker.internal:8009/api/emr/signCert/caCallback}
+    # 生产必须 https：报文含证书 PEM 与主体信息，明文传输等于对外泄露资产清单
+    # 若 HIS 侧暂未启用 TLS，需用 SSL_HIS_PUSH_URL 显式覆盖（同时会在日志里收到告警）
+    callback-url: ${SSL_HIS_PUSH_URL:https://host.docker.internal:8009/api/emr/signCert/caCallback}
+    # 报文签名密钥（HMAC-SHA256）：HIS 侧同值验签。**生产必须注入**，留空则拒绝推送
+    secret: ${SSL_HIS_PUSH_SECRET:}
     timeout-ms: ${SSL_HIS_PUSH_TIMEOUT_MS:5000}
   security:
     sm2:

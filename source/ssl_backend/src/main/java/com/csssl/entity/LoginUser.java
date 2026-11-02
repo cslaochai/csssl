@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 当前登录人身份载体，同时是 {@code SecurityContextHolder} 里 {@code Authentication#getPrincipal()} 的类型。
  *
- * <p>对标 HIS（cslk）的 {@code CurrentUser}：把「用户名 / 真实姓名 / 角色 / 租户数据域 / 生效权限」整合成
+ * <p>对标 HIS（cslk）的 {@code CurrentUser}：把「用户名 / 真实姓名 / 角色 / 公司数据域 / 生效权限」整合成
  * 唯一对象装进 {@code SecurityContextHolder}，业务侧用 {@link com.csssl.util.UserUtils#getLoginUser()} 取，
  * 不再散落依赖 {@code HttpServletRequest} 属性。这样：</p>
  * <ul>
@@ -41,9 +41,9 @@ public class LoginUser implements UserDetails {
     private final String roleCode;
 
     /**
-     * 租户数据域：null/空=全局用户（跨租户账号）；非空=租户用户，一律锁定本租户
+     * 公司数据域：null/空=全局用户（跨公司账号）；非空=公司用户，一律锁定本公司
      */
-    private final String tenantUscc;
+    private final String companyUscc;
 
     /**
      * 是否法定内置角色（builtin=1）
@@ -55,12 +55,12 @@ public class LoginUser implements UserDetails {
      */
     private final List<String> permissions;
 
-    public LoginUser(String username, String realName, String roleCode, String tenantUscc,
+    public LoginUser(String username, String realName, String roleCode, String companyUscc,
                      boolean builtin, List<String> permissions) {
         this.username = username;
         this.realName = realName;
         this.roleCode = (roleCode == null || roleCode.isBlank()) ? null : roleCode.trim().toUpperCase();
-        this.tenantUscc = (tenantUscc == null || tenantUscc.isBlank()) ? null : tenantUscc.trim();
+        this.companyUscc = (companyUscc == null || companyUscc.isBlank()) ? null : companyUscc.trim();
         this.builtin = builtin;
         this.permissions = permissions == null ? List.of() : List.copyOf(permissions);
     }

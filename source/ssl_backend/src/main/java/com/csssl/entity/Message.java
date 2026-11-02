@@ -22,8 +22,8 @@ public class Message {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 所属租户（统一社会信用代码） */
-    private String tenantUscc;
+    /** 所属公司（统一社会信用代码） */
+    private String companyUscc;
 
     /** 接收人账号 */
     private String recipientUsername;

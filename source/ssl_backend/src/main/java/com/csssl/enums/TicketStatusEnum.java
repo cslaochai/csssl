@@ -3,7 +3,7 @@ package com.csssl.enums;
 import lombok.Getter;
 
 /**
- * 审批单状态（租户变更单 / 证书操作单共用同一状态机：PENDING → EXECUTED / REJECTED / CANCELLED）。
+ * 审批单状态（公司变更单 / 证书操作单共用同一状态机：PENDING → EXECUTED / REJECTED / CANCELLED）。
  *
  * <p>枚举是状态码与中文名的单一来源：库表按 {@link #getCode()} 存字符串，
  * 业务判定用 {@link #is(String)}，出参与审计文案用 {@link #getLabel()}。</p>

@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 证书操作单分页查询（status/opType 精确、keyword 命中 主体CN/序列号/单号、tenantUscc 域过滤）。
+ * 证书操作单分页查询（status/opType 精确、keyword 命中 主体CN/序列号/单号、companyUscc 域过滤）。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -27,7 +27,7 @@ public class CertOpPageQueryDTO extends PageParam {
     private String keyword;
 
     /**
-     * 租户数据域过滤
+     * 公司数据域过滤
      */
-    private String tenantUscc;
+    private String companyUscc;
 }

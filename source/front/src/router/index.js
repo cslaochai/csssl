@@ -69,28 +69,28 @@ const routes = [
         meta: { title: '根CA管理', perm: 'menu:root-ca', roles: ['ADMIN', 'KEY_ADMIN'], group: 'business', icon: 'Key' }
       },
       {
-        path: 'tenants',
-        name: 'tenants',
-        component: () => import('@/views/Tenants.vue'),
-        // 租户管理：新建租户直接执行（建独立根CA+SUB_CA、发接入凭证），系统管理员只读巡检
+        path: 'companies',
+        name: 'companies',
+        component: () => import('@/views/Companies.vue'),
+        // 公司管理：新建公司直接执行（建独立根CA+SUB_CA、发接入凭证），系统管理员只读巡检
         meta: {
-          title: '租户管理',
-          perm: 'menu:tenants',
-          roles: ['ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER'],
-          group: 'tenant',
+          title: '公司管理',
+          perm: 'menu:companies',
+          roles: ['ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER'],
+          group: 'company',
           icon: 'OfficeBuilding'
         }
       },
       {
-        path: 'tenant-ops',
-        name: 'tenant-ops',
-        component: () => import('@/views/TenantOps.vue'),
-        // 生命周期变更单：租户管理员发起，租户审批员批准执行（发起人不得自批）
+        path: 'company-ops',
+        name: 'company-ops',
+        component: () => import('@/views/CompanyOps.vue'),
+        // 生命周期变更单：公司管理员发起，公司审批员批准执行（发起人不得自批）
         meta: {
-          title: '租户变更审批',
-          perm: 'menu:tenant-ops',
-          roles: ['ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER'],
-          group: 'tenant',
+          title: '公司变更审批',
+          perm: 'menu:company-ops',
+          roles: ['ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER'],
+          group: 'company',
           icon: 'DocumentChecked'
         }
       },
@@ -132,7 +132,7 @@ const routes = [
         // 全员可见的只读说明页：审批按角色而非指派到人，告知各业务「下一个审核人」所属角色
         meta: {
           title: '审批流说明',
-          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER'],
+          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER'],
           group: 'platform',
           icon: 'Aim'
         }
@@ -144,7 +144,7 @@ const routes = [
         // 消息中心：全员可见本人消息（本人私有，任何登录用户可读自己的消息）
         meta: {
           title: '消息中心',
-          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'CERT_OFFICER', 'AUDIT_ADMIN'],
+          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'CERT_OFFICER', 'AUDIT_ADMIN'],
           group: 'platform',
           icon: 'Bell'
         }

@@ -3,8 +3,8 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.common.ApiException;
 import com.csssl.entity.ApiClient;
-import com.csssl.entity.CaTenant;
-import com.csssl.enums.TenantStatusEnum;
+import com.csssl.entity.CaCompany;
+import com.csssl.enums.CompanyStatusEnum;
 import com.csssl.mapper.ApiClientMapper;
 import com.csssl.util.KeyVault;
 import com.csssl.vo.ApiClientSecretVO;
@@ -25,8 +25,8 @@ import java.util.List;
  * secret 经密钥保险库 SM4 加密后落库 ssl_key_vault（rel_dir=api-clients, name=appId），
  * ssl_api_client 表本身不保存明文或密文；secret 只在登记/轮换响应中展示一次。</p>
  *
- * <p>租户绑定：客户端归属租户在登记时确定，运行期请求 URL 不携带租户标识，
- * 服务端一律以 appId 反查的 tenantUscc 作为数据域（不信任调用方任何租户参数）。</p>
+ * <p>公司绑定：客户端归属公司在登记时确定，运行期请求 URL 不携带公司标识，
+ * 服务端一律以 appId 反查的 companyUscc 作为数据域（不信任调用方任何公司参数）。</p>
  */
 @Slf4j
 @Service
@@ -34,7 +34,7 @@ import java.util.List;
 public class ApiClientService {
 
     /**
-     * 建租户时自动登记的默认客户端名称（一个租户默认一份接入凭证）
+     * 建公司时自动登记的默认客户端名称（一个公司默认一份接入凭证）
      */
     public static final String DEFAULT_CLIENT_NAME = "默认接入客户端";
     private static final String VAULT_DIR = "api-clients";
@@ -42,7 +42,7 @@ public class ApiClientService {
     private static final char[] HEX = "0123456789abcdef".toCharArray();
 
     private final ApiClientMapper clientMapper;
-    private final TenantService tenantService;
+    private final CompanyService companyService;
     private final KeyVault keyVault;
     private final AuditService auditService;
 
@@ -64,15 +64,15 @@ public class ApiClientService {
     /**
      * 登记 API 客户端（仅全局系统管理员，控制器已校验）：返回一次性 secret。
      */
-    public ApiClientSecretVO create(String tenantUscc, String clientName, String ipAllowlist,
+    public ApiClientSecretVO create(String companyUscc, String clientName, String ipAllowlist,
                                     String clientCertSha256, String operator, String ip) {
-        if (tenantUscc == null || tenantUscc.isBlank()) {
-            throw new IllegalArgumentException("必须指定客户端绑定的租户");
+        if (companyUscc == null || companyUscc.isBlank()) {
+            throw new IllegalArgumentException("必须指定客户端绑定的公司");
         }
-        String tenant = tenantUscc.trim();
-        CaTenant tenantRow = tenantService.get(tenant);
-        if (!TenantStatusEnum.ACTIVE.is(tenantRow.getStatus())) {
-            throw new IllegalArgumentException("租户状态不可用: " + tenant + "（" + tenantRow.getStatus() + "）");
+        String company = companyUscc.trim();
+        CaCompany companyRow = companyService.get(company);
+        if (!CompanyStatusEnum.ACTIVE.is(companyRow.getStatus())) {
+            throw new IllegalArgumentException("公司状态不可用: " + company + "（" + companyRow.getStatus() + "）");
         }
         String name = clientName == null || clientName.isBlank() ? "外部系统客户端" : clientName.trim();
         if (name.length() > 64) {
@@ -83,7 +83,7 @@ public class ApiClientService {
 
         ApiClient client = new ApiClient();
         client.setAppId(appId);
-        client.setTenantUscc(tenant);
+        client.setCompanyUscc(company);
         client.setClientName(name);
         client.setIpAllowlist(blankToNull(ipAllowlist));
         client.setClientCertSha256(blankToNull(clientCertSha256));
@@ -95,11 +95,11 @@ public class ApiClientService {
         keyVault.storeKey(VAULT_DIR, appId, secret);
 
         auditService.record(operator, "API_CLIENT_CREATE", appId,
-                "登记外部API客户端：" + name + "（appId=" + appId + "，租户=" + tenant
+                "登记外部API客户端：" + name + "（appId=" + appId + "，公司=" + company
                         + (client.getIpAllowlist() == null ? "" : "，IP白名单=" + client.getIpAllowlist()) + "）",
-                ip, tenant);
-        log.info("[API客户端] 已登记 appId={}, tenant={}, name={}", appId, tenant, name);
-        return secretVo(client, tenantRow.getTenantName(), secret);
+                ip, company);
+        log.info("[API客户端] 已登记 appId={}, company={}, name={}", appId, company, name);
+        return secretVo(client, companyRow.getCompanyName(), secret);
     }
 
     /**
@@ -115,9 +115,9 @@ public class ApiClientService {
 
         auditService.record(operator, "API_CLIENT_ROTATE", client.getAppId(),
                 "轮换外部API客户端密钥：" + client.getClientName() + "（新版本 " + client.getSecretVersion() + "）",
-                ip, client.getTenantUscc());
+                ip, client.getCompanyUscc());
         log.info("[API客户端] secret 已轮换 appId={}, version={}", client.getAppId(), client.getSecretVersion());
-        return secretVo(client, tenantName(client.getTenantUscc()), secret);
+        return secretVo(client, companyName(client.getCompanyUscc()), secret);
     }
 
     /**
@@ -129,9 +129,9 @@ public class ApiClientService {
         clientMapper.updateById(client);
         auditService.record(operator, enabled ? "API_CLIENT_ENABLE" : "API_CLIENT_DISABLE", client.getAppId(),
                 (enabled ? "启用" : "停用") + "外部API客户端：" + client.getClientName(),
-                ip, client.getTenantUscc());
+                ip, client.getCompanyUscc());
         ApiClientVO vo = ApiClientVO.from(client);
-        vo.setTenantName(tenantName(client.getTenantUscc()));
+        vo.setCompanyName(companyName(client.getCompanyUscc()));
         return vo;
     }
 
@@ -144,29 +144,29 @@ public class ApiClientService {
         List<ApiClientVO> rows = new ArrayList<>(clients.size());
         for (ApiClient c : clients) {
             ApiClientVO vo = ApiClientVO.from(c);
-            vo.setTenantName(tenantName(c.getTenantUscc()));
+            vo.setCompanyName(companyName(c.getCompanyUscc()));
             rows.add(vo);
         }
         return rows;
     }
 
     /**
-     * 租户默认接入客户端（无则 null；租户页展示 App ID 与重置密钥用）
+     * 公司默认接入客户端（无则 null；公司页展示 App ID 与重置密钥用）
      */
-    public ApiClient findFirstByTenant(String tenantUscc) {
+    public ApiClient findFirstByCompany(String companyUscc) {
         return clientMapper.selectOne(new LambdaQueryWrapper<ApiClient>()
-                .eq(ApiClient::getTenantUscc, tenantUscc)
+                .eq(ApiClient::getCompanyUscc, companyUscc)
                 .orderByAsc(ApiClient::getId)
                 .last("LIMIT 1"));
     }
 
     /**
-     * 生成/重置租户默认接入凭证：已有则轮换，没有则新登记；secret 只在本次响应返回。
+     * 生成/重置公司默认接入凭证：已有则轮换，没有则新登记；secret 只在本次响应返回。
      */
-    public ApiClientSecretVO resetForTenant(String tenantUscc, String operator, String ip) {
-        ApiClient existing = findFirstByTenant(tenantUscc);
+    public ApiClientSecretVO resetForCompany(String companyUscc, String operator, String ip) {
+        ApiClient existing = findFirstByCompany(companyUscc);
         if (existing == null) {
-            return create(tenantUscc, DEFAULT_CLIENT_NAME, null, null, operator, ip);
+            return create(companyUscc, DEFAULT_CLIENT_NAME, null, null, operator, ip);
         }
         return rotate(existing.getId(), operator, ip);
     }
@@ -180,10 +180,10 @@ public class ApiClientService {
         if (client == null || client.getStatus() == null || client.getStatus() != 1) {
             throw new ApiException(401, "认证失败：客户端凭证无效或已停用");
         }
-        if (!CaTenant.LEGACY_NAMESPACE.equals(client.getTenantUscc())) {
-            CaTenant tenant = tenantService.findByUscc(client.getTenantUscc());
-            if (tenant == null || !TenantStatusEnum.ACTIVE.is(tenant.getStatus())) {
-                throw new ApiException(403, "租户不可用，请联系 CA 运维");
+        if (!CaCompany.LEGACY_NAMESPACE.equals(client.getCompanyUscc())) {
+            CaCompany company = companyService.findByUscc(client.getCompanyUscc());
+            if (company == null || !CompanyStatusEnum.ACTIVE.is(company.getStatus())) {
+                throw new ApiException(403, "公司不可用，请联系 CA 运维");
             }
         }
         return client;
@@ -201,7 +201,7 @@ public class ApiClientService {
     }
 
     /**
-     * 按 appId 读取 secret 明文（仅租户变更单一次性回执使用，调用方负责领取标记与审计）。
+     * 按 appId 读取 secret 明文（仅公司变更单一次性回执使用，调用方负责领取标记与审计）。
      */
     public String secretOfAppId(String appId) {
         String secret = keyVault.loadKey(VAULT_DIR, appId);
@@ -226,9 +226,9 @@ public class ApiClientService {
         client.setLastUsedAt(now);
     }
 
-    public String tenantName(String tenantUscc) {
-        CaTenant tenant = tenantService.findByUscc(tenantUscc);
-        return tenant == null ? null : tenant.getTenantName();
+    public String companyName(String companyUscc) {
+        CaCompany company = companyService.findByUscc(companyUscc);
+        return company == null ? null : company.getCompanyName();
     }
 
     private ApiClient require(Long id) {
@@ -239,12 +239,12 @@ public class ApiClientService {
         return client;
     }
 
-    private ApiClientSecretVO secretVo(ApiClient client, String tenantName, String secret) {
+    private ApiClientSecretVO secretVo(ApiClient client, String companyName, String secret) {
         ApiClientSecretVO vo = new ApiClientSecretVO();
         vo.setId(client.getId());
         vo.setAppId(client.getAppId());
-        vo.setTenantUscc(client.getTenantUscc());
-        vo.setTenantName(tenantName);
+        vo.setCompanyUscc(client.getCompanyUscc());
+        vo.setCompanyName(companyName);
         vo.setClientName(client.getClientName());
         vo.setSecret(secret);
         vo.setSecretVersion(client.getSecretVersion());

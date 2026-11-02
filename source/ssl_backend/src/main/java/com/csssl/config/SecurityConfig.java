@@ -95,7 +95,7 @@ public class SecurityConfig {
     }
 
     /**
-     * 外部系统直连 API 鉴权（仅 /ca/api/**）：appId 反查租户 + HMAC 验签 + 防重放 + 限流
+     * 外部系统直连 API 鉴权（仅 /ca/api/**）：appId 反查公司 + HMAC 验签 + 防重放 + 限流
      */
     @Bean
     public CaApiAuthFilter caApiAuthFilter() {

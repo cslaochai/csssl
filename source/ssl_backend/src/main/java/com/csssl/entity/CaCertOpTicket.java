@@ -25,9 +25,9 @@ public class CaCertOpTicket {
     private Long id;
 
     /**
-     * 归属租户（与目标证书行一致）
+     * 归属公司（与目标证书行一致）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 操作单号（CO20261030xxx）

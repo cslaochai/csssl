@@ -10,6 +10,22 @@ import './style.css'
 import { hasPerm } from './lib/perm'
 
 const app = createApp(App)
+
+// Element Plus 2.x 已知无害告警：el-sub-menu 内部渲染展开箭头 ElIcon 及其
+// 子菜单 slot 时，会以"非 render 函数内"的方式调用 slot，触发 Vue dev 警告
+// "Slot "default" invoked outside of the render function"。该告警不影响功能、
+// 也不会进入生产构建。这里仅针对 el-sub-menu 变体静默，不屏蔽其它真实告警。
+const isEpSubMenuSlotWarn = (msg, trace) =>
+  typeof msg === 'string' &&
+  msg.includes('invoked outside of the render function') &&
+  typeof trace === 'string' &&
+  trace.includes('el-sub-menu')
+app.config.warnHandler = (msg, instance, trace) => {
+  if (isEpSubMenuSlotWarn(msg, trace)) return
+  // 其余告警照常打印（开发期便于排查）
+  console.warn(`[Vue warn]: ${msg}${trace ? '\n' + trace : ''}`)
+}
+
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }

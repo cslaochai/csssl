@@ -4,13 +4,13 @@ import lombok.Data;
 
 /**
  * 对外信任材料：外部系统据此配置验签链与吊销信息获取地址，
- * 无需知晓租户标识（URL 已由服务端按 appId 绑定租户生成）。
+ * 无需知晓公司标识（URL 已由服务端按 appId 绑定公司生成）。
  */
 @Data
 public class ApiTrustVO {
 
     /**
-     * 租户根CA证书 PEM
+     * 公司根CA证书 PEM
      */
     private String rootPem;
     /**

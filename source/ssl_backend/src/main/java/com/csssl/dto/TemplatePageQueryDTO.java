@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 证书模板分页查询（keyword 命中 编码/名称、tenantUscc 域过滤）。
+ * 证书模板分页查询（keyword 命中 编码/名称、companyUscc 域过滤）。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -17,7 +17,7 @@ public class TemplatePageQueryDTO extends PageParam {
     private String keyword;
 
     /**
-     * 租户数据域过滤
+     * 公司数据域过滤
      */
-    private String tenantUscc;
+    private String companyUscc;
 }

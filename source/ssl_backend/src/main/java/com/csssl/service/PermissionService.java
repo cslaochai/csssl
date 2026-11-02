@@ -129,10 +129,10 @@ public class PermissionService {
     /**
      * 保存角色权限（整表替换）：未知权限点/超出法定边界一律拒绝；变更落审计。
      *
-     * @param auditTenant 审计归属租户（角色配置属全局管理动作，通常 default；租户管理员操作记本租户）
+     * @param auditCompany 审计归属公司（角色配置属全局管理动作，通常 default；公司管理员操作记本公司）
      */
     @Transactional(rollbackFor = Exception.class)
-    public void save(String roleCode, Collection<String> permCodes, String operator, String ip, String auditTenant) {
+    public void save(String roleCode, Collection<String> permCodes, String operator, String ip, String auditCompany) {
         if (roleCode == null || roleCode.isBlank()) {
             throw new IllegalArgumentException("角色编码不能为空");
         }
@@ -189,7 +189,7 @@ public class PermissionService {
         }
         cache.remove(rc);
         auditService.record(operator, "ROLE_PERM_UPDATE", rc,
-                diffDetail(rc, before, target), ip, auditTenant);
+                diffDetail(rc, before, target), ip, auditCompany);
         log.info("[角色] {} 权限已更新：{} 项（操作人 {}）", rc, target.size(), operator);
     }
 

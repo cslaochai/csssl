@@ -5,30 +5,30 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 /**
- * 提交证书申请请求（录入员代录；身份材料由受理租户留存，平台只收主体与公钥）。
+ * 提交证书申请请求（录入员代录；身份材料由受理公司留存，平台只收主体与公钥）。
  */
 @Data
 public class ApplicationSubmitDTO {
 
     /**
-     * 受理租户（缺省走 ?tenantUscc= / 登录域归一）
+     * 受理公司（缺省走 ?companyUscc= / 登录域归一）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
-     * 申请人类别（证书主体类型）：INSTITUTION-单位（系统/法人等非个人主体） / PERSON-个人（自然人）；与租户租户域无关
+     * 申请人类别（证书主体类型）：INSTITUTION-单位（系统/法人等非个人主体） / PERSON-个人（自然人）；与公司公司域无关
      */
     @NotBlank(message = "申请人类别不能为空")
     private String applicantType;
 
     /**
-     * 申请人/租户名称
+     * 申请人/公司名称
      */
-    @NotBlank(message = "参数 applicantName 不能为空（申请人/租户名称）")
+    @NotBlank(message = "参数 applicantName 不能为空（申请人/公司名称）")
     private String applicantName;
 
     /**
-     * 主体DN（如 CN=张三,O=麓康医院）；只放姓名/租户等稳定身份，科室等易变属性不进 DN
+     * 主体DN（如 CN=张三,O=麓康医院）；只放姓名/公司等稳定身份，科室等易变属性不进 DN
      */
     @NotBlank(message = "参数 subjectDn 不能为空（主体DN）")
     private String subjectDn;
@@ -56,7 +56,8 @@ public class ApplicationSubmitDTO {
     private String description;
 
     /**
-     * 提交时指定的审批人账号（可选；须为本租户具审批权的启用账号，且与提交人不同人）
+     * 提交时指定的审批人账号（必填；须为启用状态的审核员/RA管理员，且与提交人不同人。
+     * 对外 API 通道不传，由服务端按待审积压最少自动分派）
      */
     private String assigneeUsername;
 

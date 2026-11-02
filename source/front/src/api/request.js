@@ -42,7 +42,7 @@ function httpStatusFallback(status) {
   return map[status] || `请求失败（${status}）`
 }
 
-// 租户域一律由调用页显式传 tenantUscc：列表不传=跨租户只读，写操作不传由后端 fail-closed。
+// 公司域一律由调用页显式传 companyUscc：列表不传=跨公司只读，写操作不传由后端 fail-closed。
 request.interceptors.request.use(
   config => {
     const token = localStorage.getItem('token')
@@ -96,7 +96,7 @@ request.interceptors.response.use(
           localStorage.removeItem('role')
           localStorage.removeItem('roleName')
           localStorage.removeItem('perms')
-          localStorage.removeItem('tenantUscc')
+          localStorage.removeItem('companyUscc')
           localStorage.removeItem('caDomain')
           if (!redirectingToLogin) {
             redirectingToLogin = true
@@ -108,7 +108,7 @@ request.interceptors.response.use(
       // 真实 HTTP 403：越域/角色不足，统一越域口径提示，不跳登录页
       if (status === 403) {
         if (!silent) {
-          notifyError(message || '越域访问被拒：当前账号无该租户权限')
+          notifyError(message || '越域访问被拒：当前账号无该公司权限')
         }
         return Promise.reject(error)
       }

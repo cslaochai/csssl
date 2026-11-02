@@ -2,149 +2,97 @@
   <div>
     <div class="page-card">
       <div class="table-toolbar">
-        <div class="section-title">OCSP 证书状态自助查询</div>
+        <div class="section-title">OCSP 证书状态查询</div>
       </div>
 
-      <!-- ===== 在线验证（JSON，按租户域） ===== -->
-      <el-alert
-        type="success"
-        :closable="false"
-        show-icon
-        title="在线验证走公开端点 POST /ssl/ca/public/{tenantUscc}/verify（JSON：{certPem, purpose}），粘贴证书 PEM 即可返回 good / revoked / unknown 三态；该端点无需登录。"
-        style="margin-bottom: 14px"
-      />
       <el-form label-width="110px" style="max-width: 720px">
-        <el-form-item label="租户域">
-          <el-select v-model="tenantUscc" style="width: 240px" placeholder="选择租户域">
+        <el-form-item label="公司域">
+          <el-select v-model="companyUscc" placeholder="选择公司域" style="width: 240px">
             <el-option
-              v-for="o in tenantOptions"
-              :key="o.uscc"
-              :label="o.tenantName ? `${o.uscc}（${o.tenantName}）` : o.uscc"
-              :value="o.uscc"
+                v-for="o in companyOptions"
+                :key="o.uscc"
+                :label="o.companyName ? `${o.companyName}（${o.uscc}）` : o.uscc"
+                :value="o.uscc"
             />
           </el-select>
         </el-form-item>
         <el-form-item label="验证用途">
-          <el-select v-model="purpose" clearable style="width: 240px" placeholder="可选：限定 EKU 口径">
-            <el-option label="服务端认证（serverAuth）" value="serverAuth" />
-            <el-option label="客户端认证（clientAuth）" value="clientAuth" />
+          <el-select v-model="purpose" clearable placeholder="可选：限定 EKU 口径" style="width: 240px">
+            <el-option label="服务端认证（serverAuth）" value="serverAuth"/>
+            <el-option label="客户端/签名（clientAuth）" value="clientAuth"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="证书PEM">
+        <el-form-item label="证书 PEM">
           <el-input
-            v-model="certPem"
-            type="textarea"
-            :rows="8"
-            placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+              v-model="certPem"
+              :rows="8"
+              placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+              type="textarea"
           />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="verifying" @click="onVerify">在线验证</el-button>
+          <el-button :loading="verifying" type="primary" @click="onVerify">查询</el-button>
         </el-form-item>
       </el-form>
 
       <template v-if="result">
-        <el-result
-          v-if="resultState === 'good'"
-          icon="success"
-          title="状态：good（有效）"
-          :sub-title="`租户域 ${resultTenant} · 证书未被吊销且链可校验`"
-        />
-        <el-result
-          v-else-if="resultState === 'revoked'"
-          icon="error"
-          title="状态：revoked（已吊销）"
-          :sub-title="`租户域 ${resultTenant} · 该证书已进入租户 CRL，请勿继续信任`"
-        />
-        <el-result
-          v-else-if="resultState === 'unknown'"
-          icon="warning"
-          title="状态：unknown（未知）"
-          :sub-title="`租户域 ${resultTenant} · 证书不在该租户签发范围或序列号未命中`"
-        />
-        <template v-else>
-          <el-alert type="info" :closable="false" show-icon :title="`验证返回（租户域 ${resultTenant}）`" style="margin-bottom: 8px" />
-        </template>
+        <el-result :icon="verdict.icon" :sub-title="verdict.subTitle" :title="verdict.title"/>
         <el-descriptions :column="1" border size="small" style="max-width: 720px">
           <el-descriptions-item v-for="(v, k) in resultFields" :key="k" :label="fieldLabel(k)">
             <div class="mono-wrap">{{ formatVal(v) }}</div>
           </el-descriptions-item>
         </el-descriptions>
       </template>
-
-      <el-divider content-position="left">标准协议交互（RFC 6960 DER，供设备/中间件直连）</el-divider>
-
-      <el-alert
-        type="warning"
-        :closable="false"
-        show-icon
-        title="OCSP 标准接口为二进制（DER）协议，浏览器不代为发起协议交互——下方按所选租户域与证书序列号生成可直接执行的 openssl/curl 查询与解析示例（URL 模板含 {tenantUscc}）。"
-        style="margin-bottom: 14px"
-      />
-      <el-descriptions :column="1" border size="small" style="margin-bottom: 16px">
-        <el-descriptions-item label="状态查询端点（OCSP，POST，DER）">/ssl/ca/public/{tenantUscc}/ocsp（Content-Type: application/ocsp-request）</el-descriptions-item>
-        <el-descriptions-item label="状态查询端点（OCSP，GET，base64url）">/ssl/ca/public/{tenantUscc}/ocsp/{请求DER的base64url}</el-descriptions-item>
-        <el-descriptions-item label="租户证书/CRL 公开端点">/ssl/ca/public/{tenantUscc}/root · /subca · /crl · /crl/delta</el-descriptions-item>
-        <el-descriptions-item label="返回状态">good / revoked / unknown（挂起证书返回 on-hold 扩展）</el-descriptions-item>
-      </el-descriptions>
-
-      <el-form inline>
-        <el-form-item label="证书序列号(HEX)">
-          <el-input
-            v-model="serialHex"
-            placeholder="如 1A2B3C4D5E6F（证书详情表 serialHex 列）"
-            style="width: 260px"
-            clearable
-          />
-        </el-form-item>
-        <el-form-item label="签发者">
-          <el-radio-group v-model="issuer">
-            <el-radio-button value="subca">二级CA（默认）</el-radio-button>
-            <el-radio-button value="root">根CA</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-      </el-form>
-
-      <div class="section-title" style="margin: 6px 0 10px">查询示例（按租户域 {{ tenantNames[tenantUscc] || tenantUscc }} 自动填充）</div>
-      <pre class="cmd-block">{{ sampleScript }}</pre>
-      <div style="margin-top: 12px">
-        <el-button type="primary" plain @click="onCopy">复制示例</el-button>
-        <el-button plain @click="onDownload">下载示例脚本 .sh</el-button>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { downloadText } from '@/lib/download'
-import { verifyCertPublic, listTenantsCached, tenantNameMap } from '@/api/system'
+import {computed, onMounted, ref} from 'vue'
+import {ElMessage} from 'element-plus'
+import {listCompaniesCached, verifyCertPublic} from '@/api/system'
 
-// ===== 在线验证（POST /ca/public/{tenantUscc}/verify） =====
-const tenantUscc = ref('')
-const tenantNames = ref({})
-const tenantOptions = ref([])
+const companyUscc = ref('')
+const companyOptions = ref([])
 const certPem = ref('')
 const purpose = ref('')
 const verifying = ref(false)
 const result = ref(null)
-const resultTenant = ref('')
 
 onMounted(async () => {
-  tenantOptions.value = await listTenantsCached()
-  tenantNames.value = await tenantNameMap()
-  // 缺省选中首个启用租户，避免空域提交
-  const active = tenantOptions.value.find(o => o.status === 'ACTIVE') || tenantOptions.value[0]
-  tenantUscc.value = active?.uscc || ''
+  companyOptions.value = await listCompaniesCached()
+  // 缺省选中首个启用公司，避免空域提交
+  const active = companyOptions.value.find(o => o.status === 'ACTIVE') || companyOptions.value[0]
+  companyUscc.value = active?.uscc || ''
 })
 
+/** 三态（后端返回，对齐 OCSP）：good / revoked / unknown */
 const resultState = computed(() => {
   const d = result.value
   if (!d) return ''
-  const s = d.status || d.certStatus || d.state || (typeof d === 'string' ? d : '')
-  return String(s).toLowerCase()
+  return String(d.status || d.certStatus || d.state || '').toLowerCase()
 })
+
+/**
+ * 判定结论：status 只管吊销维度，valid 才管全链（验签+有效期+用途）。
+ * 因此「已过期但未吊销」是 status=good / valid=false，不能只按 status 显示"有效"。
+ */
+const verdict = computed(() => {
+  const d = result.value || {}
+  const state = resultState.value
+  const msg = d.message || ''
+  if (d.valid === true) {
+    return {icon: 'success', title: '校验通过', subTitle: '证书可信、未过期、未吊销'}
+  }
+  if (state === 'revoked') {
+    return {icon: 'error', title: '状态：revoked（已吊销）', subTitle: msg || '该证书已进入 CRL，请勿继续信任'}
+  }
+  if (state === 'unknown') {
+    return {icon: 'warning', title: '状态：unknown（未知）', subTitle: msg || '不在本公司签发范围或序列号未命中'}
+  }
+  return {icon: 'error', title: '校验不通过', subTitle: msg || '证书未通过链校验'}
+})
+
 const resultFields = computed(() => {
   const d = result.value
   if (!d || typeof d !== 'object') return {}
@@ -162,8 +110,10 @@ function formatVal(v) {
 
 // 验证返回字段：中文（英文键名），未收录的键原样展示
 const FIELD_LABELS = {
-  valid: '验证结果（valid）',
-  message: '验证信息（message）',
+  valid: '校验结论（valid）',
+  status: '状态三态（status）',
+  statusText: '状态说明（statusText）',
+  message: '校验信息（message）',
   serialHex: '序列号（serialHex）',
   subjectCn: '主体（subjectCn）',
   issuerCn: '签发者（issuerCn）',
@@ -171,6 +121,7 @@ const FIELD_LABELS = {
   validFrom: '生效时间（validFrom）',
   validTo: '失效时间（validTo）'
 }
+
 function fieldLabel(k) {
   return FIELD_LABELS[k] || k
 }
@@ -182,68 +133,17 @@ async function onVerify() {
   }
   verifying.value = true
   try {
-    const res = await verifyCertPublic(tenantUscc.value, {
+    const res = await verifyCertPublic(companyUscc.value, {
       certPem: certPem.value.trim(),
       purpose: purpose.value || undefined
     })
     result.value = res.data
-    resultTenant.value = tenantUscc.value
   } catch (e) {
     result.value = null
-    // 租户无根/证书不属该域等错误由拦截器提示
+    // 公司无根/证书不属该域等错误由拦截器提示
   } finally {
     verifying.value = false
   }
-}
-
-// ===== DER 协议示例（URL 模板含 {tenantUscc}） =====
-const serialHex = ref('')
-const issuer = ref('subca')
-
-const OCSP_URL = computed(() => `http://<CA主机>:8092/ssl/ca/public/${tenantUscc.value}/ocsp`)
-const ISSUER_URL = computed(() => `http://<CA主机>:8092/ssl/ca/public/${tenantUscc.value}/${issuer.value}`)
-const SERIAL = computed(() => (serialHex.value.trim() ? `0x${serialHex.value.trim().replace(/^0x/i, '')}` : '0x<证书序列号HEX>'))
-
-const sampleScript = computed(() => `#!/usr/bin/env bash
-# CSSSL OCSP（RFC 6960 DER）自助查询示例 —— 租户域 ${tenantUscc.value}
-set -euo pipefail
-
-OCSP_URL="${OCSP_URL.value}"
-ISSUER_PEM="${issuer.value}.pem"
-SERIAL="${SERIAL.value}"
-
-# 1) 获取该租户签发者证书（二级CA 或根CA）：/ssl/ca/public/{tenantUscc}/root|subca
-curl -s "${ISSUER_URL.value}" -o "$ISSUER_PEM"
-
-# 2) 一步法：openssl 自带 OCSP 客户端（构造 DER 请求并解析响应）
-openssl ocsp -issuer "$ISSUER_PEM" -serial "$SERIAL" \\
-  -url "$OCSP_URL" -nonce -text
-
-# 3) 分步法（验证 curl 通道）：先生成 DER 请求，再 POST，最后本地解析
-openssl ocsp -issuer "$ISSUER_PEM" -serial "$SERIAL" -reqout req.der
-curl -s -X POST "$OCSP_URL" \\
-  -H 'Content-Type: application/ocsp-request' \\
-  --data-binary @req.der -o resp.der
-openssl ocsp -issuer "$ISSUER_PEM" -respin resp.der -noverify -text
-
-# 结果判读：响应中 "Cert ID: ... Serial Nr: ... good/revoked/unknown"
-# CRL 通道：curl -s "http://<CA主机>:8092/ssl/ca/public/${tenantUscc.value}/crl" -o crl.pem
-# 浏览器直连（GET）：先将 req.der 做 base64url 编码（openssl base64 | tr '+/' '-_' | tr -d '=\\n'），
-# 再访问 ${OCSP_URL.value}/<编码结果>`
-)
-
-async function onCopy() {
-  try {
-    await navigator.clipboard.writeText(sampleScript.value)
-    ElMessage.success('示例已复制')
-  } catch (e) {
-    ElMessage.warning('浏览器不允许自动复制，请手动选中复制')
-  }
-}
-
-function onDownload() {
-  downloadText(sampleScript.value, `ocsp-query-${tenantUscc.value}.sh`)
-  ElMessage.success('示例脚本已下载')
 }
 </script>
 
@@ -253,17 +153,7 @@ function onDownload() {
   font-weight: 600;
   color: var(--his-title);
 }
-.cmd-block {
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  padding: 12px 14px;
-  font-family: Consolas, Menlo, monospace;
-  font-size: 12px;
-  color: #303133;
-  overflow-x: auto;
-  white-space: pre;
-}
+
 .mono-wrap {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;

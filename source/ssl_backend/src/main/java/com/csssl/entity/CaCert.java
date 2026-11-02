@@ -22,9 +22,9 @@ public class CaCert {
     private Long id;
 
     /**
-     * 所属租户（独立根CA域）；default=院内默认域（存量单根）
+     * 所属公司（独立根CA域）；default=院内默认域（存量单根）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 证书序列号（16进制，唯一）

@@ -37,8 +37,8 @@ public final class PermissionCatalog {
     public static final String MENU_CRL = "menu:crl";
     public static final String MENU_OCSP = "menu:ocsp";
     public static final String MENU_TSA = "menu:tsa";
-    public static final String MENU_TENANTS = "menu:tenants";
-    public static final String MENU_TENANT_OPS = "menu:tenant-ops";
+    public static final String MENU_COMPANIES = "menu:companies";
+    public static final String MENU_COMPANY_OPS = "menu:company-ops";
     public static final String MENU_ROOT_CA = "menu:root-ca";
     public static final String MENU_TEMPLATES = "menu:templates";
     public static final String MENU_USERS = "menu:users";
@@ -78,12 +78,15 @@ public final class PermissionCatalog {
     public static final String CA_SHARE_DOWNLOAD = "ca:share:download";
     public static final String CA_SHARE_MIGRATE = "ca:share:migrate";
     public static final String CA_SHARE_UNSEAL = "ca:share:unseal";
+    public static final String CA_SHARE_ASSIGN = "ca:share:assign";
+    public static final String CA_SUBCA_REBUILD_APPLY = "ca:subca:rebuild:apply";
+    public static final String CA_SUBCA_REBUILD_EXECUTE = "ca:subca:rebuild:execute";
     public static final String CA_ROOT_DOWNLOAD = "ca:root:download";
     public static final String CA_SUBCA_DOWNLOAD = "ca:subca:download";
 
-    public static final String TENANT_CREATE = "tenant:create";
-    public static final String TENANT_OP_APPLY = "tenant:op:apply";
-    public static final String TENANT_OP_APPROVE = "tenant:op:approve";
+    public static final String COMPANY_CREATE = "company:create";
+    public static final String COMPANY_OP_APPLY = "company:op:apply";
+    public static final String COMPANY_OP_APPROVE = "company:op:approve";
 
     public static final String USER_LIST = "user:list";
     public static final String USER_CREATE = "user:create";
@@ -113,8 +116,8 @@ public final class PermissionCatalog {
         menu(MENU_CRL, "CRL吊销", "吊销列表查看与下载");
         menu(MENU_OCSP, "OCSP查询", "证书状态在线查询");
         menu(MENU_TSA, "时间戳TSA", "可信时间戳服务");
-        menu(MENU_TENANTS, "租户管理", "租户档案与新建（租户管理员；系统管理员只读巡检）");
-        menu(MENU_TENANT_OPS, "租户变更审批", "暂停/恢复/关闭/重置接入密钥变更单的提交、审批与回执领取");
+        menu(MENU_COMPANIES, "公司管理", "公司档案与新建（公司管理员；系统管理员只读巡检）");
+        menu(MENU_COMPANY_OPS, "公司变更审批", "暂停/恢复/关闭/重置接入密钥变更单的提交、审批与回执领取");
         menu(MENU_ROOT_CA, "根CA管理", "根CA初始化、密钥封存与门限分持");
         menu(MENU_TEMPLATES, "证书模板", "证书策略模板（KeyUsage/EKU/策略OID）");
         menu(MENU_USERS, "用户管理", "管理账号的建号、改角色、启停与重置口令");
@@ -128,7 +131,7 @@ public final class PermissionCatalog {
         action("RA申请", APP_ISSUE, "按申请签发", "对已批准申请签发证书");
         action("RA申请", APP_CANCEL, "撤销申请", "仅提交人本人或系统管理员可撤销");
         action("RA申请", APP_URGE, "催办审批人", "向被指派审批人发站内信提醒（仅提交人）");
-        action("RA申请", APP_LIST_APPROVERS, "查看本租户审批人", "提交表单下拉可选，不依赖 user:list");
+        action("RA申请", APP_LIST_APPROVERS, "查看本公司审批人", "提交表单下拉可选，不依赖 user:list");
 
         // ---------- 证书业务 ----------
         action("证书业务", CERT_LIST, "查看证书台账", "证书列表与详情查询");
@@ -157,13 +160,16 @@ public final class PermissionCatalog {
         action("根CA与密钥", CA_SHARE_DOWNLOAD, "下载门限份额", "份额建议 5 份分人分管");
         action("根CA与密钥", CA_SHARE_MIGRATE, "门限化迁移", "单点加密私钥切换为 Shamir(3,5)");
         action("根CA与密钥", CA_SHARE_UNSEAL, "份额解封", "任意 3 份重组根私钥（仅内存）");
+        action("根CA与密钥", CA_SHARE_ASSIGN, "指派密钥保管人", "把根私钥 5 份门限份额各绑定一名保管人（仅密钥管理员/系统管理员）");
+        action("根CA与密钥", CA_SUBCA_REBUILD_APPLY, "发起二级CA重建申请", "动用根私钥重建二级CA 须先提单，通知 5 名保管人审批");
+        action("根CA与密钥", CA_SUBCA_REBUILD_EXECUTE, "执行二级CA重建", "凭 ≥3 份保管人份额加载根私钥后重建二级CA");
         action("根CA与密钥", CA_ROOT_DOWNLOAD, "下载根证书", "供子系统信任链配置");
         action("根CA与密钥", CA_SUBCA_DOWNLOAD, "下载二级CA证书", "中间CA链配置");
 
-        // ---------- 租户管理 ----------
-        action("租户管理", TENANT_CREATE, "新建租户", "开租户即建独立根CA+SUB_CA 并发放接入凭证，直接执行，无需双人复核");
-        action("租户管理", TENANT_OP_APPLY, "发起租户变更单", "暂停/恢复/关闭/重置接入密钥一律走单，不得直接执行");
-        action("租户管理", TENANT_OP_APPROVE, "审批租户变更单", "批准即执行；不得与发起人同一人");
+        // ---------- 公司管理 ----------
+        action("公司管理", COMPANY_CREATE, "新建公司", "开公司即建独立根CA+SUB_CA 并发放接入凭证，直接执行，无需双人复核");
+        action("公司管理", COMPANY_OP_APPLY, "发起公司变更单", "暂停/恢复/关闭/重置接入密钥一律走单，不得直接执行");
+        action("公司管理", COMPANY_OP_APPROVE, "审批公司变更单", "批准即执行；不得与发起人同一人");
 
         // ---------- 用户与角色 ----------
         action("用户与角色", USER_LIST, "查看账号", "管理账号列表");

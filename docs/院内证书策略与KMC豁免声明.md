@@ -49,7 +49,7 @@
 - subjectAlternativeName：按申请提交（DNS/IP）。
 - cRLDistributionPoints（CDP）：证书内置 CRL 下载地址（publicBaseUrl/ca/public/crl）。
 - authorityInfoAccess（AIA）：证书内置 OCSP 地址（publicBaseUrl/ca/public/ocsp）。
-- 统一社会信用代码（非关键扩展，UTF8String，18 位，遵循 GB 32100）：租户根CA 签发时写入，SUB_CA 与终端证书逐级继承，保证整条证书链可核对租户法人身份；存量 default 域不写该扩展（逐字节兼容）。扩展定义见 GM/T 0015-2023 附录A.3（UniformSocialCreditIdentifier），OID 取电子政务证书代码标识弧 `1.2.156.10260.4.1.6`，对外对接前须与该标准附录A.3、GM/T 0006-2023 第8章原文核对（不一致时仅需改 `CertUtil.USCC_EXTENSION_OID` 一处）。
+- 统一社会信用代码（非关键扩展，UTF8String，18 位，遵循 GB 32100）：公司根CA 签发时写入，SUB_CA 与终端证书逐级继承，保证整条证书链可核对公司法人身份；存量 default 域不写该扩展（逐字节兼容）。扩展定义见 GM/T 0015-2023 附录A.3（UniformSocialCreditIdentifier），OID 取电子政务证书代码标识弧 `1.2.156.10260.4.1.6`，对外对接前须与该标准附录A.3、GM/T 0006-2023 第8章原文核对（不一致时仅需改 `CertUtil.USCC_EXTENSION_OID` 一处）。
 
 ### 2.3 签发流程（RA 用户注册，对应 §5.2.2）
 

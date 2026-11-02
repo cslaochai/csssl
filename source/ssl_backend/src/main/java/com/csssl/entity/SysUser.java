@@ -42,9 +42,9 @@ public class SysUser {
     private String roleCode;
 
     /**
-     * 归属租户；NULL=全局管理员（跨租户，兼容存量账号）
+     * 归属公司；NULL=全局管理员（跨公司，兼容存量账号）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 1-启用 0-禁用

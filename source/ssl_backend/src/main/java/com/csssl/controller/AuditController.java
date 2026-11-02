@@ -10,7 +10,7 @@ import com.csssl.dto.ChainVerifyQueryDTO;
 import com.csssl.vo.ChainVerifyVO;
 import com.csssl.entity.AuditLog;
 import com.csssl.service.AuditService;
-import com.csssl.util.TenantScope;
+import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -29,8 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>审计属监管职责，按分权制衡要求收口给审计员（AUDITOR）单独查看，
  * 系统管理员/操作员不得读审计（防"做事的人删自己的痕迹"）。</p>
  *
- * <p>路线A数据域口径：租户审计员强制本租户过滤（显式传别租户 403）；
- * 全局审计员可按 ?tenantUscc= 逐租户查看，不传=跨租户全量——审计域本就属监督职能，
+ * <p>路线A数据域口径：公司审计员强制本公司过滤（显式传别公司 403）；
+ * 全局审计员可按 ?companyUscc= 逐公司查看，不传=跨公司全量——审计域本就属监督职能，
  * 全局只读总览为合规设计，不构成写旁路。</p>
  */
 @RestController
@@ -40,17 +40,17 @@ public class AuditController {
 
     private final AuditService auditService;
 
-    /** 审计日志分页查询（仅审计员；租户用户强制本租户，全局用户 tenantUscc 缺省=全量只读） */
+    /** 审计日志分页查询（仅审计员；公司用户强制本公司，全局用户 companyUscc 缺省=全量只读） */
     @PreAuthorize("hasAuthority('audit:view')")
     @GetMapping
     public Result<Page<AuditLog>> page(@Valid AuditPageQueryDTODTO query, HttpServletRequest request) {
         return Result.success("查询成功", auditService.page(query.getPageNo(), query.getPageSize(), query.getAction(),
-                TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), query.getTenantUscc())));
+                CompanyScope.readCompanyScope(UserUtils.requireLoginUser().getCompanyUscc(), query.getCompanyUscc())));
     }
 
     /**
      * 验签：校验某条审计记录未被篡改（改动任何字段都会失败；仅审计员）。
-     * 租户用户仅可验本租户记录（行级数据域校验，越域 403）；全局用户跨租户放行（只读监督职能）。
+     * 公司用户仅可验本公司记录（行级数据域校验，越域 403）；全局用户跨公司放行（只读监督职能）。
      */
     @PreAuthorize("hasAuthority('audit:verify')")
     @PostMapping("/verify")
@@ -60,28 +60,28 @@ public class AuditController {
             throw new IllegalArgumentException("参数 id 不能为空");
         }
         AuditLog row = auditService.load(id);
-        TenantScope.requireRowVisible(UserUtils.requireLoginUser().getTenantUscc(), AuditService.tenantOf(row));
+        CompanyScope.requireRowVisible(UserUtils.requireLoginUser().getCompanyUscc(), AuditService.companyOf(row));
         return Result.success("验签完成", auditService.verifyLog(id));
     }
 
     /**
      * 审计归档导出（≥5年留存材料）：CSV（UTF-8 BOM）+ 审计报告 SM2 签名，归档文件完整性可验签（仅审计员）。
-     * 租户用户强制导出本租户；全局用户 tenantUscc 缺省=跨租户全量导出（只读放行，合规设计）。
+     * 公司用户强制导出本公司；全局用户 companyUscc 缺省=跨公司全量导出（只读放行，合规设计）。
      */
     @PreAuthorize("hasAuthority('audit:export')")
     @GetMapping("/export")
-    public Result<AuditExportVO> export(@RequestParam(required = false) String tenantUscc,
+    public Result<AuditExportVO> export(@RequestParam(required = false) String companyUscc,
                                         HttpServletRequest request) {
-        return Result.success("导出完成", auditService.exportCsv(TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), tenantUscc)));
+        return Result.success("导出完成", auditService.exportCsv(CompanyScope.readCompanyScope(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc)));
     }
 
     /**
      * 哈希链对账（仅审计员）：区间可空=全量，分页扫描按 id 升序逐条核验签名与 prev_id/prev_sign 衔接。
      * 检出删除（前驱指向缺失）、分叉与篡改改写。
      *
-     * <p><b>保持全局链视角，不分租户（有意设计）</b>：审计链为全局单链，prev_id 跨租户连续，
-     * 链构造与对账都不按租户分段——分段会把跨租户相邻行的 prev 引用误判断链，反而不可审计。
-     * 租户数据域过滤只作用于"查"（分页/验签/导出），对账结果仅暴露断链 id 与原因，不含记录内容。</p>
+     * <p><b>保持全局链视角，不分公司（有意设计）</b>：审计链为全局单链，prev_id 跨公司连续，
+     * 链构造与对账都不按公司分段——分段会把跨公司相邻行的 prev 引用误判断链，反而不可审计。
+     * 公司数据域过滤只作用于"查"（分页/验签/导出），对账结果仅暴露断链 id 与原因，不含记录内容。</p>
      */
     @PreAuthorize("hasAuthority('audit:chain')")
     @GetMapping("/chain-verify")

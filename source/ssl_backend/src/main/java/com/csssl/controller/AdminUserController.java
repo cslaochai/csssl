@@ -7,17 +7,18 @@ import com.csssl.common.Result;
 import com.csssl.dto.UserCreateDTO;
 import com.csssl.dto.UserPageQueryDTO;
 import com.csssl.dto.UserUpdateDTO;
-import com.csssl.entity.CaTenant;
+import com.csssl.entity.CaCompany;
 import com.csssl.entity.LoginUser;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
 import com.csssl.mapper.SysRoleMapper;
+import com.csssl.vo.UserSimpleVO;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.AuditService;
 import com.csssl.service.AuthService;
-import com.csssl.service.TenantService;
+import com.csssl.service.CompanyService;
 import com.csssl.enums.RoleCodeEnum;
-import com.csssl.util.TenantScope;
+import com.csssl.util.CompanyScope;
 import cn.hutool.crypto.digest.BCrypt;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -42,14 +44,14 @@ import java.util.List;
  * <p>账号治理：口令由调用方必传并按复杂度校验（不再下发默认弱口令、不回显明文）；
  * 建号/改角色/启停用/重置口令均落审计，安全相关变更递增 token_version 吊销既有会话。</p>
  *
- * <p>路线A数据域口径（effectiveTenant，服务端强制）：
+ * <p>路线A数据域口径（effectiveCompany，服务端强制）：
  * <ul>
- *   <li>建号：全局 ADMIN 可传 tenantUscc 建租户用户（含租户 ADMIN，租户主由全局任命）或不传=全局用户；
- *       租户 ADMIN 只能建本租户用户，且不可建/改 ADMIN 角色，不可建全局用户；越域请求 403。</li>
- *   <li>列表：租户用户只见本租户；全局用户可按 ?tenantUscc= 过滤，不传=全部
- *       ——这是唯一允许的跨租户"读"口（全局 ADMIN 总览），不构成写旁路。</li>
- *   <li>改角色/停用/重置口令：目标用户必须落在操作者数据域（租户 ADMIN 改别租户/全局用户→403）；
- *       审计记录带目标用户租户。</li>
+ *   <li>建号：全局 ADMIN 可传 companyUscc 建公司用户（含公司 ADMIN，公司主由全局任命）或不传=全局用户；
+ *       公司 ADMIN 只能建本公司用户，且不可建/改 ADMIN 角色，不可建全局用户；越域请求 403。</li>
+ *   <li>列表：公司用户只见本公司；全局用户可按 ?companyUscc= 过滤，不传=全部
+ *       ——这是唯一允许的跨公司"读"口（全局 ADMIN 总览），不构成写旁路。</li>
+ *   <li>改角色/停用/重置口令：目标用户必须落在操作者数据域（公司 ADMIN 改别公司/全局用户→403）；
+ *       审计记录带目标用户公司。</li>
  * </ul></p>
  */
 @RestController
@@ -60,20 +62,20 @@ public class AdminUserController {
     private final SysUserMapper userMapper;
     private final SysRoleMapper roleMapper;
     private final AuditService auditService;
-    private final TenantService tenantService;
+    private final CompanyService companyService;
 
-    /** 用户列表（分页 + 角色/租户筛选；租户用户强制本租户，全局用户 tenantUscc 缺省=跨租户总览只读） */
+    /** 用户列表（分页 + 角色/公司筛选；公司用户强制本公司，全局用户 companyUscc 缺省=跨公司总览只读） */
     @PreAuthorize("hasAuthority('user:list')")
     @GetMapping
     public Result<Page<SysUser>> page(@Valid UserPageQueryDTO query, HttpServletRequest request) {
-        // readTenantScope：租户用户锁本租户（传别租户 403）；全局用户不传=null=全部（唯一跨租户读口）
-        String scope = TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), query.getTenantUscc());
+        // readCompanyScope：公司用户锁本公司（传别公司 403）；全局用户不传=null=全部（唯一跨公司读口）
+        String scope = CompanyScope.readCompanyScope(UserUtils.requireLoginUser().getCompanyUscc(), query.getCompanyUscc());
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         if (query.getRoleCode() != null && !query.getRoleCode().isBlank()) {
             qw.eq(SysUser::getRoleCode, query.getRoleCode());
         }
         if (scope != null) {
-            qw.eq(SysUser::getTenantUscc, scope);
+            qw.eq(SysUser::getCompanyUscc, scope);
         }
         qw.orderByAsc(SysUser::getId);
         Page<SysUser> page = userMapper.selectPage(new Page<>(query.getPageNo(), query.getPageSize()), qw);
@@ -82,9 +84,9 @@ public class AdminUserController {
     }
 
     /**
-     * 创建管理账号：全局 ADMIN 可建全局/各租户账号（tenantUscc 显式指定，缺省=全局）；
-     * 租户 ADMIN 仅可建本租户 OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN，
-     * 不可建 ADMIN（租户主由全局 ADMIN 任命）、不可建全局用户；越域 403。
+     * 创建管理账号：全局 ADMIN 可建全局/各公司账号（companyUscc 显式指定，缺省=全局）；
+     * 公司 ADMIN 仅可建本公司 OPERATOR/APPROVER/AUDITOR/SECURITY_ADMIN/KEY_ADMIN，
+     * 不可建 ADMIN（公司主由全局 ADMIN 任命）、不可建全局用户；越域 403。
      */
     @PreAuthorize("hasAuthority('user:create')")
     @PostMapping
@@ -105,20 +107,20 @@ public class AdminUserController {
         }
         requireAssignableRole(role);
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String myTenant = loginUser.getTenantUscc();
-        String reqTenant = blankToNull(body.getTenantUscc());
-        String targetTenant;
-        if (myTenant != null) {
-            // 租户 ADMIN：一律落本租户；请求 tenantUscc 与本人租户不一致=越域 403；不可任命租户主（ADMIN）
-            targetTenant = TenantScope.effectiveTenant(myTenant, reqTenant);
+        String myCompany = loginUser.getCompanyUscc();
+        String reqCompany = blankToNull(body.getCompanyUscc());
+        String targetCompany;
+        if (myCompany != null) {
+            // 公司 ADMIN：一律落本公司；请求 companyUscc 与本人公司不一致=越域 403；不可任命公司主（ADMIN）
+            targetCompany = CompanyScope.effectiveCompany(myCompany, reqCompany);
             if (RoleCodeEnum.ADMIN.name().equals(role)) {
-                throw new SecurityException("权限不足：租户管理员不可创建 ADMIN 角色账号（租户主由全局 ADMIN 任命）");
+                throw new SecurityException("权限不足：公司管理员不可创建 ADMIN 角色账号（公司主由全局 ADMIN 任命）");
             }
         } else {
-            // 全局 ADMIN：显式 tenantUscc=建该租户用户（租户须存在）；缺省=全局用户（tenant_uscc NULL）
-            targetTenant = reqTenant;
-            if (targetTenant != null) {
-                tenantService.get(targetTenant);
+            // 全局 ADMIN：显式 companyUscc=建该公司用户（公司须存在）；缺省=全局用户（company_uscc NULL）
+            targetCompany = reqCompany;
+            if (targetCompany != null) {
+                companyService.get(targetCompany);
             }
         }
         String password = body.getPassword();
@@ -129,7 +131,7 @@ public class AdminUserController {
         user.setRealName(body.getRealName() == null || body.getRealName().isBlank()
                 ? username.trim() : body.getRealName().trim());
         user.setRoleCode(role);
-        user.setTenantUscc(targetTenant);
+        user.setCompanyUscc(targetCompany);
         user.setStatus(1);
         user.setFailedAttempts(0);
         user.setTokenVersion(0);
@@ -137,16 +139,56 @@ public class AdminUserController {
         userMapper.insert(user);
         auditService.record(loginUser.getUsername(), "USER_CREATE", String.valueOf(user.getId()),
                 "创建账号：" + user.getUsername() + "，角色=" + role + "，姓名=" + user.getRealName()
-                        + "，租户=" + (targetTenant == null ? "全局" : targetTenant),
-                clientIp(request), auditTenant(targetTenant, myTenant));
+                        + "，公司=" + (targetCompany == null ? "全局" : targetCompany),
+                clientIp(request), auditCompany(targetCompany, myCompany));
         user.setPassword(null);
         return Result.success("创建成功", user);
     }
 
     /**
+     * 用户简易列表（保管人下拉用）：返回精简字段（username/realName/roleCode/companyUscc/status），
+     * 不含口令等敏感信息。用于"新建公司指定密钥保管人""手动指派保管人"等下拉。
+     * 仅开公司/指派保管人权限可见，避免普通账号枚举账号。
+     *
+     * <p>公司域收敛：只返回"平台级密钥管理员"（company_uscc 为空，即平台密钥管理岗）
+     * 与（传了 companyUscc 时）该公司本域的密钥管理员；不返回其他公司的员工。</p>
+     */
+    @PreAuthorize("hasAnyAuthority('company:create','ca:share:assign')")
+    @GetMapping("/simple")
+    public Result<List<UserSimpleVO>> simple(@RequestParam(required = false) String companyUscc) {
+        // 分权制衡（GM/T 0034 §10.1、NIST SP 800-57 M-of-N 双控）：
+        // 根私钥份额保管人必须为平台"密钥管理员(KEY_ADMIN)"角色——其职责定义即"根密钥门限分持/封存/解封与份额保管"，
+        // 与厂商 key-ceremony "具名保管人"对齐，且天然排除系统管理员(ADMIN)等冲突角色，避免一人既掌平台又掌根私钥。
+        // 故保管人下拉仅返回 KEY_ADMIN；禁用账号仍返回（前端置灰不可选），便于指定人知悉账号存在但不可用。
+        // 另按公司域收敛：平台级（company_uscc 空）+ 目标公司本域，杜绝跨公司枚举与选错人。
+        LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
+        qw.eq(SysUser::getRoleCode, RoleCodeEnum.KEY_ADMIN.name());
+        String target = companyUscc == null ? null : companyUscc.trim();
+        if (target == null || target.isBlank()) {
+            qw.isNull(SysUser::getCompanyUscc).or().eq(SysUser::getCompanyUscc, "");
+        } else {
+            qw.and(w -> w.isNull(SysUser::getCompanyUscc).or()
+                    .eq(SysUser::getCompanyUscc, "")
+                    .or().eq(SysUser::getCompanyUscc, target));
+        }
+        qw.orderByAsc(SysUser::getId);
+        List<SysUser> users = userMapper.selectList(qw);
+        List<UserSimpleVO> vos = users.stream().map(u -> {
+            UserSimpleVO v = new UserSimpleVO();
+            v.setUsername(u.getUsername());
+            v.setRealName(u.getRealName());
+            v.setRoleCode(u.getRoleCode());
+            v.setCompanyUscc(u.getCompanyUscc());
+            v.setStatus(u.getStatus());
+            return v;
+        }).collect(java.util.stream.Collectors.toList());
+        return Result.success("查询成功", vos);
+    }
+
+    /**
      * 更新角色/姓名/启停用（password 可选重置）；口令/角色/状态变更后旧会话即刻失效。
-     * 目标用户必须落在操作者数据域（租户 ADMIN 改别租户/全局用户→403）；
-     * 租户 ADMIN 不可把角色改为 ADMIN（租户主任命权保留在全局 ADMIN）。
+     * 目标用户必须落在操作者数据域（公司 ADMIN 改别公司/全局用户→403）；
+     * 公司 ADMIN 不可把角色改为 ADMIN（公司主任命权保留在全局 ADMIN）。
      */
     @PreAuthorize("hasAuthority('user:update')")
     @PostMapping("/{id}")
@@ -158,19 +200,19 @@ public class AdminUserController {
         }
         LoginUser loginUser = UserUtils.requireLoginUser();
         String operator = loginUser.getUsername();
-        String myTenant = loginUser.getTenantUscc();
+        String myCompany = loginUser.getCompanyUscc();
 
 
         String ip = clientIp(request);
-        String targetTenant = user.getTenantUscc();
-        if (myTenant != null) {
-            // 租户 ADMIN：目标必须为本租户用户（全局用户 tenant_uscc=NULL 亦不可触碰）
-            if (targetTenant == null || !myTenant.equals(targetTenant)) {
-                throw new SecurityException("权限不足：不能操作其他租户或全局账号");
+        String targetCompany = user.getCompanyUscc();
+        if (myCompany != null) {
+            // 公司 ADMIN：目标必须为本公司用户（全局用户 company_uscc=NULL 亦不可触碰）
+            if (targetCompany == null || !myCompany.equals(targetCompany)) {
+                throw new SecurityException("权限不足：不能操作其他公司或全局账号");
             }
             String newRole = blankToNull(body.getRoleCode());
             if (newRole != null && RoleCodeEnum.ADMIN.name().equals(newRole.trim().toUpperCase())) {
-                throw new SecurityException("权限不足：租户管理员不可任命/变更为 ADMIN 角色（租户主由全局 ADMIN 任命）");
+                throw new SecurityException("权限不足：公司管理员不可任命/变更为 ADMIN 角色（公司主由全局 ADMIN 任命）");
             }
         }
 
@@ -228,26 +270,26 @@ public class AdminUserController {
         if (touched) {
             userMapper.update(null, uw);
         }
-        // 审计归位：按目标用户租户（全局用户=平台主租户留痕）
-        String auditTenant = auditTenant(targetTenant, myTenant);
+        // 审计归位：按目标用户公司（全局用户=平台主公司留痕）
+        String auditCompany = auditCompany(targetCompany, myCompany);
         if (!changes.isEmpty()) {
             auditService.record(operator, "USER_UPDATE", String.valueOf(id),
-                    "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip, auditTenant);
+                    "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip, auditCompany);
         }
         if (resetPassword) {
             auditService.record(operator, "USER_RESET_PWD", String.valueOf(id),
-                    "重置账号 " + user.getUsername() + " 的登录口令（口令不入库留痕、需该用户重新登录）", ip, auditTenant);
+                    "重置账号 " + user.getUsername() + " 的登录口令（口令不入库留痕、需该用户重新登录）", ip, auditCompany);
         }
         user.setPassword(null);
         return Result.success("更新成功", user);
     }
 
-    /** 审计租户归位：目标账号租户优先；全局账号（tenant_uscc NULL）按操作者域，操作者亦全局则 default */
-    private static String auditTenant(String targetUserTenant, String operatorTenant) {
-        if (targetUserTenant != null && !targetUserTenant.isBlank()) {
-            return targetUserTenant;
+    /** 审计公司归位：目标账号公司优先；全局账号（company_uscc NULL）按操作者域，操作者亦全局则 default */
+    private static String auditCompany(String targetUserCompany, String operatorCompany) {
+        if (targetUserCompany != null && !targetUserCompany.isBlank()) {
+            return targetUserCompany;
         }
-        return operatorTenant == null || operatorTenant.isBlank() ? CaTenant.PRIMARY_TENANT_USCC : operatorTenant;
+        return operatorCompany == null || operatorCompany.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : operatorCompany;
     }
 
     private boolean isSupportedRole(String role) {

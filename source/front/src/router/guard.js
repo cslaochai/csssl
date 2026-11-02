@@ -20,7 +20,7 @@ function firstAllowedPath() {
     return !c.meta.roles || c.meta.roles.includes(role)
   })
   if (!allowed.length) return null
-  const groupOrder = ['top', 'business', 'tenant', 'platform', 'bottom']
+  const groupOrder = ['top', 'business', 'company', 'platform', 'bottom']
   allowed.sort((a, b) => groupOrder.indexOf(a.meta.group) - groupOrder.indexOf(b.meta.group))
   return '/' + allowed[0].path
 }

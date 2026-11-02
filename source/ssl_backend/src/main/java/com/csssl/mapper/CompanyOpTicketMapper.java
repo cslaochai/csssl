@@ -1,9 +1,9 @@
 package com.csssl.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.csssl.entity.CaTenantOpTicket;
+import com.csssl.entity.CompanyOpTicket;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface CaTenantOpTicketMapper extends BaseMapper<CaTenantOpTicket> {
+public interface CompanyOpTicketMapper extends BaseMapper<CompanyOpTicket> {
 }

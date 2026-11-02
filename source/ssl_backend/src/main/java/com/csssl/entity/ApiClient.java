@@ -11,7 +11,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 外部系统 API 客户端（HIS 等）：租户由服务端绑定，请求不携带租户标识；
+ * 外部系统 API 客户端（HIS 等）：公司由服务端绑定，请求不携带公司标识；
  * app_id 与 secret 均为随机不可猜串，secret 密文存密钥保险库（api-clients/{appId}），本表不落明文。
  */
 @Data
@@ -28,9 +28,9 @@ public class ApiClient {
     private String appId;
 
     /**
-     * 绑定租户（请求数据域唯一来源，不信任调用方传参）
+     * 绑定公司（请求数据域唯一来源，不信任调用方传参）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 客户端名称（审计展示）

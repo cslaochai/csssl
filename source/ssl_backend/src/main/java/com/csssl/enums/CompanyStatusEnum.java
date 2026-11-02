@@ -3,12 +3,12 @@ package com.csssl.enums;
 import lombok.Getter;
 
 /**
- * 租户状态（生命周期：启用 → 暂停/关闭，两者均可经「申请恢复」变更单回到启用）。
+ * 公司状态（生命周期：启用 → 暂停/关闭，两者均可经「申请恢复」变更单回到启用）。
  *
- * <p>库表按 {@link #getCode()} 存字符串；状态迁移约束见 {@code TenantService}。</p>
+ * <p>库表按 {@link #getCode()} 存字符串；状态迁移约束见 {@code CompanyService}。</p>
  */
 @Getter
-public enum TenantStatusEnum {
+public enum CompanyStatusEnum {
 
     ACTIVE("ACTIVE", "启用"),
     SUSPENDED("SUSPENDED", "已暂停"),
@@ -17,7 +17,7 @@ public enum TenantStatusEnum {
     private final String code;
     private final String label;
 
-    TenantStatusEnum(String code, String label) {
+    CompanyStatusEnum(String code, String label) {
         this.code = code;
         this.label = label;
     }
@@ -30,12 +30,12 @@ public enum TenantStatusEnum {
     /**
      * 由库值取枚举（忽略大小写/空白），未知返回 null
      */
-    public static TenantStatusEnum fromCode(String code) {
+    public static CompanyStatusEnum fromCode(String code) {
         if (code == null || code.isBlank()) {
             return null;
         }
         String c = code.trim().toUpperCase();
-        for (TenantStatusEnum s : values()) {
+        for (CompanyStatusEnum s : values()) {
             if (s.code.equals(c)) {
                 return s;
             }

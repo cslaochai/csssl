@@ -1,6 +1,7 @@
 package com.csssl.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -12,7 +13,7 @@ import java.time.LocalDateTime;
 
 /**
  * 证书申请单（RA 用户注册流程，GM/T 0034 §5.2.2）：
- * 提交（录入员）→ 审核批准/驳回（审核员，不得与录入员同一人）→ 签发（录入员）。
+ * 提交（录入员，必须指派审批人）→ 审核批准/驳回（被指派的审核员，不得与录入员同一人）→ 签发（录入员）。
  */
 @Data
 @TableName("ssl_cert_application")
@@ -23,9 +24,9 @@ public class CertApplication {
     private Long id;
 
     /**
-     * 受理租户（签发落到该租户根域）；default=院内默认域
+     * 受理公司（签发落到该公司根域）；default=院内默认域
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 申请单号（RA20261027xxx）
@@ -33,12 +34,12 @@ public class CertApplication {
     private String applyNo;
 
     /**
-     * 申请人类别（证书主体类型）：INSTITUTION-单位 / PERSON-个人；与租户租户域无关
+     * 申请人类别（证书主体类型）：INSTITUTION-单位 / PERSON-个人；与公司公司域无关
      */
     private String applicantType;
 
     /**
-     * 申请人/租户名称
+     * 申请人/公司名称
      */
     private String applicantName;
 
@@ -79,7 +80,7 @@ public class CertApplication {
     private String externalSystem;
 
     /**
-     * 外部系统申请唯一ID（同租户同客户端内幂等）
+     * 外部系统申请唯一ID（同公司同客户端内幂等）
      */
     private String externalRequestId;
 
@@ -151,7 +152,7 @@ public class CertApplication {
     private String reviewComment;
 
     /**
-     * 提交时指定的具体审批人账号（录入与审核分离：提交人可预先指派审批员，便于催办）
+     * 提交时指定的具体审批人账号（审批准入闸门：只有该账号可批准/驳回，同时用于列表可见范围与催办收件人）
      */
     private String assigneeUsername;
 
@@ -159,6 +160,12 @@ public class CertApplication {
      * 指定审批人真实姓名（展示用；登录账号见 assigneeUsername）
      */
     private String assigneeRealName;
+
+    /**
+     * 当前登录人可否审核本单（列表查询时按登录人现算，不落库；口径见 CertApplicationService#checkAssignee）
+     */
+    @TableField(exist = false)
+    private Boolean reviewable;
 
     /**
      * 签发证书ID

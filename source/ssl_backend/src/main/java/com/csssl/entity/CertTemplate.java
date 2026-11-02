@@ -23,12 +23,12 @@ public class CertTemplate {
     private Long id;
 
     /**
-     * 归属租户；NULL=全局模板（所有租户可用，兼容内置模板）
+     * 归属公司；NULL=全局模板（所有公司可用，兼容内置模板）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
-     * 模板编码（唯一）：SERVER_COMM-租户通信 / DOCTOR_SIGN-医生签名 / SUB_CA-二级CA
+     * 模板编码（唯一）：SERVER_COMM-公司通信 / DOCTOR_SIGN-医生签名 / SUB_CA-二级CA
      */
     private String templateCode;
 

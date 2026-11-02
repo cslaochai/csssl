@@ -83,6 +83,9 @@ csssl:
     enabled: ${SSL_HIS_PUSH_ENABLED:true}
     # 回调地址（HIS 后端 context-path=/api）：dev 本机 8080；132 部署经 host.docker.internal 走宿主 8009
     callback-url: ${SSL_HIS_PUSH_URL:http://localhost:8080/api/emr/signCert/caCallback}
+    # 报文签名密钥（HMAC-SHA256）：HIS 侧用同一值验签。留空则拒绝推送——无签名报文可被伪造
+    # dev 与 HIS 的 his.sign.ca.callback-secret 默认值一致；生产用 SSL_HIS_PUSH_SECRET 注入
+    secret: ${SSL_HIS_PUSH_SECRET:his-dev-ca-push-secret}
     # 单次推送超时（毫秒）
     timeout-ms: ${SSL_HIS_PUSH_TIMEOUT_MS:5000}
 

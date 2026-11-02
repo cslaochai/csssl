@@ -1,13 +1,13 @@
 <template>
   <div class="dashboard">
-    <el-form inline class="dash-toolbar">
-      <el-form-item label="租户">
-        <el-select v-model="tenantUscc" placeholder="选择租户" style="width: 320px" @change="load">
+    <el-form class="dash-toolbar" inline>
+      <el-form-item label="公司">
+        <el-select v-model="companyUscc" placeholder="选择公司" style="width: 320px" @change="load">
           <el-option
-            v-for="o in tenantOptions"
-            :key="o.uscc"
-            :label="o.tenantName ? `${o.tenantName}（${o.uscc}）` : o.uscc"
-            :value="o.uscc"
+              v-for="o in companyOptions"
+              :key="o.uscc"
+              :label="o.companyName ? `${o.companyName}（${o.uscc}）` : o.uscc"
+              :value="o.uscc"
           />
         </el-select>
       </el-form-item>
@@ -16,15 +16,17 @@
     <!-- 运营指标：待办优先，点击进对应列表 -->
     <div class="stat-grid">
       <button
-        v-for="card in statCards"
-        :key="card.key"
-        type="button"
-        class="stat-card"
-        :class="`tone-${card.tone}`"
-        @click="$router.push(card.to)"
+          v-for="card in statCards"
+          :key="card.key"
+          :class="`tone-${card.tone}`"
+          class="stat-card"
+          type="button"
+          @click="$router.push(card.to)"
       >
         <div class="stat-head">
-          <el-icon><component :is="card.icon" /></el-icon>
+          <el-icon>
+            <component :is="card.icon"/>
+          </el-icon>
           <span>{{ card.label }}</span>
         </div>
         <div class="stat-num">{{ card.value }}</div>
@@ -33,11 +35,11 @@
     </div>
 
     <div class="panel-row">
-      <!-- 根CA：本租户信任根，先看是否就绪 -->
+      <!-- 根CA：本公司信任根，先看是否就绪 -->
       <div class="page-card ca-card">
         <div class="section-title">
           根CA
-          <el-tag :type="root.initialized ? 'success' : 'danger'" size="small" effect="light">
+          <el-tag :type="root.initialized ? 'success' : 'danger'" effect="light" size="small">
             {{ root.initialized ? '已就绪' : '未就绪' }}
           </el-tag>
           <router-link class="section-link" to="/root-ca">管理根CA</router-link>
@@ -60,25 +62,31 @@
             <span class="ca-value">{{ statusText(root.status) }}</span>
           </div>
         </template>
-        <el-alert v-else :title="root.message || '根CA未初始化'" type="warning" :closable="false" show-icon />
+        <el-alert v-else :closable="false" :title="root.message || '根CA未初始化'" show-icon type="warning"/>
       </div>
 
       <!-- 常用操作 -->
       <div class="page-card quick-card">
         <div class="section-title">常用操作</div>
         <div class="quick-actions">
-          <button type="button" class="quick-item" @click="$router.push('/applications')">
-            <el-icon><EditPen /></el-icon>
+          <button class="quick-item" type="button" @click="$router.push('/applications')">
+            <el-icon>
+              <EditPen/>
+            </el-icon>
             <span>提交申请</span>
-            <small>录入租户/个人主体与公钥</small>
+            <small>录入公司/个人主体与公钥</small>
           </button>
-          <button type="button" class="quick-item" @click="$router.push('/certs')">
-            <el-icon><DocumentAdd /></el-icon>
+          <button class="quick-item" type="button" @click="$router.push('/certs')">
+            <el-icon>
+              <DocumentAdd/>
+            </el-icon>
             <span>签发证书</span>
             <small>查看证书台账与签发记录</small>
           </button>
-          <button type="button" class="quick-item" @click="$router.push('/crl')">
-            <el-icon><CircleClose /></el-icon>
+          <button class="quick-item" type="button" @click="$router.push('/crl')">
+            <el-icon>
+              <CircleClose/>
+            </el-icon>
             <span>查看吊销列表</span>
             <small>CRL 与吊销记录</small>
           </button>
@@ -89,11 +97,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { getOverview, pageApplications, listTenantsCached } from '@/api/system'
+import {computed, onMounted, ref} from 'vue'
+import {getOverview, listCompaniesCached, pageApplications} from '@/api/system'
 
-const tenantOptions = ref([])
-const tenantUscc = ref('')
+const companyOptions = ref([])
+const companyUscc = ref('')
 const overview = ref({})
 const root = ref({})
 const pending = ref(0)
@@ -153,11 +161,11 @@ const statCards = computed(() => [
 ])
 
 async function load() {
-  if (!tenantUscc.value) return
+  if (!companyUscc.value) return
   try {
     const [ov, apps] = await Promise.all([
-      getOverview(tenantUscc.value),
-      pageApplications({ status: 'PENDING', pageNo: 1, pageSize: 1, tenantUscc: tenantUscc.value })
+      getOverview(companyUscc.value),
+      pageApplications({status: 'PENDING', pageNo: 1, pageSize: 1, companyUscc: companyUscc.value})
     ])
     overview.value = ov.data || {}
     root.value = ov.data?.root || {}
@@ -168,9 +176,9 @@ async function load() {
 }
 
 onMounted(async () => {
-  tenantOptions.value = await listTenantsCached()
-  const active = tenantOptions.value.find(o => o.status === 'ACTIVE') || tenantOptions.value[0]
-  tenantUscc.value = active?.uscc || ''
+  companyOptions.value = await listCompaniesCached()
+  const active = companyOptions.value.find(o => o.status === 'ACTIVE') || companyOptions.value[0]
+  companyUscc.value = active?.uscc || ''
   await load()
 })
 </script>

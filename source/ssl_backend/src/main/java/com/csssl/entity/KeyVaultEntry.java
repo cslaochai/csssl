@@ -17,8 +17,8 @@ public class KeyVaultEntry {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 租户域（default=存量单根保险库；其他=租户独立保险库，主密钥亦独立） */
-    private String tenantUscc;
+    /** 公司域（default=存量单根保险库；其他=公司独立保险库，主密钥亦独立） */
+    private String companyUscc;
 
     /** 保险库相对目录（root/subca/tsa/audit-sign/issued/{serial}），兼容原文件路径语义 */
     private String relDir;

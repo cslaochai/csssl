@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.dto.TemplateCreateDTO;
 import com.csssl.dto.TemplateUpdateDTO;
-import com.csssl.entity.CaTenant;
+import com.csssl.entity.CaCompany;
 import com.csssl.entity.CertTemplate;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.util.CertUtil;
@@ -22,10 +22,10 @@ import java.util.Set;
  *
  * <p>模板决定证书用途与密钥用法，属策略变更，故增删改一律落审计（TEMPLATE_*）。</p>
  *
- * <p>路线A数据域：ssl_cert_template.tenant_uscc NULL=全局模板（所有租户可见，内置模板保持全局）；
- * 租户模板仅本租户可见。租户 SECURITY_ADMIN 创建/修改/删除仅限本租户模板（不可改全局模板）；
- * 全局 ADMIN/SECURITY_ADMIN 可管全局模板与各租户模板（模板域用 tenantUscc 指定，全局建模板 tenantUscc 传空=全局）。
- * 可见集过滤=全局模板 ∪ 本租户模板；RA/签发引用模板时必须校验"该模板对该租户可见"。</p>
+ * <p>路线A数据域：ssl_cert_template.company_uscc NULL=全局模板（所有公司可见，内置模板保持全局）；
+ * 公司模板仅本公司可见。公司 SECURITY_ADMIN 创建/修改/删除仅限本公司模板（不可改全局模板）；
+ * 全局 ADMIN/SECURITY_ADMIN 可管全局模板与各公司模板（模板域用 companyUscc 指定，全局建模板 companyUscc 传空=全局）。
+ * 可见集过滤=全局模板 ∪ 本公司模板；RA/签发引用模板时必须校验"该模板对该公司可见"。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -35,35 +35,35 @@ public class CertTemplateService {
     private static final Set<String> ALGORITHMS = Set.of(CertUtil.ALG_RSA2048, CertUtil.ALG_SM2);
 
     private final CertTemplateMapper templateMapper;
-    private final TenantService tenantService;
+    private final CompanyService companyService;
     private final AuditService auditService;
 
     /**
-     * 模板对操作域是否可见：全局模板（tenant_uscc NULL）人人可见；租户模板仅归属租户可见；全局域（null）全可见
+     * 模板对操作域是否可见：全局模板（company_uscc NULL）人人可见；公司模板仅归属公司可见；全局域（null）全可见
      */
-    public static boolean visibleTo(CertTemplate tpl, String operatorTenant) {
-        if (operatorTenant == null || operatorTenant.isBlank()) {
+    public static boolean visibleTo(CertTemplate tpl, String operatorCompany) {
+        if (operatorCompany == null || operatorCompany.isBlank()) {
             return true;
         }
-        return tpl.getTenantUscc() == null || tpl.getTenantUscc().isBlank() || tpl.getTenantUscc().equals(operatorTenant);
+        return tpl.getCompanyUscc() == null || tpl.getCompanyUscc().isBlank() || tpl.getCompanyUscc().equals(operatorCompany);
     }
 
     /**
-     * 模板行归属租户兜底（NULL=全局模板，审计归位用）
+     * 模板行归属公司兜底（NULL=全局模板，审计归位用）
      */
-    private static String rowTenant(CertTemplate tpl) {
-        return tpl.getTenantUscc() == null || tpl.getTenantUscc().isBlank() ? CaTenant.PRIMARY_TENANT_USCC : tpl.getTenantUscc();
+    private static String rowCompany(CertTemplate tpl) {
+        return tpl.getCompanyUscc() == null || tpl.getCompanyUscc().isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : tpl.getCompanyUscc();
     }
 
     /**
-     * 管理权校验：租户操作者（tenant 非空）仅能管理"本租户"模板——全局模板（tenant_uscc NULL）与其他租户模板一律 403
+     * 管理权校验：公司操作者（company 非空）仅能管理"本公司"模板——全局模板（company_uscc NULL）与其他公司模板一律 403
      */
-    private static void requireManaged(CertTemplate tpl, String operatorTenant) {
-        if (operatorTenant == null || operatorTenant.isBlank()) {
+    private static void requireManaged(CertTemplate tpl, String operatorCompany) {
+        if (operatorCompany == null || operatorCompany.isBlank()) {
             return;
         }
-        if (tpl.getTenantUscc() == null || tpl.getTenantUscc().isBlank() || !tpl.getTenantUscc().equals(operatorTenant)) {
-            throw new SecurityException("权限不足：租户管理员仅能管理本租户模板");
+        if (tpl.getCompanyUscc() == null || tpl.getCompanyUscc().isBlank() || !tpl.getCompanyUscc().equals(operatorCompany)) {
+            throw new SecurityException("权限不足：公司管理员仅能管理本公司模板");
         }
     }
 
@@ -86,17 +86,17 @@ public class CertTemplateService {
     }
 
     /**
-     * 分页查询模板（租户域版）：tenantScope=null 跨租户全量（全局用户总览，只读放行）；
-     * tenantScope 非空=可见集过滤——全局模板（tenant_uscc NULL）+ 该租户模板。
+     * 分页查询模板（公司域版）：companyScope=null 跨公司全量（全局用户总览，只读放行）；
+     * companyScope 非空=可见集过滤——全局模板（company_uscc NULL）+ 该公司模板。
      */
-    public Page<CertTemplate> page(long pageNo, long pageSize, String keyword, String tenantScope) {
+    public Page<CertTemplate> page(long pageNo, long pageSize, String keyword, String companyScope) {
         LambdaQueryWrapper<CertTemplate> qw = new LambdaQueryWrapper<>();
         if (keyword != null && !keyword.isBlank()) {
             qw.and(w -> w.like(CertTemplate::getTemplateName, keyword).or()
                     .like(CertTemplate::getTemplateCode, keyword));
         }
-        if (tenantScope != null && !tenantScope.isBlank()) {
-            qw.and(w -> w.isNull(CertTemplate::getTenantUscc).or().eq(CertTemplate::getTenantUscc, tenantScope));
+        if (companyScope != null && !companyScope.isBlank()) {
+            qw.and(w -> w.isNull(CertTemplate::getCompanyUscc).or().eq(CertTemplate::getCompanyUscc, companyScope));
         }
         qw.orderByAsc(CertTemplate::getTemplateCode);
         return templateMapper.selectPage(new Page<>(pageNo, pageSize), qw);
@@ -115,11 +115,11 @@ public class CertTemplateService {
 
     /**
      * 按数据域取模板（RA/签发/详情引用模板的统一入口）：
-     * 租户域仅可见全局模板与本租户模板，其余按"不存在"处理（不泄露他租户模板存在性）。
+     * 公司域仅可见全局模板与本公司模板，其余按"不存在"处理（不泄露他公司模板存在性）。
      */
-    public CertTemplate detailVisible(Long id, String tenantScope) {
+    public CertTemplate detailVisible(Long id, String companyScope) {
         CertTemplate tpl = detail(id);
-        if (!visibleTo(tpl, tenantScope)) {
+        if (!visibleTo(tpl, companyScope)) {
             throw new IllegalArgumentException("证书模板不存在（id=" + id + "）");
         }
         return tpl;
@@ -127,16 +127,16 @@ public class CertTemplateService {
 
     /**
      * 创建模板（仅安全管理员/系统管理员；变更落审计）。
-     * tplTenant=模板归属域：租户操作者已由 effectiveTenant 锁本租户；全局操作者传 null=全局模板、
-     * 非空=为该租户建模板（租户必须存在）。
+     * tplCompany=模板归属域：公司操作者已由 effectiveCompany 锁本公司；全局操作者传 null=全局模板、
+     * 非空=为该公司建模板（公司必须存在）。
      */
     public CertTemplate create(TemplateCreateDTO body, String operator, String ip,
-                               String tplTenant, String operatorTenant) {
-        if (tplTenant != null && !tplTenant.isBlank()) {
-            tenantService.get(tplTenant);
+                               String tplCompany, String operatorCompany) {
+        if (tplCompany != null && !tplCompany.isBlank()) {
+            companyService.get(tplCompany);
         }
         CertTemplate tpl = new CertTemplate();
-        tpl.setTenantUscc(tplTenant == null || tplTenant.isBlank() ? null : tplTenant);
+        tpl.setCompanyUscc(tplCompany == null || tplCompany.isBlank() ? null : tplCompany);
         tpl.setTemplateCode(required(body.getTemplateCode(), "templateCode"));
         tpl.setTemplateName(required(body.getTemplateName(), "templateName"));
         tpl.setCertType(validateType(body.getCertType()));
@@ -168,19 +168,19 @@ public class CertTemplateService {
                         + "，有效期=" + tpl.getValidityDays() + "天"
                         + "，KeyUsage=" + tpl.getKeyUsage() + "，EKU=" + nz(tpl.getExtKeyUsage())
                         + "，策略OID=" + nz(tpl.getPolicyOid())
-                        + "，归属=" + (tpl.getTenantUscc() == null ? "全局" : tpl.getTenantUscc()),
-                ip, rowTenant(tpl));
+                        + "，归属=" + (tpl.getCompanyUscc() == null ? "全局" : tpl.getCompanyUscc()),
+                ip, rowCompany(tpl));
         return tpl;
     }
 
     /**
      * 更新模板（仅安全管理员/系统管理员；内置模板可更新参数但编码与类型不可改）。
-     * 数据域：租户操作者（operatorTenant 非空）仅可改本租户模板，全局模板与其他租户模板不可触碰；
-     * 全局操作者可改全局模板与各租户模板。
+     * 数据域：公司操作者（operatorCompany 非空）仅可改本公司模板，全局模板与其他公司模板不可触碰；
+     * 全局操作者可改全局模板与各公司模板。
      */
-    public CertTemplate update(Long id, TemplateUpdateDTO body, String operator, String ip, String operatorTenant) {
+    public CertTemplate update(Long id, TemplateUpdateDTO body, String operator, String ip, String operatorCompany) {
         CertTemplate tpl = detail(id);
-        requireManaged(tpl, operatorTenant);
+        requireManaged(tpl, operatorCompany);
         // 变更前后快照对比，审计 detail 只记真正变化的关键项
         String oldName = tpl.getTemplateName();
         String oldAlgorithm = tpl.getAlgorithm();
@@ -233,17 +233,17 @@ public class CertTemplateService {
         auditService.record(operator, "TEMPLATE_UPDATE", String.valueOf(id),
                 "更新证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
                         + (changes.isEmpty() ? "，无字段变化" : "；变化：" + String.join("；", changes)),
-                ip, rowTenant(tpl));
+                ip, rowCompany(tpl));
         return tpl;
     }
 
     /**
      * 删除模板（仅安全管理员/系统管理员；内置模板不可删除）。
-     * 数据域：租户操作者仅可删本租户模板；全局操作者可删各租户自定义模板（全局模板同样受内置保护）。
+     * 数据域：公司操作者仅可删本公司模板；全局操作者可删各公司自定义模板（全局模板同样受内置保护）。
      */
-    public void delete(Long id, String operator, String ip, String operatorTenant) {
+    public void delete(Long id, String operator, String ip, String operatorCompany) {
         CertTemplate tpl = detail(id);
-        requireManaged(tpl, operatorTenant);
+        requireManaged(tpl, operatorCompany);
         if (tpl.getBuiltin() != null && tpl.getBuiltin() == 1) {
             throw new IllegalArgumentException("内置模板（" + tpl.getTemplateCode() + "）不可删除，可停用或改参数");
         }
@@ -251,7 +251,7 @@ public class CertTemplateService {
         auditService.record(operator, "TEMPLATE_DELETE", String.valueOf(id),
                 "删除证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
                         + "，类型=" + tpl.getCertType() + "，算法=" + tpl.getAlgorithm()
-                        + "，有效期=" + tpl.getValidityDays() + "天", ip, rowTenant(tpl));
+                        + "，有效期=" + tpl.getValidityDays() + "天", ip, rowCompany(tpl));
     }
 
     private String validateType(String type) {

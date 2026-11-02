@@ -14,8 +14,8 @@ public class ApiClientVO {
 
     private Long id;
     private String appId;
-    private String tenantUscc;
-    private String tenantName;
+    private String companyUscc;
+    private String companyName;
     private String clientName;
     private String ipAllowlist;
     private String clientCertSha256;
@@ -33,7 +33,7 @@ public class ApiClientVO {
         ApiClientVO vo = new ApiClientVO();
         vo.setId(c.getId());
         vo.setAppId(c.getAppId());
-        vo.setTenantUscc(c.getTenantUscc());
+        vo.setCompanyUscc(c.getCompanyUscc());
         vo.setClientName(c.getClientName());
         vo.setIpAllowlist(c.getIpAllowlist());
         vo.setClientCertSha256(c.getClientCertSha256());

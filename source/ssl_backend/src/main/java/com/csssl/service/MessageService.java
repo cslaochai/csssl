@@ -23,11 +23,11 @@ public class MessageService {
 
     /** 发消息（系统催办/审批结果通知统一入口） */
     @Transactional(rollbackFor = Exception.class)
-    public void send(String tenantUscc, String recipientUsername, String recipientRealName,
+    public void send(String companyUscc, String recipientUsername, String recipientRealName,
                      String senderUsername, String type, String title, String content,
                      String bizType, String bizId) {
         Message m = new Message();
-        m.setTenantUscc(tenantUscc == null || tenantUscc.isBlank() ? "default" : tenantUscc);
+        m.setCompanyUscc(companyUscc == null || companyUscc.isBlank() ? "default" : companyUscc);
         m.setRecipientUsername(recipientUsername);
         m.setRecipientRealName(recipientRealName);
         m.setSenderUsername(senderUsername);

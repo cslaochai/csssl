@@ -109,7 +109,7 @@ public final class CertUtil {
         return selfSignRoot(rootKey, cn, "CSSSL", algorithm, validityDays, null);
     }
 
-    /** 根CA自签证书（多租户版：主体 O 取自租户注册表 subject_o，租户受控） */
+    /** 根CA自签证书（多公司版：主体 O 取自公司注册表 subject_o，公司受控） */
     public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String organization,
                                                String algorithm, int validityDays) {
         return selfSignRoot(rootKey, cn, organization, algorithm, validityDays, null);
@@ -117,7 +117,7 @@ public final class CertUtil {
 
     /**
      * 根CA自签证书（带统一社会信用代码）：uscc 为空则不写该扩展（存量 default 域零变化）。
-     * 扩展只写在租户根上，SUB_CA 与终端证书签发时由 {@link #usccOf} 从签发CA继承，整条链携带同一租户代码。
+     * 扩展只写在公司根上，SUB_CA 与终端证书签发时由 {@link #usccOf} 从签发CA继承，整条链携带同一公司代码。
      */
     public static X509Certificate selfSignRoot(KeyPair rootKey, String cn, String organization,
                                                String algorithm, int validityDays, String uscc) {
@@ -382,7 +382,7 @@ public final class CertUtil {
                                 new GeneralName(GeneralName.uniformResourceIdentifier, ocspUrl))));
             }
 
-            // 租户信用代码继承：签发CA（租户根）带统一社会信用代码扩展时，SUB_CA 与终端证书一并带上
+            // 公司信用代码继承：签发CA（公司根）带统一社会信用代码扩展时，SUB_CA 与终端证书一并带上
             addUsccExtension(builder, usccOf(caCert));
 
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithmForKey(caKey))
@@ -550,7 +550,7 @@ public final class CertUtil {
         return names;
     }
 
-    /** 组装主体 DN（CN+O，多租户场景 O 受控于租户注册表；特殊字符按 RFC2253 转义） */
+    /** 组装主体 DN（CN+O，多公司场景 O 受控于公司注册表；特殊字符按 RFC2253 转义） */
     public static X500Name subjectDn(String cn, String organization) {
         return new X500Name("CN=" + escapeX500(cn) + ",O=" + escapeX500(organization));
     }

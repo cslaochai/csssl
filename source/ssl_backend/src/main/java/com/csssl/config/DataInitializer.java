@@ -12,6 +12,7 @@ import com.csssl.mapper.RolePermMapper;
 import com.csssl.mapper.SysRoleMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.CertService;
+import com.csssl.util.PermissionCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -24,7 +25,7 @@ import java.util.Set;
 /**
  * 启动初始化：确保默认管理员账号存在（首次启动创建 admin / 123456，密码 BCrypt 存储）、
  * 初始化内置证书模板（GM/T 0034 §5.3.4）、执行过期证书归档扫描（§12 生命周期）。
- * 租户不在此处创建：空库由管理员在租户管理页开首个租户（开租户即初始化该租户独立根CA）。
+ * 公司不在此处创建：空库由管理员在公司管理页开首个公司（开公司即初始化该公司独立根CA）。
  */
 @Slf4j
 @Component
@@ -37,6 +38,15 @@ public class DataInitializer implements ApplicationRunner {
     private final RolePermMapper rolePermMapper;
     private final CertService certService;
 
+    /**
+     * 升级新增权限点（随版本新增，存量库的角色授权不会自动获得）：
+     * 这些权限点加入角色法定上限后，需为存量预置角色补齐授权（只补缺，不动管理员已收窄的其余授权）。
+     */
+    private static final Set<String> UPGRADE_PERMS = Set.of(
+            PermissionCatalog.CA_SHARE_ASSIGN,
+            PermissionCatalog.CA_SUBCA_REBUILD_APPLY,
+            PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE);
+
     @Override
     public void run(ApplicationArguments args) {
         initRoles();
@@ -48,7 +58,7 @@ public class DataInitializer implements ApplicationRunner {
             admin.setPassword(BCrypt.hashpw("123456", BCrypt.gensalt()));
             admin.setRealName("系统管理员");
             admin.setRoleCode("ADMIN");
-            admin.setTenantUscc(null); // 默认管理员=全局账号（tenant_uscc NULL：跨租户总览，租户域操作仍须显式传 tenantUscc）
+            admin.setCompanyUscc(null); // 默认管理员=全局账号（company_uscc NULL：跨公司总览，公司域操作仍须显式传 companyUscc）
             admin.setStatus(1);
             admin.setCreatedAt(LocalDateTime.now());
             userMapper.insert(admin);
@@ -88,6 +98,24 @@ public class DataInitializer implements ApplicationRunner {
                         log.warn("[初始化] 角色 {} 清理越界授权 {} 项（超出 GM/T 0034 法定边界）", code, pruned);
                     }
                 }
+                // 升级新增权限点：为存量预置角色补齐（仅限 UPGRADE_PERMS，不动管理员已收窄的其余授权）
+                for (String permCode : max) {
+                    if (!UPGRADE_PERMS.contains(permCode)) {
+                        continue;
+                    }
+                    Long granted = rolePermMapper.selectCount(new LambdaQueryWrapper<RolePerm>()
+                            .eq(RolePerm::getRoleCode, code)
+                            .eq(RolePerm::getPermCode, permCode));
+                    if (granted != null && granted > 0) {
+                        continue;
+                    }
+                    RolePerm row = new RolePerm();
+                    row.setRoleCode(code);
+                    row.setPermCode(permCode);
+                    row.setCreatedAt(LocalDateTime.now());
+                    rolePermMapper.insert(row);
+                    log.info("[初始化] 角色 {} 补齐升级新增权限点：{}", code, permCode);
+                }
                 continue;
             }
             SysRole role = new SysRole();
@@ -123,10 +151,10 @@ public class DataInitializer implements ApplicationRunner {
 
     /**
      * 内置证书模板（编码唯一，重复启动幂等；KeyUsage/EKU/策略OID 锁定，签发按模板）。
-     * 内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：tenant_uscc=NULL，所有租户可见。
+     * 内置模板（SERVER_COMM/DOCTOR_SIGN/SUB_CA）保持全局：company_uscc=NULL，所有公司可见。
      */
     private void initTemplates() {
-        insertIfAbsent("SERVER_COMM", "租户通信证书", "SERVER", "SM2", 730,
+        insertIfAbsent("SERVER_COMM", "公司通信证书", "SERVER", "SM2", 730,
                 "digitalSignature,keyEncipherment", "serverAuth",
                 "1.2.156.112562.2.2.15", "医保前置/局端等系统间加密传输通信证书（SM2 签名证书策略）");
         insertIfAbsent("DOCTOR_SIGN", "医生签名证书", "CLIENT", "SM2", 365,
@@ -144,7 +172,7 @@ public class DataInitializer implements ApplicationRunner {
             return;
         }
         CertTemplate tpl = new CertTemplate();
-        tpl.setTenantUscc(null); // 内置模板=全局模板（ssl_cert_template.tenant_uscc NULL：所有租户可见集内）
+        tpl.setCompanyUscc(null); // 内置模板=全局模板（ssl_cert_template.company_uscc NULL：所有公司可见集内）
         tpl.setTemplateCode(code);
         tpl.setTemplateName(name);
         tpl.setCertType(certType);

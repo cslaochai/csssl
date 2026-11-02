@@ -2,7 +2,6 @@ package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.common.ApiException;
-import com.csssl.config.CssslProperties;
 import com.csssl.dto.ApiApplicationSubmitDTO;
 import com.csssl.dto.ApiCertRevokeDTO;
 import com.csssl.dto.ApplicationSubmitDTO;
@@ -20,17 +19,15 @@ import org.springframework.stereotype.Service;
 
 import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 对外证书申请 API（HIS 等外部系统直连 RA）。
  *
- * <p>数据域铁律：租户一律取 {@link ApiClient#getTenantUscc()}（由 HMAC 鉴权后的 appId 反查），
- * 请求 URL 与请求体都不接受租户参数；客户端只能看到自己（同 appId）提交的申请单。</p>
+ * <p>数据域铁律：公司一律取 {@link ApiClient#getCompanyUscc()}（由 HMAC 鉴权后的 appId 反查），
+ * 请求 URL 与请求体都不接受公司参数；客户端只能看到自己（同 appId）提交的申请单。</p>
  *
- * <p>幂等：同租户同 appId 下 externalRequestId 唯一，请求体 SHA-256 作为指纹；
+ * <p>幂等：同公司同 appId 下 externalRequestId 唯一，请求体 SHA-256 作为指纹；
  * 同 ID 同体返回首次结果（idempotentReplay=true），同 ID 异体 409。</p>
  */
 @Slf4j
@@ -38,15 +35,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CaApiService {
 
-    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
     private final CertApplicationMapper applicationMapper;
     private final CertTemplateMapper templateMapper;
     private final CaCertMapper certMapper;
     private final CertApplicationService applicationService;
     private final CertService certService;
-    private final CaService caService;
-    private final CssslProperties props;
 
     private static String apiUsername(ApiClient client) {
         return "api:" + client.getAppId();
@@ -101,56 +94,18 @@ public class CaApiService {
     }
 
     /**
-     * 信任材料：根/中间证书 PEM 与 CRL/OCSP 地址（按 appId 绑定租户生成，调用方无需知道租户标识）。
-     */
-    public ApiTrustVO trust(ApiClient client) {
-        String tenant = client.getTenantUscc();
-        String base = props.getPublicBaseUrl().replaceAll("/+$", "");
-        ApiTrustVO vo = new ApiTrustVO();
-        vo.setRootPem(caService.exportRootPem(tenant));
-        vo.setSubCaPem(caService.exportSubCaPem(tenant));
-        vo.setCrlUrl(base + "/ca/public/" + tenant + "/crl");
-        vo.setDeltaCrlUrl(base + "/ca/public/" + tenant + "/crl/delta");
-        vo.setOcspUrl(base + "/ca/public/" + tenant + "/ocsp");
-        return vo;
-    }
-
-    /**
-     * 可用模板：全局模板 ∪ 本租户模板，排除 SUB_CA（二级CA不走 RA）。
-     */
-    public List<ApiTemplateVO> templates(ApiClient client, String certType) {
-        String tenant = client.getTenantUscc();
-        LambdaQueryWrapper<CertTemplate> qw = new LambdaQueryWrapper<CertTemplate>()
-                .and(w -> w.isNull(CertTemplate::getTenantUscc).or().eq(CertTemplate::getTenantUscc, tenant))
-                .ne(CertTemplate::getCertType, "SUB_CA");
-        if (certType != null && !certType.isBlank()) {
-            String type = certType.trim().toUpperCase();
-            if (!"SERVER".equals(type) && !"CLIENT".equals(type)) {
-                throw new ApiException(400, "certType 仅支持 SERVER / CLIENT");
-            }
-            qw.eq(CertTemplate::getCertType, type);
-        }
-        qw.orderByAsc(CertTemplate::getTemplateCode);
-        List<ApiTemplateVO> rows = new ArrayList<>();
-        for (CertTemplate tpl : templateMapper.selectList(qw)) {
-            rows.add(ApiTemplateVO.from(tpl));
-        }
-        return rows;
-    }
-
-    /**
      * 提交申请：幂等命中即返回首次结果；否则经 RA 同一套校验落 PENDING 单。
      */
     public ApiApplicationVO submit(ApiClient client, ApiApplicationSubmitDTO body, String requestHash, String ip) {
-        String tenant = client.getTenantUscc();
-        CertApplication existing = findExternal(tenant, client.getAppId(), body.getExternalRequestId());
+        String company = client.getCompanyUscc();
+        CertApplication existing = findExternal(company, client.getAppId(), body.getExternalRequestId());
         if (existing != null) {
             return replayOrConflict(existing, requestHash);
         }
-        CertTemplate tpl = resolveTemplate(tenant, body.getTemplateCode());
+        CertTemplate tpl = resolveTemplate(company, body.getTemplateCode());
 
         ApplicationSubmitDTO dto = new ApplicationSubmitDTO();
-        dto.setTenantUscc(tenant);
+        dto.setCompanyUscc(company);
         dto.setApplicantType(body.getApplicantType());
         dto.setApplicantName(body.getApplicantName());
         dto.setSubjectDn(body.getSubjectDn());
@@ -163,36 +118,17 @@ public class CaApiService {
         try {
             app = applicationService.submitExternal(dto, client.getAppId(), body.getExternalRequestId(),
                     requestHash, body.getExternalEmployeeId(), body.getExternalEmployeeCode(),
-                    body.getExternalDeptName(), apiUsername(client), client.getClientName(), ip, tenant);
+                    body.getExternalDeptName(), apiUsername(client), client.getClientName(), ip, company);
         } catch (DuplicateKeyException e) {
             // 并发同 ID 提交：唯一键兜底，以先落库的单为准（同体重放/异体冲突）
-            CertApplication winner = findExternal(tenant, client.getAppId(), body.getExternalRequestId());
+            CertApplication winner = findExternal(company, client.getAppId(), body.getExternalRequestId());
             if (winner == null) {
                 throw e;
             }
             return replayOrConflict(winner, requestHash);
         }
         log.info("[对外API][{}] 提交申请 appId={}, applyNo={}, externalRequestId={}",
-                tenant, client.getAppId(), app.getApplyNo(), body.getExternalRequestId());
-        return toVo(app, false);
-    }
-
-    /**
-     * 按申请单号查询（仅本客户端提交的单）
-     */
-    public ApiApplicationVO detail(ApiClient client, String applyNo) {
-        CertApplication app = requireApplication(client, applyNo);
-        return toVo(app, false);
-    }
-
-    /**
-     * 按 externalRequestId 查询（仅本客户端提交的单）
-     */
-    public ApiApplicationVO detailByExternalRequestId(ApiClient client, String externalRequestId) {
-        CertApplication app = findExternal(client.getTenantUscc(), client.getAppId(), externalRequestId);
-        if (app == null) {
-            throw new ApiException(404, "申请单不存在（externalRequestId=" + externalRequestId + "）");
-        }
+                company, client.getAppId(), app.getApplyNo(), body.getExternalRequestId());
         return toVo(app, false);
     }
 
@@ -209,72 +145,111 @@ public class CaApiService {
             throw new ApiException(409, "申请单当前状态为 " + applicationStatusText(app.getStatus()) + "，不可撤销");
         }
         CertApplication cancelled = applicationService.cancel(app.getId(), apiUsername(client), null, ip,
-                client.getTenantUscc(), reason);
+                client.getCompanyUscc(), reason);
         return toVo(cancelled, false);
     }
 
     /**
-     * 证书下载：仅 ISSUED 单；chain=true（默认）返回 叶子+SUB_CA+根，false 仅叶子。
-     */
-    public CertificateDownload download(ApiClient client, String applyNo, boolean includeChain) {
-        CertApplication app = requireApplication(client, applyNo);
-        if (!CertApplicationStatusEnum.ISSUED.is(app.getStatus()) || app.getIssuedCertId() == null) {
-            throw new ApiException(409, "申请单当前状态为 " + applicationStatusText(app.getStatus()) + "，证书尚未签发");
-        }
-        CaCert cert = requireCertOfTenant(app.getIssuedCertId(), client.getTenantUscc());
-        X509Certificate leaf;
-        try {
-            leaf = PemUtil.parseCert(cert.getCertPem());
-        } catch (Exception e) {
-            throw new IllegalStateException("证书内容无法解析（serial=" + cert.getSerialHex() + "）", e);
-        }
-        String pem = cert.getCertPem();
-        if (includeChain) {
-            pem = certService.certPem(cert.getId()) + caService.exportRootPem(client.getTenantUscc());
-        }
-        return new CertificateDownload(pem, cert.getSerialHex(), fingerprint(leaf), TS.format(cert.getValidTo()));
-    }
-
-    /**
-     * 按序列号查询证书状态（本租户域内；实时性要求高时以 OCSP 为准）
-     */
-    public ApiCertStatusVO certStatus(ApiClient client, String serialHex) {
-        CaCert cert = requireCertBySerial(client.getTenantUscc(), serialHex);
-        return statusVo(cert);
-    }
-
-    /**
-     * 吊销证书（外部系统主动推送吊销）：序列号与原因都在请求体内，已吊销按幂等返回。
+     * 吊销证书（外部系统主动推送吊销）：序列号、医生身份与原因都在请求体内，已吊销按幂等返回。
+     *
+     * <p>作用域收敛——一次一张，且必须落到"指定医生"上，四道校验缺一不可：
+     * <ol>
+     *   <li>证书在本公司域内（{@link #requireCertBySerial}）；</li>
+     *   <li>证书类型为 CLIENT：服务端证书与 SUB_CA 不允许外部系统吊销；</li>
+     *   <li>证书由本 appId 提交的申请单签出：与 {@link #requireApplication} 同口径，
+     *       不能再出现"申请单只能看自己的、证书却能吊全院的"越权；</li>
+     *   <li>医生身份（工号 / HIS 员工主键）与申请单记录一致。</li>
+     * </ol>
      */
     public ApiCertStatusVO revoke(ApiClient client, ApiCertRevokeDTO body, String ip) {
-        CaCert cert = requireCertBySerial(client.getTenantUscc(), body.getSerialHex());
+        CaCert cert = requireCertBySerial(client.getCompanyUscc(), body.getSerialHex());
         if ("REVOKED".equals(cert.getStatus())) {
             log.info("[对外API][{}] 吊销幂等命中 appId={}, serial={}",
-                    client.getTenantUscc(), client.getAppId(), cert.getSerialHex());
+                    client.getCompanyUscc(), client.getAppId(), cert.getSerialHex());
             return statusVo(cert);
         }
-        String reason = body.getReason() == null || body.getReason().isBlank()
-                ? "外部系统推送吊销" : body.getReason().trim();
+        requireRevocableCertType(cert);
+        CertApplication app = requireOwnIssuedApplication(client, cert);
+        requireEmployeeMatch(client, app, body);
+        String reason = body.getReason().trim();
         certService.revoke(cert.getId(), reason, apiUsername(client), ip);
         ApiCertStatusVO vo = statusVo(certService.findById(cert.getId()));
-        log.info("[对外API][{}] 吊销证书 appId={}, serial={}, reason={}",
-                client.getTenantUscc(), client.getAppId(), cert.getSerialHex(), reason);
+        log.info("[对外API][{}] 吊销证书 appId={}, serial={}, applyNo={}, employee={}, reason={}",
+                client.getCompanyUscc(), client.getAppId(), cert.getSerialHex(), app.getApplyNo(),
+                body.getExternalEmployeeCode() == null ? body.getExternalEmployeeId() : body.getExternalEmployeeCode(),
+                reason);
         return vo;
     }
 
     /**
-     * 按序列号定位本租户证书（外部 API 的吊销与状态查询共用域校验）
+     * 按序列号定位本公司证书（外部 API 的吊销与状态查询共用域校验）
      */
-    private CaCert requireCertBySerial(String tenant, String serialHex) {
+    private CaCert requireCertBySerial(String company, String serialHex) {
         String serial = normalizeSerial(serialHex);
         CaCert cert = certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
-                .eq(CaCert::getTenantUscc, tenant)
+                .eq(CaCert::getCompanyUscc, company)
                 .eq(CaCert::getSerialHex, serial)
                 .last("LIMIT 1"));
         if (cert == null) {
             throw new ApiException(404, "证书不存在（serialHex=" + serialHex + "）");
         }
         return cert;
+    }
+
+    /**
+     * 外部系统只允许吊销客户端（医生）证书：吊服务端证书会直接打断业务，
+     * 吊 SUB_CA 会让整片叶子证书失去信任链，二者都必须走 CA 管理端。
+     */
+    private void requireRevocableCertType(CaCert cert) {
+        String type = cert.getCertType();
+        if (type != null && !type.isBlank() && !"CLIENT".equalsIgnoreCase(type)) {
+            throw new ApiException(403, "该证书类型不允许外部系统吊销（certType=" + type + "），请通过 CA 管理端处理");
+        }
+    }
+
+    /**
+     * 反查签出该证书的申请单并校验归属：只能吊"本 appId 提交的申请单"签出的证书。
+     * 证书与申请单是单向关联（application.issuedCertId），这里反向定位。
+     */
+    private CertApplication requireOwnIssuedApplication(ApiClient client, CaCert cert) {
+        CertApplication app = applicationMapper.selectOne(new LambdaQueryWrapper<CertApplication>()
+                .eq(CertApplication::getIssuedCertId, cert.getId())
+                .last("LIMIT 1"));
+        if (app == null) {
+            throw new ApiException(403, "证书不是通过对外 API 申请签发的，不能由外部系统吊销（请通过 CA 管理端处理）");
+        }
+        if (!client.getAppId().equals(app.getExternalSystem())) {
+            throw new ApiException(403, "证书不是本客户端（appId=" + client.getAppId() + "）提交的申请单签出的，禁止吊销");
+        }
+        return app;
+    }
+
+    /**
+     * 医生身份交叉校验：请求携带的工号 / HIS 员工主键必须与申请单记录一致，
+     * 杜绝"拿 A 医生的序列号配 B 医生的身份"吊销。
+     *
+     * <p>存量申请单若两个身份字段都为空，降级为仅按 appId 归属放行并打告警，
+     * 便于数据补齐后收紧；新申请已由 {@link ApiApplicationSubmitDTO#isPersonIdentified()} 强制留痕。
+     */
+    private void requireEmployeeMatch(ApiClient client, CertApplication app, ApiCertRevokeDTO body) {
+        String reqEmployeeId = trimToNull(body.getExternalEmployeeId());
+        String reqEmployeeCode = trimToNull(body.getExternalEmployeeCode());
+        String recEmployeeId = trimToNull(app.getExternalEmployeeId());
+        String recEmployeeCode = trimToNull(app.getExternalEmployeeCode());
+        if (recEmployeeId == null && recEmployeeCode == null) {
+            log.warn("[对外API][{}] 吊销降级：存量申请单未记录医生身份，仅按 appId 归属放行 appId={} applyNo={}",
+                    client.getCompanyUscc(), client.getAppId(), app.getApplyNo());
+            return;
+        }
+        boolean idMatch = reqEmployeeId != null && reqEmployeeId.equals(recEmployeeId);
+        boolean codeMatch = reqEmployeeCode != null && reqEmployeeCode.equals(recEmployeeCode);
+        if (!idMatch && !codeMatch) {
+            throw new ApiException(403, "医生身份与证书申请记录不一致，拒绝吊销（applyNo=" + app.getApplyNo() + "）");
+        }
+    }
+
+    private static String trimToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     private ApiCertStatusVO statusVo(CaCert cert) {
@@ -290,15 +265,15 @@ public class CaApiService {
     }
 
     /**
-     * 模板解析：本租户模板优先于全局模板；SUB_CA 模板不允许走 RA。
+     * 模板解析：本公司模板优先于全局模板；SUB_CA 模板不允许走 RA。
      */
-    private CertTemplate resolveTemplate(String tenant, String templateCode) {
+    private CertTemplate resolveTemplate(String company, String templateCode) {
         List<CertTemplate> rows = templateMapper.selectList(new LambdaQueryWrapper<CertTemplate>()
                 .eq(CertTemplate::getTemplateCode, templateCode)
-                .and(w -> w.isNull(CertTemplate::getTenantUscc).or().eq(CertTemplate::getTenantUscc, tenant))
-                .orderByDesc(CertTemplate::getTenantUscc));
+                .and(w -> w.isNull(CertTemplate::getCompanyUscc).or().eq(CertTemplate::getCompanyUscc, company))
+                .orderByDesc(CertTemplate::getCompanyUscc));
         if (rows.isEmpty()) {
-            throw new ApiException(422, "模板不存在或对本租户不可用：" + templateCode);
+            throw new ApiException(422, "模板不存在或对本公司不可用：" + templateCode);
         }
         CertTemplate tpl = rows.get(0);
         if ("SUB_CA".equals(tpl.getCertType())) {
@@ -307,9 +282,9 @@ public class CaApiService {
         return tpl;
     }
 
-    private CertApplication findExternal(String tenant, String appId, String externalRequestId) {
+    private CertApplication findExternal(String company, String appId, String externalRequestId) {
         return applicationMapper.selectOne(new LambdaQueryWrapper<CertApplication>()
-                .eq(CertApplication::getTenantUscc, tenant)
+                .eq(CertApplication::getCompanyUscc, company)
                 .eq(CertApplication::getExternalSystem, appId)
                 .eq(CertApplication::getExternalRequestId, externalRequestId)
                 .last("LIMIT 1"));
@@ -317,7 +292,7 @@ public class CaApiService {
 
     private CertApplication requireApplication(ApiClient client, String applyNo) {
         CertApplication app = applicationMapper.selectOne(new LambdaQueryWrapper<CertApplication>()
-                .eq(CertApplication::getTenantUscc, client.getTenantUscc())
+                .eq(CertApplication::getCompanyUscc, client.getCompanyUscc())
                 .eq(CertApplication::getExternalSystem, client.getAppId())
                 .eq(CertApplication::getApplyNo, applyNo)
                 .last("LIMIT 1"));
@@ -325,16 +300,6 @@ public class CaApiService {
             throw new ApiException(404, "申请单不存在（applyNo=" + applyNo + "）");
         }
         return app;
-    }
-
-    private CaCert requireCertOfTenant(Long certId, String tenant) {
-        CaCert cert = certService.findById(certId);
-        String rowTenant = cert.getTenantUscc() == null || cert.getTenantUscc().isBlank()
-                ? CaTenant.PRIMARY_TENANT_USCC : cert.getTenantUscc();
-        if (!tenant.equals(rowTenant)) {
-            throw new ApiException(403, "证书不属于当前客户端租户");
-        }
-        return cert;
     }
 
     private ApiApplicationVO replayOrConflict(CertApplication existing, String requestHash) {
@@ -395,11 +360,5 @@ public class CaApiService {
         }
         CertTemplate tpl = templateMapper.selectById(templateId);
         return tpl == null ? null : tpl.getTemplateCode();
-    }
-
-    /**
-     * 证书下载结果（PEM 文本 + 响应头辅助信息）
-     */
-    public record CertificateDownload(String pem, String serialHex, String fingerprintSha256, String notAfter) {
     }
 }

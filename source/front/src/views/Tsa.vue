@@ -12,18 +12,18 @@
         <el-descriptions-item label="签名算法">
           <el-tag size="small" type="warning">{{ info.signAlgo }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="公钥指纹（SM3）" :span="2">
+        <el-descriptions-item :span="2" label="公钥指纹（SM3）">
           <div class="mono-wrap">{{ info.fingerprint }}</div>
         </el-descriptions-item>
-        <el-descriptions-item label="服务说明" :span="2">{{ info.note }}</el-descriptions-item>
+        <el-descriptions-item :span="2" label="服务说明">{{ info.note }}</el-descriptions-item>
       </el-descriptions>
       <el-empty v-else-if="!loading" description="未获取到 TSA 公钥（首次盖章时自动生成）"/>
 
       <template v-if="info.publicKeyPem">
         <div class="section-title" style="margin: 16px 0 10px">验签公钥（PEM / SPKI）</div>
-        <el-input :model-value="info.publicKeyPem" type="textarea" :rows="8" readonly class="pem-preview"/>
+        <el-input :model-value="info.publicKeyPem" :rows="8" class="pem-preview" readonly type="textarea"/>
         <div style="margin-top: 12px">
-          <el-button type="primary" plain @click="onDownloadPem">下载公钥 PEM</el-button>
+          <el-button plain type="primary" @click="onDownloadPem">下载公钥 PEM</el-button>
           <el-button plain @click="onCopyPem">复制公钥</el-button>
         </div>
       </template>

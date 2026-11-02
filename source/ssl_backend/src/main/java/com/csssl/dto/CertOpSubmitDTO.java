@@ -29,7 +29,7 @@ public class CertOpSubmitDTO {
     private Integer validityDays;
 
     /**
-     * 租户数据域（全局用户显式传入）
+     * 公司数据域（全局用户显式传入）
      */
-    private String tenantUscc;
+    private String companyUscc;
 }

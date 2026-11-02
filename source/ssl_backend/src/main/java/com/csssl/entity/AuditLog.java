@@ -27,9 +27,9 @@ public class AuditLog {
     private String username;
 
     /**
-     * 操作归属租户（全局操作记 default；租户维度过滤由后续波次接入）
+     * 操作归属公司（全局操作记 default；公司维度过滤由后续波次接入）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 操作：LOGIN/LOGOUT/CA_INIT/CERT_ISSUE/CERT_CSR_ISSUE/CERT_REVOKE/CERT_DOWNLOAD/CRL_DOWNLOAD

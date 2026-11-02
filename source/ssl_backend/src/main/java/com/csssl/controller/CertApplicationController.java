@@ -14,7 +14,7 @@ import com.csssl.entity.SysUser;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.CertApplicationService;
 import com.csssl.service.HisPushService;
-import com.csssl.util.TenantScope;
+import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -31,13 +31,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * RA 申请-审核-签发接口（GM/T 0034 §5.2.2）：
- * 提交=操作员/管理员，审核=审核员/管理员（不得与提交人同一人），签发=操作员/管理员。
+ * 提交=操作员/管理员（必须指派审批人），审核=被指派的审核员/RA管理员（不得与提交人同一人），签发=操作员/管理员。
  *
- * <p>路线A数据域（服务端强制，effectiveTenant 口径）：
- * 提交时受理租户=操作者数据域（租户用户锁本人租户；全局用户显式 ?tenantUscc=，缺省 default）；
- * 列表/详情按域过滤（租户用户只见本租户，全局用户 tenantUscc 缺省=跨租户只读总览）；
- * approve/reject/issue/cancel 校验申请单归属租户==操作者有效域，跨租户 403——
- * 全局用户操作非 default 域申请必须显式传该租户 tenantUscc，不存在写旁路。</p>
+ * <p>路线A数据域（服务端强制，effectiveCompany 口径）：
+ * 提交时受理公司=操作者数据域（公司用户锁本人公司；全局用户显式 ?companyUscc=，缺省 default）；
+ * 列表/详情按域过滤（公司用户只见本公司，全局用户 companyUscc 缺省=跨公司只读总览）；
+ * approve/reject/issue/cancel 校验申请单归属公司==操作者有效域，跨公司 403——
+ * 全局用户操作非 default 域申请必须显式传该公司 companyUscc，不存在写旁路。</p>
  */
 @RestController
 @RequestMapping("/admin/applications")
@@ -50,71 +50,75 @@ public class CertApplicationController {
 
     private final SysUserMapper sysUserMapper;
 
-    /** 申请单分页查询（登录即可查看；租户用户强制本租户，全局用户可按 ?tenantUscc= 过滤，不传=全量只读） */
+    /**
+     * 申请单分页查询（双重收口，服务端强制：公司用户只见本公司 + 审核/录入/签发角色只见与我相关或我能处理的单；
+     * 全局用户不传 companyUscc 时按角色范围跨公司只读总览。审核人参数不接受前端传入）
+     */
     @GetMapping
     public Result<Page<CertApplication>> page(@Valid ApplicationPageQueryDTO query,
                                               HttpServletRequest request) {
+        LoginUser viewer = UserUtils.requireLoginUser();
         return Result.success("查询成功", applicationService.page(query.getPageNo(), query.getPageSize(), query.getStatus(),
-                query.getKeyword(), TenantScope.readTenantScope(UserUtils.requireLoginUser().getTenantUscc(), query.getTenantUscc())));
+                query.getKeyword(), CompanyScope.readCompanyScope(viewer.getCompanyUscc(), query.getCompanyUscc()), viewer));
     }
 
-    /** 申请单详情（租户用户访问他租户单按不存在处理，不泄露存在性） */
+    /** 申请单详情（公司用户访问他公司单按不存在处理，不泄露存在性） */
     @GetMapping("/{id}")
     public Result<CertApplication> detail(@PathVariable Long id, HttpServletRequest request) {
         return Result.success("查询成功",
-                applicationService.detailVisible(id, UserUtils.requireLoginUser().getTenantUscc()));
+                applicationService.detailVisible(id, UserUtils.requireLoginUser().getCompanyUscc()));
     }
 
-    /** 提交证书申请（录入员代录；需 操作员/管理员；受理域=effectiveTenant，租户单校验主体 O 受控） */
+    /** 提交证书申请（录入员代录；需 操作员/管理员；受理域=effectiveCompany，公司单校验主体 O 受控） */
     @PreAuthorize("hasAuthority('app:submit')")
     @PostMapping
     public Result<CertApplication> submit(@Valid @RequestBody ApplicationSubmitDTO body,
-                                          @RequestParam(required = false) String tenantUscc,
+                                          @RequestParam(required = false) String companyUscc,
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String tenant = TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc == null || tenantUscc.isBlank() ? body.getTenantUscc() : tenantUscc);
+        String company = CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc == null || companyUscc.isBlank() ? body.getCompanyUscc() : companyUscc);
         return Result.success("申请提交成功", applicationService.submit(body,
-                loginUser.getUsername(), loginUser.getRealName(), clientIp(request), tenant));
+                loginUser.getUsername(), loginUser.getRealName(), clientIp(request), company));
     }
 
-    /** 审核批准（需 审核员/管理员；不得与提交人同一人；申请单必须落在操作者域） */
+    /** 审核批准（需 审核员/管理员；须为本单被指派人且不得与提交人同一人；申请单必须落在操作者域） */
     @PreAuthorize("hasAuthority('app:approve')")
     @PostMapping("/{id}/approve")
     public Result<CertApplication> approve(@PathVariable Long id, @Valid @RequestBody(required = false) ApplicationAuditDTO body,
-                                           @RequestParam(required = false) String tenantUscc,
+                                           @RequestParam(required = false) String companyUscc,
                                            HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         String comment = body == null ? null : body.getComment();
         CertApplication app = applicationService.approve(id, comment,
                 loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
         hisPushService.pushApplication(app);
         return Result.success("已批准", app);
     }
 
-    /** 审核驳回（需 审核员/管理员；不得与提交人同一人；申请单必须落在操作者域） */
+    /** 审核驳回（需 审核员/管理员；须为本单被指派人且不得与提交人同一人；申请单必须落在操作者域） */
     @PreAuthorize("hasAuthority('app:reject')")
     @PostMapping("/{id}/reject")
     public Result<CertApplication> reject(@PathVariable Long id, @Valid @RequestBody ApplicationAuditDTO body,
-                                          @RequestParam(required = false) String tenantUscc,
+                                          @RequestParam(required = false) String companyUscc,
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         CertApplication app = applicationService.reject(id, body.getComment(),
                 loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
         hisPushService.pushApplication(app);
         return Result.success("已驳回", app);
     }
 
-    /** 按申请签发证书（需 操作员/管理员；复用模板+公钥，私钥申请方自持；落到申请单受理租户域） */
+    /** 按申请签发证书（需 操作员/管理员；复用模板+公钥，私钥申请方自持；落到申请单受理公司域） */
     @PreAuthorize("hasAuthority('app:issue')")
     @PostMapping("/{id}/issue")
-    public Result<CertVO> issue(@PathVariable Long id, @RequestParam(required = false) String tenantUscc,
+    public Result<CertVO> issue(@PathVariable Long id, @RequestParam(required = false) String companyUscc,
                                 HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         CertVO vo = applicationService.issue(id,
                 loginUser.getUsername(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
         // 签发已提交：按最新申请单状态推送外部系统（ISSUED 报文带证书 PEM，供其自动回填）
         hisPushService.pushApplication(applicationService.detail(id));
         return Result.success("签发成功", vo);
@@ -123,26 +127,26 @@ public class CertApplicationController {
     /** 撤销申请（需 操作员/管理员；仅提交人本人或系统管理员可撤销；申请单必须落在操作者域） */
     @PreAuthorize("hasAuthority('app:cancel')")
     @PostMapping("/{id}/cancel")
-    public Result<CertApplication> cancel(@PathVariable Long id, @RequestParam(required = false) String tenantUscc,
+    public Result<CertApplication> cancel(@PathVariable Long id, @RequestParam(required = false) String companyUscc,
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         CertApplication app = applicationService.cancel(id,
                 loginUser.getUsername(), loginUser.getRoleCode(), clientIp(request),
-                TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
+                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
         hisPushService.pushApplication(app);
         return Result.success("已撤销", app);
     }
 
-    /** 本租户审批人名单（提交表单下拉用；受限，不依赖 user:list） */
+    /**
+     * 审批人名单（提交表单「指定审批人」下拉用；受限，不依赖 user:list）。
+     * CA 平台公司级统管，审批人均为公司（平台）级人员，与受理公司无关，不做任何公司过滤——
+     * 直接返回全部启用状态的审核员(APPROVER)/RA管理员(RA_ADMIN)。
+     */
     @PreAuthorize("hasAuthority('app:listApprovers')")
     @GetMapping("/approvers")
-    public Result<List<SysUser>> listApprovers(@RequestParam(required = false) String tenantUscc,
-                                              HttpServletRequest request) {
-        LoginUser loginUser = UserUtils.requireLoginUser();
-        String scope = TenantScope.readTenantScope(loginUser.getTenantUscc(), tenantUscc);
+    public Result<List<SysUser>> listApprovers() {
         List<SysUser> list = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                 .in(SysUser::getRoleCode, "APPROVER", "RA_ADMIN")
-                .eq(scope != null && !scope.isBlank(), SysUser::getTenantUscc, scope)
                 .eq(SysUser::getStatus, 1)
                 .orderByAsc(SysUser::getId));
         list.forEach(u -> u.setPassword(null));

@@ -1,5 +1,6 @@
 package com.csssl.dto;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -7,13 +8,13 @@ import lombok.Data;
 
 /**
  * 外部系统（HIS 等）提交证书申请请求：模板用 templateCode 引用（外部系统不感知内部雪花 ID），
- * externalRequestId 为幂等键；身份材料由受理租户留存，平台只收主体与公钥。
+ * externalRequestId 为幂等键；身份材料由受理公司留存，平台只收主体与公钥。
  */
 @Data
 public class ApiApplicationSubmitDTO {
 
     /**
-     * 外部系统申请唯一标识（同租户同客户端内幂等；断网重试必须复用）
+     * 外部系统申请唯一标识（同公司同客户端内幂等；断网重试必须复用）
      */
     @NotBlank(message = "externalRequestId 不能为空（幂等键）")
     @Size(max = 64, message = "externalRequestId 不超过64字符")
@@ -24,6 +25,7 @@ public class ApiApplicationSubmitDTO {
      * 申请人类别：INSTITUTION-单位 / PERSON-个人
      */
     @NotBlank(message = "applicantType 不能为空（INSTITUTION / PERSON）")
+    @Pattern(regexp = "INSTITUTION|PERSON", message = "applicantType 只能是 INSTITUTION 或 PERSON")
     private String applicantType;
 
     @NotBlank(message = "applicantName 不能为空")
@@ -35,7 +37,7 @@ public class ApiApplicationSubmitDTO {
     private String subjectDn;
 
     /**
-     * 模板编码（如 DOCTOR_SIGN）；必须是全局或本租户模板，SUB_CA 模板拒绝
+     * 模板编码（如 DOCTOR_SIGN）；必须是全局或本公司模板，SUB_CA 模板拒绝
      */
     @NotBlank(message = "templateCode 不能为空")
     private String templateCode;
@@ -66,4 +68,18 @@ public class ApiApplicationSubmitDTO {
      */
     @Size(max = 64, message = "externalDeptName 不超过64字符")
     private String externalDeptName;
+
+    /**
+     * 个人证书必须带医生身份锚点：吊销时要拿它做交叉校验，申请时不留就没法验。
+     */
+    @AssertTrue(message = "applicantType=PERSON 时必须填写医生身份：externalEmployeeCode 与 externalEmployeeId 至少填一个")
+    public boolean isPersonIdentified() {
+        return !"PERSON".equalsIgnoreCase(applicantType)
+                || notBlank(externalEmployeeId)
+                || notBlank(externalEmployeeCode);
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
 }

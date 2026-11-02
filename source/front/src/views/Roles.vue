@@ -6,27 +6,27 @@
         <el-form :model="query" inline>
           <el-form-item label="角色">
             <el-input
-              v-model="query.keyword"
-              clearable
-              placeholder="角色名称/编码"
-              style="width: 200px"
-              @keyup.enter="handleSearch"
+                v-model="query.keyword"
+                clearable
+                placeholder="角色名称/编码"
+                style="width: 200px"
+                @keyup.enter="handleSearch"
             />
           </el-form-item>
           <el-form-item label="状态">
-            <el-select v-model="query.status" placeholder="全部" clearable style="width: 120px" @change="handleSearch">
-              <el-option label="启用" :value="1" />
-              <el-option label="停用" :value="0" />
+            <el-select v-model="query.status" clearable placeholder="全部" style="width: 120px" @change="handleSearch">
+              <el-option :value="1" label="启用"/>
+              <el-option :value="0" label="停用"/>
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button :icon="Search" type="primary" @click="handleSearch">搜索</el-button>
             <el-button :icon="Refresh" @click="handleReset">重置</el-button>
           </el-form-item>
         </el-form>
         <div class="query-actions">
           <el-tooltip content="六类角色由 GM/T 0034 分权职责固化：编码不可改、角色不可增删" placement="top">
-            <el-tag type="info" effect="plain">六类法定角色</el-tag>
+            <el-tag effect="plain" type="info">六类法定角色</el-tag>
           </el-tooltip>
         </div>
       </div>
@@ -35,144 +35,149 @@
     <!-- 表格卡 -->
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="pageRows" :max-height="tableMaxHeight" stripe style="width: 100%">
-        <el-table-column prop="roleCode" label="角色编码" width="150" class-name="cell-mono" />
-        <el-table-column prop="roleName" label="角色名称" width="150" />
-        <el-table-column prop="roleDesc" label="职责说明" min-width="300" show-overflow-tooltip />
-        <el-table-column label="账号数" width="90" align="center">
+        <el-table-column class-name="cell-mono" label="角色编码" prop="roleCode" width="150"/>
+        <el-table-column label="角色名称" prop="roleName" width="150"/>
+        <el-table-column label="职责说明" min-width="300" prop="roleDesc" show-overflow-tooltip/>
+        <el-table-column align="center" label="账号数" width="90">
           <template #default="{ row }">
             <span class="cell-count">{{ row.userCount }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="权限授权" width="120" align="center">
+        <el-table-column align="center" label="权限授权" width="120">
           <template #default="{ row }">
             <el-tooltip
-              :content="`已授权 ${row.permCount} 项 / 法定可授 ${row.maxPermCount} 项`"
-              placement="top"
+                :content="`已授权 ${row.permCount} 项 / 法定可授 ${row.maxPermCount} 项`"
+                placement="top"
             >
-              <el-tag size="small" :type="row.permCount === row.maxPermCount ? 'success' : 'warning'">
+              <el-tag :type="row.permCount === row.maxPermCount ? 'success' : 'warning'" size="small">
                 {{ row.permCount }} / {{ row.maxPermCount }}
               </el-tag>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column prop="sortOrder" label="排序" width="70" align="center" />
+        <el-table-column align="center" label="排序" prop="sortOrder" width="70"/>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 1 ? 'success' : 'info'">{{ row.status === 1 ? '启用' : '停用' }}</el-tag>
+            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
+                row.status === 1 ? '启用' : '停用'
+              }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" align="right" fixed="right">
+        <el-table-column align="right" fixed="right" label="操作" width="240">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
-            <el-button v-perm="'role:update'" link type="primary" size="small" :icon="Edit" @click="openEdit(row)">
+            <el-button link size="small" type="primary" @click="onRowDetail(row)">详情</el-button>
+            <el-button v-perm="'role:update'" :icon="Edit" link size="small" type="primary" @click="openEdit(row)">
               编辑
             </el-button>
-            <el-button v-perm="'role:perm'" link type="primary" size="small" :icon="Setting" @click="openPerms(row)">
+            <el-button v-perm="'role:perm'" :icon="Setting" link size="small" type="primary" @click="openPerms(row)">
               权限配置
             </el-button>
           </template>
         </el-table-column>
       </el-table>
-      <div v-if="filteredRows.length === 0 && !loading" class="empty-tip">暂无匹配的角色</div>
       <div ref="footerRef" class="list-footer">
         <el-pagination
-          v-model:current-page="query.pageNo"
-          v-model:page-size="query.pageSize"
-          :page-sizes="PAGE_SIZES"
-          :total="filteredRows.length"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSizeChange"
-          @current-change="handleCurrentChange"
+            v-model:current-page="query.pageNo"
+            v-model:page-size="query.pageSize"
+            :page-sizes="PAGE_SIZES"
+            :total="filteredRows.length"
+            layout="total, sizes, prev, pager, next, jumper"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
         />
       </div>
     </el-card>
 
     <!-- 编辑角色档案：编码只读，名称/职责/排序/启停可维护 -->
-    <el-dialog v-model="editVisible" title="编辑角色" width="540px" :close-on-click-modal="false">
+    <el-dialog v-model="editVisible" :close-on-click-modal="false" title="编辑角色" width="540px">
       <el-form :model="editForm" label-width="90px">
         <el-form-item label="角色编码">
-          <el-input v-model="editForm.roleCode" disabled />
+          <el-input v-model="editForm.roleCode" disabled/>
           <div class="form-hint">编码由 GM/T 0034 分权职责固化，不可修改；角色不可增删。</div>
         </el-form-item>
         <el-form-item label="角色名称" required>
-          <el-input v-model="editForm.roleName" maxlength="64" show-word-limit placeholder="页面展示名称" />
+          <el-input v-model="editForm.roleName" maxlength="64" placeholder="页面展示名称" show-word-limit/>
         </el-form-item>
         <el-form-item label="职责说明">
           <el-input
-            v-model="editForm.roleDesc"
-            type="textarea"
-            :rows="3"
-            maxlength="500"
-            show-word-limit
-            placeholder="对应 GM/T 0034 的分权职责"
+              v-model="editForm.roleDesc"
+              :rows="3"
+              maxlength="500"
+              placeholder="对应 GM/T 0034 的分权职责"
+              show-word-limit
+              type="textarea"
           />
         </el-form-item>
         <el-form-item label="排序号">
-          <el-input-number v-model="editForm.sortOrder" :min="0" :max="999" controls-position="right" />
+          <el-input-number v-model="editForm.sortOrder" :max="999" :min="0" controls-position="right"/>
         </el-form-item>
         <el-form-item label="状态">
           <el-switch
-            v-model="editForm.status"
-            :active-value="1"
-            :inactive-value="0"
-            active-text="启用"
-            inactive-text="停用"
-            :disabled="editForm.roleCode === 'ADMIN'"
+              v-model="editForm.status"
+              :active-value="1"
+              :disabled="editForm.roleCode === 'ADMIN'"
+              :inactive-value="0"
+              active-text="启用"
+              inactive-text="停用"
           />
           <div class="form-hint">
-            {{ editForm.roleCode === 'ADMIN'
-              ? '系统管理员角色不可停用（避免无人可管理角色与账号）'
-              : '停用后该角色账号立即不可登录，已登录会话下一次请求即失效' }}
+            {{
+              editForm.roleCode === 'ADMIN'
+                  ? '系统管理员角色不可停用（避免无人可管理角色与账号）'
+                  : '停用后该角色账号立即不可登录，已登录会话下一次请求即失效'
+            }}
           </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="editVisible = false">取消</el-button>
-          <el-button type="primary" :loading="editSubmitting" @click="onSaveEdit">保存</el-button>
+          <el-button :loading="editSubmitting" type="primary" @click="onSaveEdit">保存</el-button>
         </div>
       </template>
     </el-dialog>
 
     <!-- 权限配置：菜单 + 按钮，越法定边界置灰不可勾选 -->
     <el-dialog
-      v-model="permVisible"
-      :title="`配置权限 - ${permRole ? permRole.roleName : ''}`"
-      width="760px"
-      destroy-on-close
-      :close-on-click-modal="false"
+        v-model="permVisible"
+        :close-on-click-modal="false"
+        :title="`配置权限 - ${permRole ? permRole.roleName : ''}`"
+        destroy-on-close
+        width="760px"
     >
       <el-alert
-        type="warning"
-        :closable="false"
-        show-icon
-        title="只能在该角色的法定职责边界内授权：置灰项超出 GM/T 0034 分权边界，不可勾选；保存后即时生效"
-        style="margin-bottom: 12px"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+          title="只能在该角色的法定职责边界内授权：置灰项超出 GM/T 0034 分权边界，不可勾选；保存后即时生效"
+          type="warning"
       />
       <div class="perm-summary">
         <span class="perm-summary-item">已授权 <b>{{ checkedCount }}</b> 项</span>
         <span class="perm-summary-item">法定可授 {{ permCatalog.filter(i => i.allowed).length }} 项</span>
-        <el-button link type="primary" size="small" @click="checkAllAllowed">勾选全部可授权项</el-button>
-        <el-button link type="danger" size="small" @click="clearChecked">清空</el-button>
+        <el-button link size="small" type="primary" @click="checkAllAllowed">勾选全部可授权项</el-button>
+        <el-button link size="small" type="danger" @click="clearChecked">清空</el-button>
       </div>
       <div v-loading="permLoading" class="perm-tree-wrap">
         <el-tree
-          ref="permTreeRef"
-          :data="permTree"
-          :props="{ label: 'label', children: 'children' }"
-          node-key="key"
-          show-checkbox
-          default-expand-all
-          check-strictly
-          @check="onTreeCheck"
+            ref="permTreeRef"
+            :data="permTree"
+            :props="{ label: 'label', children: 'children' }"
+            check-strictly
+            default-expand-all
+            node-key="key"
+            show-checkbox
+            @check="onTreeCheck"
         >
           <template #default="{ data }">
             <span class="perm-node">
               <span class="perm-node-label">{{ data.label }}</span>
-              <el-tag v-if="data.isGroup" size="small" type="info" effect="plain">分组</el-tag>
-              <el-tag v-else-if="data.type === 'MENU'" size="small" type="success" effect="plain">菜单</el-tag>
-              <el-tag v-else size="small" effect="plain">按钮</el-tag>
-              <el-tag v-if="data.isGroup ? false : !data.allowed" size="small" type="danger" effect="plain">法定越界</el-tag>
+              <el-tag v-if="data.isGroup" effect="plain" size="small" type="info">分组</el-tag>
+              <el-tag v-else-if="data.type === 'MENU'" effect="plain" size="small" type="success">菜单</el-tag>
+              <el-tag v-else effect="plain" size="small">按钮</el-tag>
+              <el-tag v-if="data.isGroup ? false : !data.allowed" effect="plain" size="small"
+                      type="danger">法定越界</el-tag>
               <span v-if="data.note" class="perm-node-note">{{ data.note }}</span>
             </span>
           </template>
@@ -181,7 +186,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="permVisible = false">取消</el-button>
-          <el-button type="primary" :loading="permSubmitting" @click="onSavePerms">保存</el-button>
+          <el-button :loading="permSubmitting" type="primary" @click="onSavePerms">保存</el-button>
         </div>
       </template>
     </el-dialog>
@@ -193,7 +198,10 @@
         <el-descriptions-item label="角色名称">{{ detail?.roleName }}</el-descriptions-item>
         <el-descriptions-item label="职责说明">{{ detail?.roleDesc || '-' }}</el-descriptions-item>
         <el-descriptions-item label="账号数">{{ detail?.userCount ?? 0 }}</el-descriptions-item>
-        <el-descriptions-item label="权限授权">{{ detail ? `${detail.permCount} / ${detail.maxPermCount}` : '' }}</el-descriptions-item>
+        <el-descriptions-item label="权限授权">{{
+            detail ? `${detail.permCount} / ${detail.maxPermCount}` : ''
+          }}
+        </el-descriptions-item>
         <el-descriptions-item label="排序">{{ detail?.sortOrder }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail?.status === 1 ? '启用' : '停用' }}</el-descriptions-item>
         <el-descriptions-item label="内置角色">{{ detail?.builtin === 1 ? '是' : '否' }}</el-descriptions-item>
@@ -205,19 +213,19 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Edit, Refresh, Search, Setting } from '@element-plus/icons-vue'
-import { listRoles, getRolePerms, updateRole, saveRolePerms, getMyPerms } from '@/api/system'
-import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from '@/lib/pagination'
-import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
-import { savePerms, saveRoleName } from '@/lib/perm'
+import {computed, nextTick, onMounted, reactive, ref} from 'vue'
+import {ElMessage} from 'element-plus'
+import {Edit, Refresh, Search, Setting} from '@element-plus/icons-vue'
+import {getMyPerms, getRolePerms, listRoles, saveRolePerms, updateRole} from '@/api/system'
+import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
+import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
+import {savePerms, saveRoleName} from '@/lib/perm'
 
 const loading = ref(false)
 const rows = ref([])
-const query = reactive({ keyword: '', status: '', pageNo: 1, pageSize: DEFAULT_PAGE_SIZE })
+const query = reactive({keyword: '', status: '', pageNo: 1, pageSize: DEFAULT_PAGE_SIZE})
 
-const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
+const {queryCardRef, footerRef, tableMaxHeight} = useTableMaxHeight()
 
 const filteredRows = computed(() => {
   const kw = query.keyword.trim().toLowerCase()
@@ -238,7 +246,7 @@ const editVisible = ref(false)
 const editSubmitting = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
-const editForm = reactive({ roleCode: '', roleName: '', roleDesc: '', sortOrder: 0, status: 1 })
+const editForm = reactive({roleCode: '', roleName: '', roleDesc: '', sortOrder: 0, status: 1})
 
 // ===== 权限配置 =====
 const permVisible = ref(false)

@@ -3,18 +3,26 @@
     <!-- 顶部 Header：与 cslk HIS 同风格（深蓝顶栏 + logo + 面包屑 + 用户区） -->
     <el-header class="app-header">
       <div class="header-left">
-        <router-link to="/" class="brand" title="返回首页" :style="brandStyle">
-          <img class="brand-logo" :src="logo" alt="长沙麓康CA认证中心" />
+        <router-link :style="brandStyle" class="brand" title="返回首页" to="/">
+          <img :src="logo" alt="长沙麓康CA认证中心" class="brand-logo"/>
           <span v-if="!sidebarCollapsed" class="brand-name">长沙麓康CA认证中心</span>
         </router-link>
-        <button class="collapse-btn" :title="sidebarCollapsed ? '展开菜单' : '收起菜单'" @click="toggleSidebar">
-          <el-icon v-if="sidebarCollapsed"><Expand /></el-icon>
-          <el-icon v-else><Fold /></el-icon>
+        <button :title="sidebarCollapsed ? '展开菜单' : '收起菜单'" class="collapse-btn" @click="toggleSidebar">
+          <el-icon v-if="sidebarCollapsed">
+            <Expand/>
+          </el-icon>
+          <el-icon v-else>
+            <Fold/>
+          </el-icon>
         </button>
         <nav class="breadcrumb-nav">
-          <el-icon class="crumb-icon"><HomeFilled /></el-icon>
+          <el-icon class="crumb-icon">
+            <HomeFilled/>
+          </el-icon>
           <span class="crumb-label">长沙麓康CA认证中心</span>
-          <el-icon v-if="currentTitle" class="crumb-sep"><ArrowRight /></el-icon>
+          <el-icon v-if="currentTitle" class="crumb-sep">
+            <ArrowRight/>
+          </el-icon>
           <span v-if="currentTitle" class="crumb-current">{{ currentTitle }}</span>
         </nav>
       </div>
@@ -29,22 +37,32 @@
           <span class="clock-week">{{ currentWeekday }}</span>
         </div>
         <div class="header-divider"></div>
-        <el-badge :value="unreadCount" :hidden="unreadCount === 0" :max="99" type="danger">
+        <el-badge :hidden="unreadCount === 0" :max="99" :value="unreadCount" type="danger">
           <button class="header-icon-btn" title="消息中心" @click="goMessages">
-            <el-icon><Bell /></el-icon>
+            <el-icon>
+              <Bell/>
+            </el-icon>
           </button>
         </el-badge>
         <el-dropdown trigger="click" @command="onCommand">
           <button class="header-icon-btn" title="设置">
-            <el-icon><Setting /></el-icon>
+            <el-icon>
+              <Setting/>
+            </el-icon>
           </button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="changePassword">
-                <el-icon><Key /></el-icon>修改口令
+                <el-icon>
+                  <Key/>
+                </el-icon>
+                修改口令
               </el-dropdown-item>
               <el-dropdown-item command="logout" divided>
-                <el-icon><SwitchButton /></el-icon>退出登录
+                <el-icon>
+                  <SwitchButton/>
+                </el-icon>
+                退出登录
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -57,28 +75,34 @@
       <el-aside :width="sidebarCollapsed ? '64px' : '264px'" class="app-sidebar">
         <el-scrollbar class="flex-1">
           <el-menu
-            :collapse="sidebarCollapsed"
-            :collapse-transition="false"
-            :default-active="activeMenu"
-            :default-openeds="openedGroups"
-            background-color="#0a3d6b"
-            text-color="#c8d0e4"
-            active-text-color="#ffffff"
-            router
-            class="app-menu !border-none"
+              :collapse="sidebarCollapsed"
+              :collapse-transition="false"
+              :default-active="activeMenu"
+              :default-openeds="openedGroups"
+              active-text-color="#ffffff"
+              background-color="#0a3d6b"
+              class="app-menu !border-none"
+              router
+              text-color="#c8d0e4"
           >
             <template v-for="entry in menuTree" :key="entry.key || entry.path">
               <el-menu-item v-if="entry.type === 'item'" :index="entry.path">
-                <el-icon><component :is="entry.icon" /></el-icon>
+                <el-icon>
+                  <component :is="entry.icon"/>
+                </el-icon>
                 <span>{{ entry.title }}</span>
               </el-menu-item>
               <el-sub-menu v-else :index="entry.key">
                 <template #title>
-                  <el-icon><component :is="entry.icon" /></el-icon>
+                  <el-icon>
+                    <component :is="entry.icon"/>
+                  </el-icon>
                   <span>{{ entry.title }}</span>
                 </template>
                 <el-menu-item v-for="child in entry.children" :key="child.path" :index="child.path">
-                  <el-icon><component :is="child.icon" /></el-icon>
+                  <el-icon>
+                    <component :is="child.icon"/>
+                  </el-icon>
                   <span>{{ child.title }}</span>
                 </el-menu-item>
               </el-sub-menu>
@@ -88,34 +112,35 @@
       </el-aside>
 
       <el-main class="app-main">
-        <router-view :key="route.path" />
+        <router-view :key="route.path"/>
       </el-main>
     </el-container>
 
     <!-- 修改口令 -->
-    <el-dialog v-model="pwdVisible" title="修改登录口令" width="440px" :close-on-click-modal="false">
+    <el-dialog v-model="pwdVisible" :close-on-click-modal="false" title="修改登录口令" width="440px">
       <el-alert
-        type="warning"
-        :closable="false"
-        show-icon
-        title="修改成功后当前会话失效，需使用新口令重新登录"
-        style="margin-bottom: 14px"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 14px"
+          title="修改成功后当前会话失效，需使用新口令重新登录"
+          type="warning"
       />
       <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="90px">
         <el-form-item label="旧口令" prop="oldPassword">
-          <el-input v-model="pwdForm.oldPassword" type="password" show-password placeholder="当前登录口令" />
+          <el-input v-model="pwdForm.oldPassword" placeholder="当前登录口令" show-password type="password"/>
         </el-form-item>
         <el-form-item label="新口令" prop="newPassword">
-          <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="至少8位，需同时包含字母和数字" />
+          <el-input v-model="pwdForm.newPassword" placeholder="至少8位，需同时包含字母和数字" show-password
+                    type="password"/>
         </el-form-item>
         <el-form-item label="确认新口令" prop="confirmPassword">
-          <el-input v-model="pwdForm.confirmPassword" type="password" show-password placeholder="再次输入新口令" />
+          <el-input v-model="pwdForm.confirmPassword" placeholder="再次输入新口令" show-password type="password"/>
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="pwdVisible = false">取消</el-button>
-          <el-button type="primary" :loading="pwdSubmitting" @click="onChangePassword">确认修改</el-button>
+          <el-button :loading="pwdSubmitting" type="primary" @click="onChangePassword">确认修改</el-button>
         </div>
       </template>
     </el-dialog>
@@ -123,12 +148,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { logout, changePassword, getMyPerms, unreadMessageCount } from '@/api/system'
-import { encryptPassword, resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
-import { hasPerm, permReady, loadRoleName, savePerms, saveRoleName, clearPerms } from '@/lib/perm'
+import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue'
+import {useRoute, useRouter} from 'vue-router'
+import {ElMessage, ElMessageBox} from 'element-plus'
+import {changePassword, getMyPerms, logout, unreadMessageCount} from '@/api/system'
+import {encryptPassword, resetPublicKeyCache as resetSm2Cache} from '@/lib/password'
+import {clearPerms, hasPerm, loadRoleName, permReady, savePerms, saveRoleName} from '@/lib/perm'
 import logo from '@/assets/logo.svg'
 
 const route = useRoute()
@@ -151,6 +176,7 @@ const permVersion = ref(0)
 // 消息中心未读红点（登录后轮询；切页也刷一次）
 const unreadCount = ref(0)
 let unreadTimer = null
+
 async function loadUnread() {
   if (!localStorage.getItem('token')) return
   try {
@@ -160,12 +186,14 @@ async function loadUnread() {
     // 会话失效由拦截器统一处理，这里不重复提示
   }
 }
+
 function goMessages() {
   router.push('/messages')
 }
 
 // ========== 侧栏折叠（与 HIS 一致：按钮在顶栏，侧栏收成图标） ==========
 const sidebarCollapsed = ref(false)
+
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
@@ -174,9 +202,9 @@ function toggleSidebar() {
 // 展开 240px + 顶栏 24px 左内边距 = 侧栏 264px，右边缘对齐并带竖线；
 // 折叠时 marginLeft -24px + 宽 64px，右边缘对齐侧栏折叠态 64px。
 const brandStyle = computed(() =>
-  sidebarCollapsed.value
-    ? { width: '64px', marginLeft: '-24px', justifyContent: 'center' }
-    : { width: '240px' }
+    sidebarCollapsed.value
+        ? {width: '64px', marginLeft: '-24px', justifyContent: 'center'}
+        : {width: '240px'}
 )
 
 // ========== 实时时钟 ==========
@@ -251,9 +279,9 @@ onUnmounted(() => {
 
 // ===== 菜单树：页面属性（标题/图标/角色）单一来源=路由 meta，此处只定义分组 =====
 const GROUP_DEFS = [
-  { key: 'business', title: '证书业务', icon: 'Tickets' },
-  { key: 'tenant', title: '租户管理', icon: 'Connection' },
-  { key: 'platform', title: '平台管理', icon: 'Setting' }
+  {key: 'business', title: '证书业务', icon: 'Tickets'},
+  {key: 'company', title: '公司管理', icon: 'OfficeBuilding'},
+  {key: 'platform', title: '平台管理', icon: 'Setting'}
 ]
 // 默认收起全部二级分组；仅当直达/刷新在组内页面时展开该组，保证激活项可见
 const openedGroups = computed(() => {
@@ -276,11 +304,11 @@ function visibleChild(c) {
 
 const menuTree = computed(() => {
   const kids = router.options.routes.find(r => r.path === '/').children.filter(visibleChild)
-  const toItem = c => ({ type: 'item', path: '/' + c.path, title: c.meta.title, icon: c.meta.icon })
+  const toItem = c => ({type: 'item', path: '/' + c.path, title: c.meta.title, icon: c.meta.icon})
   const direct = g => kids.filter(c => c.meta.group === g).map(toItem)
   const groups = GROUP_DEFS.map(g => {
     const children = direct(g.key)
-    return children.length ? { type: 'sub', key: g.key, title: g.title, icon: g.icon, children } : null
+    return children.length ? {type: 'sub', key: g.key, title: g.title, icon: g.icon, children} : null
   }).filter(Boolean)
   return [...direct('top'), ...groups]
 })
@@ -289,11 +317,11 @@ const menuTree = computed(() => {
 const pwdVisible = ref(false)
 const pwdSubmitting = ref(false)
 const pwdFormRef = ref()
-const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+const pwdForm = reactive({oldPassword: '', newPassword: '', confirmPassword: ''})
 const pwdRules = {
-  oldPassword: [{ required: true, message: '请输入旧口令', trigger: 'blur' }],
+  oldPassword: [{required: true, message: '请输入旧口令', trigger: 'blur'}],
   newPassword: [
-    { required: true, message: '请输入新口令', trigger: 'blur' },
+    {required: true, message: '请输入新口令', trigger: 'blur'},
     {
       validator: (rule, value, callback) => {
         if (!value) return callback()
@@ -306,7 +334,7 @@ const pwdRules = {
     }
   ],
   confirmPassword: [
-    { required: true, message: '请再次输入新口令', trigger: 'blur' },
+    {required: true, message: '请再次输入新口令', trigger: 'blur'},
     {
       validator: (rule, value, callback) => {
         if (value !== pwdForm.newPassword) return callback(new Error('两次输入的新口令不一致'))
@@ -335,7 +363,7 @@ async function onChangePassword() {
       encryptPassword(pwdForm.oldPassword),
       encryptPassword(pwdForm.newPassword)
     ])
-    await changePassword({ oldPassword, newPassword })
+    await changePassword({oldPassword, newPassword})
     pwdVisible.value = false
     ElMessage.success('口令修改成功，需使用新口令重新登录')
     clearSession()
@@ -347,12 +375,12 @@ async function onChangePassword() {
 
 async function onCommand(command) {
   if (command === 'changePassword') {
-    Object.assign(pwdForm, { oldPassword: '', newPassword: '', confirmPassword: '' })
+    Object.assign(pwdForm, {oldPassword: '', newPassword: '', confirmPassword: ''})
     pwdVisible.value = true
     return
   }
   if (command === 'logout') {
-    await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
+    await ElMessageBox.confirm('确定退出登录吗？', '提示', {type: 'warning'})
     try {
       await logout()
     } catch (e) {

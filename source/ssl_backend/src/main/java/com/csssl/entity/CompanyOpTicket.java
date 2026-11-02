@@ -11,14 +11,14 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 租户变更审批单（新建/暂停/恢复/关闭/重置接入密钥 全量走单，GM/T 0034 §10.1g 分权制衡）：
- * 发起（持 tenant:op:apply）→ 审批（持 tenant:op:approve，不得与发起人同一人）→ 批准即执行。
+ * 公司变更审批单（新建/暂停/恢复/关闭/重置接入密钥 全量走单，GM/T 0034 §10.1g 分权制衡）：
+ * 发起（持 company:op:apply）→ 审批（持 company:op:approve，不得与发起人同一人）→ 批准即执行。
  * 直接执行通道已拆除，含系统管理员在内一律只能发起或查看。
  * 接入密钥明文不落库：执行结果只记 App ID 与版本，发起人凭一次性回执从密钥保险库领取。
  */
 @Data
-@TableName("ssl_tenant_op_ticket")
-public class CaTenantOpTicket {
+@TableName("ssl_company_op_ticket")
+public class CompanyOpTicket {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -35,14 +35,14 @@ public class CaTenantOpTicket {
     private String opType;
 
     /**
-     * 目标租户（统一社会信用代码；CREATE 时为拟登记代码）
+     * 目标公司（统一社会信用代码；CREATE 时为拟登记代码）
      */
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
-     * 租户名称（CREATE 参数快照，审批展示）
+     * 公司名称（CREATE 参数快照，审批展示）
      */
-    private String tenantName;
+    private String companyName;
 
     /**
      * 证书主体O（CREATE 参数快照）

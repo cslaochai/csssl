@@ -9,17 +9,17 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 增量 CRL（dCRL）视图：指定租户域自最近全量发布以来新增的吊销/挂起条目。
- * default 域时 tenantUscc 保持 null（字段不输出，存量 URL 响应体逐字节兼容）。
+ * 增量 CRL（dCRL）视图：指定公司域自最近全量发布以来新增的吊销/挂起条目。
+ * default 域时 companyUscc 保持 null（字段不输出，存量 URL 响应体逐字节兼容）。
  */
 @Data
 public class DeltaCrlVO {
 
     /**
-     * 归属租户域（仅非 default 域输出）
+     * 归属公司域（仅非 default 域输出）
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private String tenantUscc;
+    private String companyUscc;
 
     /**
      * 增量 CRL PEM

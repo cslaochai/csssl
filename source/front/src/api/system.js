@@ -2,8 +2,8 @@ import request from './request'
 
 /**
  * CSSSL · CA根认证中心 API 封装（与后端 /ssl context-path 对齐）。
- * 租户不是登录主体：账号一律为平台账号，租户域由调用页按操作显式传入 tenantUscc；
- * 列表类接口不传=跨租户只读，写操作不传由后端 fail-closed 拒绝。
+ * 公司不是登录主体：账号一律为平台账号，公司域由调用页按操作显式传入 companyUscc；
+ * 列表类接口不传=跨公司只读，写操作不传由后端 fail-closed 拒绝。
  */
 
 // ===== 登录鉴权 =====
@@ -21,103 +21,157 @@ export function changePassword(data) {
   return request.post('/auth/changePassword', data)
 }
 
-// ===== 租户管理（多租户域；新建直接执行，暂停/恢复/关闭/重置密钥走变更单双人复核） =====
-export function listTenants() {
-  return request.get('/admin/tenants')
+// ===== 公司管理（多公司域；新建直接执行，暂停/恢复/关闭/重置密钥走变更单双人复核） =====
+export function listCompanies() {
+  return request.get('/admin/companies')
 }
-/** 新建租户（直接执行：建租户即建独立根CA+SUB_CA 并发放接入凭证；返回一次性凭证回执） */
-export function createTenant(data) {
-  return request.post('/admin/tenants', data)
+/** 新建公司（直接执行：建公司即建独立根CA+SUB_CA 并发放接入凭证；返回一次性凭证回执） */
+export function createCompany(data) {
+  return request.post('/admin/companies', data)
 }
-/** 租户分页查询：{pageNo,pageSize,keyword,status}（keyword 命中 标识/名称/主体O） */
-export function pageTenants(params) {
-  return request.get('/admin/tenants/page', { params })
+/** 公司分页查询：{pageNo,pageSize,keyword,status}（keyword 命中 标识/名称/主体O） */
+export function pageCompanies(params) {
+  return request.get('/admin/companies/page', { params })
 }
-export function getTenant(tenantUscc) {
-  return request.get(`/admin/tenants/${tenantUscc}`)
+export function getCompany(companyUscc) {
+  return request.get(`/admin/companies/${companyUscc}`)
 }
 
-// ===== 租户变更单（暂停/恢复/关闭/重置接入密钥：发起→他人审批→批准即执行） =====
+// ===== 公司变更单（暂停/恢复/关闭/重置接入密钥：发起→他人审批→批准即执行） =====
 /** 变更单分页查询：{pageNo,pageSize,status,opType,keyword} */
-export function pageTenantOps(params) {
-  return request.get('/admin/tenant-ops', { params })
+export function pageCompanyOps(params) {
+  return request.get('/admin/company-ops', { params })
 }
-/** 发起变更单：{opType,uscc,reason}；新建租户不走变更单（见 createTenant） */
-export function submitTenantOp(data) {
-  return request.post('/admin/tenant-ops', data)
+/** 发起变更单：{opType,uscc,reason}；新建公司不走变更单（见 createCompany） */
+export function submitCompanyOp(data) {
+  return request.post('/admin/company-ops', data)
 }
 /** 审批批准（不得与发起人同一人；批准即执行） */
-export function approveTenantOp(id, comment) {
-  return request.post(`/admin/tenant-ops/${id}/approve`, { comment })
+export function approveCompanyOp(id, comment) {
+  return request.post(`/admin/company-ops/${id}/approve`, { comment })
 }
 /** 审批驳回（意见必填） */
-export function rejectTenantOp(id, comment) {
-  return request.post(`/admin/tenant-ops/${id}/reject`, { comment })
+export function rejectCompanyOp(id, comment) {
+  return request.post(`/admin/company-ops/${id}/reject`, { comment })
 }
 /** 撤回（仅发起人本人、仅待审批） */
-export function cancelTenantOp(id) {
-  return request.post(`/admin/tenant-ops/${id}/cancel`)
+export function cancelCompanyOp(id) {
+  return request.post(`/admin/company-ops/${id}/cancel`)
 }
 /** 领取接入凭证回执（仅发起人本人、一次性；密钥仅返回本次响应） */
-export function takeTenantOpReceipt(id) {
-  return request.get(`/admin/tenant-ops/${id}/receipt`)
+export function takeCompanyOpReceipt(id) {
+  return request.get(`/admin/company-ops/${id}/receipt`)
 }
 
-/** 租户列表模块级缓存（各页租户下拉共用；失败返回空数组不阻断页面） */
-let tenantsCache = null
-export async function listTenantsCached(force = false) {
-  if (tenantsCache && !force) return tenantsCache
+/** 公司列表模块级缓存（各页公司下拉共用；失败返回空数组不阻断页面） */
+let companiesCache = null
+export async function listCompaniesCached(force = false) {
+  if (companiesCache && !force) return companiesCache
   try {
-    const res = await listTenants()
+    const res = await listCompanies()
     const d = res.data
-    tenantsCache = Array.isArray(d) ? d : d?.records || []
+    companiesCache = Array.isArray(d) ? d : d?.records || []
   } catch (e) {
-    tenantsCache = tenantsCache || []
+    companiesCache = companiesCache || []
   }
-  return tenantsCache
+  return companiesCache
 }
 
-/** 租户标识→中文名映射（缓存清单）：界面展示一律中文名优先，未命中回落标识 */
-export async function tenantNameMap() {
+/** 公司标识→中文名映射（缓存清单）：界面展示一律中文名优先，未命中回落标识 */
+export async function companyNameMap() {
   const map = {}
-  for (const t of await listTenantsCached()) {
-    if (t.uscc) map[t.uscc] = t.tenantName || t.uscc
+  for (const t of await listCompaniesCached()) {
+    if (t.uscc) map[t.uscc] = t.companyName || t.uscc
   }
   return map
 }
 
-// ===== 根CA（按租户域；tenantUscc 由所在页面显式传入） =====
-export function getCaStatus(tenantUscc) {
-  return request.get('/admin/ca/status', { params: { tenantUscc } })
+// ===== 根CA（按公司域；companyUscc 由所在页面显式传入） =====
+export function getCaStatus(companyUscc) {
+  return request.get('/admin/ca/status', { params: { companyUscc } })
 }
-export function initCa(tenantUscc) {
-  return request.post('/admin/ca/init', { tenantUscc })
+export function initCa(companyUscc) {
+  return request.post('/admin/ca/init', { companyUscc })
 }
-export function downloadRootCert(tenantUscc) {
-  return request.get('/admin/ca/root/download', { params: { tenantUscc } })
+export function downloadRootCert(companyUscc) {
+  return request.get('/admin/ca/root/download', { params: { companyUscc } })
 }
-export function sealRootKey(tenantUscc) {
-  return request.post('/admin/ca/seal', { tenantUscc })
+export function sealRootKey(companyUscc) {
+  return request.post('/admin/ca/seal', { companyUscc })
 }
-export function unsealRootKey(tenantUscc) {
-  return request.post('/admin/ca/unseal', { tenantUscc })
+export function unsealRootKey(companyUscc) {
+  return request.post('/admin/ca/unseal', { companyUscc })
 }
-export function downloadSubCaCert(tenantUscc) {
-  return request.get('/admin/ca/subca/download', { params: { tenantUscc } })
+export function downloadSubCaCert(companyUscc) {
+  return request.get('/admin/ca/subca/download', { params: { companyUscc } })
 }
 
-// ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN；按租户域） =====
-export function getCaShares(tenantUscc) {
-  return request.get('/admin/ca/shares', { params: { tenantUscc } })
+// ===== 根密钥 Shamir(3,5) 门限分持（GM/T 0034 §8.2.4.3，仅 ADMIN/KEY_ADMIN；按公司域） =====
+export function getCaShares(companyUscc) {
+  return request.get('/admin/ca/shares', { params: { companyUscc } })
 }
-export function migrateCaShares(tenantUscc) {
-  return request.post('/admin/ca/shares/migrate', { tenantUscc })
+export function migrateCaShares(companyUscc) {
+  return request.post('/admin/ca/shares/migrate', { companyUscc })
 }
-export function downloadCaShare(index, tenantUscc) {
-  return request.get(`/admin/ca/shares/${index}`, { params: { tenantUscc } })
+export function downloadCaShare(index, companyUscc) {
+  return request.get(`/admin/ca/shares/${index}`, { params: { companyUscc } })
 }
-export function unsealCaShares(shares, tenantUscc) {
-  return request.post('/admin/ca/unseal-shares', { shares, tenantUscc })
+export function unsealCaShares(shares, companyUscc) {
+  return request.post('/admin/ca/unseal-shares', { shares, companyUscc })
+}
+
+// ===== 根密钥份额保管人绑定（建根/开公司时指定，一人一份；3-of-5 动用根私钥需审批） =====
+/** 指定/重指定根私钥份额保管人：{companyUscc, holderUsernames[5]}（仅 ADMIN/KEY_ADMIN） */
+export function assignShares(data) {
+  return request.post('/admin/ca/shares/assign', data)
+}
+/**
+ * 某公司密钥份额总览（一次调用返回全部）：
+ * { holders:[{shareIndex,holderUsername,holderRealName}], mine:{index,total,threshold,yHex,shareJson}|null, threshold, total }
+ * holders 对密钥管理员/系统管理员/公司管理员可见；mine 仅保管人本人可见（非保管人=null）。
+ */
+export function getShareOverview(companyUscc) {
+  return request.get('/admin/ca/shares/overview', { params: { companyUscc } })
+}
+
+// ===== 用户简易列表（保管人下拉用；不含口令；仅开公司/指派保管人权限） =====
+// 传 companyUscc 则收敛为「平台级 + 该公司本域」的密钥管理员；不传则只返回平台级
+export function listSimpleUsers(companyUscc) {
+  return request.get('/admin/users/simple', { params: { companyUscc } })
+}
+
+// ===== 二级CA 重建申请单（发起→5名保管人 3-of-5 审批→批准执行：粘贴≥3份额加载根私钥后重建） =====
+/** 发起重建申请：{companyUscc, reason}（ca:subca:rebuild:apply；会自动通知 5 名保管人） */
+export function applySubCaRebuild(data) {
+  return request.post('/admin/ca/subca-rebuild/apply', data)
+}
+/** 申请单分页：{pageNo,pageSize,status,keyword}（ca:subca:rebuild:apply 可见全部） */
+export function pageSubCaRebuild(params) {
+  return request.get('/admin/ca/subca-rebuild/page', { params })
+}
+/** 当前登录人作为保管人且尚未投票的待审单（轻量轮询入口） */
+export function pendingSubCaRebuild() {
+  return request.get('/admin/ca/subca-rebuild/pending')
+}
+/** 申请单详情 */
+export function detailSubCaRebuild(id) {
+  return request.get(`/admin/ca/subca-rebuild/${id}`)
+}
+/** 审批同意：{comment}（须为保管人；3-of-5 任意 3 人同意即批准） */
+export function approveSubCaRebuild(id, data) {
+  return request.post(`/admin/ca/subca-rebuild/${id}/approve`, data)
+}
+/** 审批驳回：{comment}（须为保管人；意见必填；任一驳回即否决） */
+export function rejectSubCaRebuild(id, data) {
+  return request.post(`/admin/ca/subca-rebuild/${id}/reject`, data)
+}
+/** 撤回申请（仅发起人本人，且仅 PENDING） */
+export function cancelSubCaRebuild(id) {
+  return request.post(`/admin/ca/subca-rebuild/${id}/cancel`)
+}
+/** 执行重建：{shareJsons[≥3]}（ca:subca:rebuild:execute；粘贴份额加载根私钥后重建二级CA） */
+export function executeSubCaRebuild(id, data) {
+  return request.post(`/admin/ca/subca-rebuild/${id}/execute`, data)
 }
 
 // ===== 证书管理 =====
@@ -127,15 +181,15 @@ export function pageCerts(params) {
 export function getCert(id) {
   return request.get(`/admin/certs/${id}`)
 }
-export function issueCert(data, tenantUscc) {
-  return request.post('/admin/certs', data, { params: { tenantUscc } })
+export function issueCert(data, companyUscc) {
+  return request.post('/admin/certs', data, { params: { companyUscc } })
 }
-export function issueCertByCsr(data, tenantUscc) {
-  return request.post('/admin/certs/csr', data, { params: { tenantUscc } })
+export function issueCertByCsr(data, companyUscc) {
+  return request.post('/admin/certs/csr', data, { params: { companyUscc } })
 }
 /** 公钥直签（RA 场景）：申请方自持私钥，提交 Subject DN + 公钥 PEM + 模板/CN/SAN */
-export function issueCertByPublicKey(data, tenantUscc) {
-  return request.post('/admin/certs/public-key', data, { params: { tenantUscc } })
+export function issueCertByPublicKey(data, companyUscc) {
+  return request.post('/admin/certs/public-key', data, { params: { companyUscc } })
 }
 export function downloadCertPem(id) {
   return request.get(`/admin/certs/${id}/cert.pem`)
@@ -147,25 +201,25 @@ export function downloadKeyPem(id) {
 export function downloadCertZip(id) {
   return request.get(`/admin/certs/${id}/export/zip`, { responseType: 'blob' })
 }
-/** 证书概览（按租户域）；不传 tenantUscc 时后端按平台主租户兜底 */
-export function getOverview(tenantUscc) {
-  return request.get('/admin/overview', { params: { tenantUscc } })
+/** 证书概览（按公司域）；不传 companyUscc 时后端按平台主公司兜底 */
+export function getOverview(companyUscc) {
+  return request.get('/admin/overview', { params: { companyUscc } })
 }
 
-// ===== CRL 吊销列表（按租户域） =====
-export function getCrlView(tenantUscc) {
-  return request.get('/admin/crl', { params: { tenantUscc } })
+// ===== CRL 吊销列表（按公司域） =====
+export function getCrlView(companyUscc) {
+  return request.get('/admin/crl', { params: { companyUscc } })
 }
-/** 吊销记录分页查询：{pageNo,pageSize,keyword,status,reason,tenantUscc?}（不传租户=跨租户只读） */
+/** 吊销记录分页查询：{pageNo,pageSize,keyword,status,reason,companyUscc?}（不传公司=跨公司只读） */
 export function pageCrlRecords(params) {
   return request.get('/admin/crl/records', { params })
 }
-export function downloadCrl(tenantUscc) {
-  return request.get('/admin/crl/download', { params: { tenantUscc } })
+export function downloadCrl(companyUscc) {
+  return request.get('/admin/crl/download', { params: { companyUscc } })
 }
 /** 增量 CRL（dCRL）：{deltaPem, thisUpdate, nextUpdate, entryCount, crlNumber, baseCrlNumber} */
-export function getDeltaCrl(tenantUscc) {
-  return request.get('/admin/crl/delta', { params: { tenantUscc } })
+export function getDeltaCrl(companyUscc) {
+  return request.get('/admin/crl/delta', { params: { companyUscc } })
 }
 
 // ===== 审计日志 =====
@@ -236,34 +290,34 @@ export function deleteTemplate(id) {
 export function pageApplications(params) {
   return request.get('/admin/applications', { params })
 }
-export function submitApplication(data, tenantUscc) {
-  return request.post('/admin/applications', data, { params: { tenantUscc } })
+export function submitApplication(data, companyUscc) {
+  return request.post('/admin/applications', data, { params: { companyUscc } })
 }
-export function approveApplication(id, comment, tenantUscc) {
-  return request.post(`/admin/applications/${id}/approve`, { comment }, { params: { tenantUscc } })
+export function approveApplication(id, comment, companyUscc) {
+  return request.post(`/admin/applications/${id}/approve`, { comment }, { params: { companyUscc } })
 }
-export function rejectApplication(id, comment, tenantUscc) {
-  return request.post(`/admin/applications/${id}/reject`, { comment }, { params: { tenantUscc } })
+export function rejectApplication(id, comment, companyUscc) {
+  return request.post(`/admin/applications/${id}/reject`, { comment }, { params: { companyUscc } })
 }
-export function issueApplication(id, tenantUscc) {
-  return request.post(`/admin/applications/${id}/issue`, null, { params: { tenantUscc } })
+export function issueApplication(id, companyUscc) {
+  return request.post(`/admin/applications/${id}/issue`, null, { params: { companyUscc } })
 }
-export function cancelApplication(id, tenantUscc) {
-  return request.post(`/admin/applications/${id}/cancel`, null, { params: { tenantUscc } })
+export function cancelApplication(id, companyUscc) {
+  return request.post(`/admin/applications/${id}/cancel`, null, { params: { companyUscc } })
 }
 
 // ===== 申请单：审批人名单 / 轨迹 / 催办 =====
-/** 本租户审批人名单（提交表单下拉；不依赖 user:list） */
-export function listApprovers(tenantUscc) {
-  return request.get('/admin/applications/approvers', { params: { tenantUscc } })
+/** 本公司审批人名单（提交表单下拉；不依赖 user:list） */
+export function listApprovers() {
+  return request.get('/admin/applications/approvers')
 }
 /** 单据审批轨迹（按步时间正序） */
 export function listTrail(id) {
   return request.get(`/admin/applications/${id}/trail`)
 }
 /** 催办被指派审批人 */
-export function urgeApplication(id, tenantUscc) {
-  return request.post(`/admin/applications/${id}/urge`, null, { params: { tenantUscc } })
+export function urgeApplication(id, companyUscc) {
+  return request.post(`/admin/applications/${id}/urge`, null, { params: { companyUscc } })
 }
 
 // ===== 站内信 / 消息中心 =====
@@ -281,20 +335,20 @@ export function markMessagesRead(ids) {
 }
 
 // ===== 证书操作审批单（吊销/挂起/解除挂起双人复核，批准即执行进 CRL） =====
-export function submitCertOp(data, tenantUscc) {
-  return request.post('/admin/cert-ops', data, { params: { tenantUscc } })
+export function submitCertOp(data, companyUscc) {
+  return request.post('/admin/cert-ops', data, { params: { companyUscc } })
 }
 export function pageCertOps(params) {
   return request.get('/admin/cert-ops', { params })
 }
-export function approveCertOp(id, comment, tenantUscc) {
-  return request.post(`/admin/cert-ops/${id}/approve`, { comment }, { params: { tenantUscc } })
+export function approveCertOp(id, comment, companyUscc) {
+  return request.post(`/admin/cert-ops/${id}/approve`, { comment }, { params: { companyUscc } })
 }
-export function rejectCertOp(id, comment, tenantUscc) {
-  return request.post(`/admin/cert-ops/${id}/reject`, { comment }, { params: { tenantUscc } })
+export function rejectCertOp(id, comment, companyUscc) {
+  return request.post(`/admin/cert-ops/${id}/reject`, { comment }, { params: { companyUscc } })
 }
-export function cancelCertOp(id, tenantUscc) {
-  return request.post(`/admin/cert-ops/${id}/cancel`, null, { params: { tenantUscc } })
+export function cancelCertOp(id, companyUscc) {
+  return request.post(`/admin/cert-ops/${id}/cancel`, null, { params: { companyUscc } })
 }
 
 // ===== 导出（PKCS#12 软件证书 / 审计归档 CSV） =====
@@ -302,8 +356,8 @@ export function cancelCertOp(id, tenantUscc) {
 export function exportCertP12(id, password) {
   return request.post(`/admin/certs/${id}/export/p12`, { password }, { responseType: 'blob' })
 }
-export function exportAuditCsv(tenantUscc) {
-  return request.get('/admin/audit/export', { params: { tenantUscc } })
+export function exportAuditCsv(companyUscc) {
+  return request.get('/admin/audit/export', { params: { companyUscc } })
 }
 
 // ===== TSA 可信时间戳（公开） =====
@@ -311,8 +365,8 @@ export function getTsaPublicKey() {
   return request.get('/tsa/publicKey')
 }
 
-// ===== 公开验证端点（按租户域，无需登录） =====
-/** 证书在线验证三态：POST /ca/public/{tenantUscc}/verify，body {certPem, purpose} */
-export function verifyCertPublic(tenantUscc, data) {
-  return request.post(`/ca/public/${tenantUscc}/verify`, data)
+// ===== 公开验证端点（按公司域，无需登录） =====
+/** 证书在线验证三态：POST /ca/public/{companyUscc}/verify，body {certPem, purpose} */
+export function verifyCertPublic(companyUscc, data) {
+  return request.post(`/ca/public/${companyUscc}/verify`, data)
 }

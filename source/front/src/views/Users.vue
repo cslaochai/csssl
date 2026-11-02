@@ -5,22 +5,23 @@
       <div class="query-wrap">
         <el-form :model="query" inline>
           <el-form-item label="角色">
-            <el-select v-model="query.roleCode" placeholder="全部" clearable style="width: 150px" @change="handleSearch">
+            <el-select v-model="query.roleCode" clearable placeholder="全部" style="width: 150px"
+                       @change="handleSearch">
               <el-option
-                v-for="r in roleOptions"
-                :key="r.roleCode"
-                :label="roleLabel(r)"
-                :value="r.roleCode"
+                  v-for="r in roleOptions"
+                  :key="r.roleCode"
+                  :label="roleLabel(r)"
+                  :value="r.roleCode"
               />
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button :icon="Search" type="primary" @click="handleSearch">搜索</el-button>
             <el-button :icon="Refresh" @click="handleReset">重置</el-button>
           </el-form-item>
         </el-form>
         <div class="query-actions">
-          <el-button v-perm="'user:create'" type="primary" :icon="Plus" @click="openCreate">创建管理账号</el-button>
+          <el-button v-perm="'user:create'" :icon="Plus" type="primary" @click="openCreate">创建管理账号</el-button>
         </div>
       </div>
     </el-card>
@@ -28,84 +29,91 @@
     <!-- 表格卡 -->
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-        <el-table-column prop="username" label="账号" min-width="130" class-name="cell-mono" />
-        <el-table-column prop="realName" label="姓名" min-width="130" />
+        <el-table-column class-name="cell-mono" label="账号" min-width="130" prop="username"/>
+        <el-table-column label="姓名" min-width="130" prop="realName"/>
         <el-table-column label="角色" width="110">
           <template #default="{ row }">
-            <el-tag size="small" :type="roleTag(row.roleCode)">{{ roleText(row.roleCode) }}</el-tag>
+            <el-tag :type="roleTag(row.roleCode)" size="small">{{ roleText(row.roleCode) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 1 ? 'success' : 'info'">{{ row.status === 1 ? '启用' : '禁用' }}</el-tag>
+            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
+                row.status === 1 ? '启用' : '禁用'
+              }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="lastLoginTime" label="最近登录" width="170" />
-        <el-table-column align="right" label="操作" width="260" fixed="right">
+        <el-table-column label="最近登录" prop="lastLoginTime" width="170"/>
+        <el-table-column align="right" fixed="right" label="操作" width="260">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="onRowDetail(row)">详情</el-button>
-            <el-button v-perm="'user:update'" link type="primary" size="small" :disabled="row.username === 'admin'" @click="openEdit(row)">编辑</el-button>
+            <el-button link size="small" type="primary" @click="onRowDetail(row)">详情</el-button>
+            <el-button v-perm="'user:update'" :disabled="row.username === 'admin'" link size="small" type="primary"
+                       @click="openEdit(row)">编辑
+            </el-button>
             <el-button
-              v-perm="'user:update'"
-              link
-              size="small"
-              :type="row.status === 1 ? 'danger' : 'success'"
-              :disabled="row.username === 'admin'"
-              @click="toggleStatus(row)"
-            >{{ row.status === 1 ? '禁用' : '启用' }}</el-button>
+                v-perm="'user:update'"
+                :disabled="row.username === 'admin'"
+                :type="row.status === 1 ? 'danger' : 'success'"
+                link
+                size="small"
+                @click="toggleStatus(row)"
+            >{{ row.status === 1 ? '禁用' : '启用' }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
-      <div v-if="rows.length === 0 && !loading" class="empty-tip">暂无匹配的用户记录</div>
       <div ref="footerRef" class="list-footer">
         <el-pagination
-          v-model:current-page="query.pageNo"
-          v-model:page-size="query.pageSize"
-          :page-sizes="PAGE_SIZES"
-          :total="total"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSizeChange"
-          @current-change="handleCurrentChange"
+            v-model:current-page="query.pageNo"
+            v-model:page-size="query.pageSize"
+            :page-sizes="PAGE_SIZES"
+            :total="total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
         />
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑账号' : '创建管理账号'" width="480px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :close-on-click-modal="false" :title="editing ? '编辑账号' : '创建管理账号'"
+               width="480px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="账号" required>
-          <el-input v-model="form.username" :disabled="editing" placeholder="登录账号（创建后不可改）" />
+          <el-input v-model="form.username" :disabled="editing" placeholder="登录账号（创建后不可改）"/>
         </el-form-item>
         <el-form-item :label="editing ? '重置口令' : '口令'" required>
           <el-input
-            v-model="form.password"
-            :placeholder="editing ? '留空则不修改口令' : '至少8位，需同时包含字母和数字'"
-            type="password"
-            show-password
+              v-model="form.password"
+              :placeholder="editing ? '留空则不修改口令' : '至少8位，需同时包含字母和数字'"
+              show-password
+              type="password"
           />
         </el-form-item>
         <el-form-item label="姓名">
-          <el-input v-model="form.realName" placeholder="真实姓名/岗位" />
+          <el-input v-model="form.realName" placeholder="真实姓名/岗位"/>
         </el-form-item>
         <el-form-item label="角色" required>
           <el-select v-model="form.roleCode" style="width: 100%">
             <el-option
-              v-for="r in roleOptions"
-              :key="r.roleCode"
-              :label="roleLabel(r)"
-              :value="r.roleCode"
-              :disabled="r.status !== 1"
+                v-for="r in roleOptions"
+                :key="r.roleCode"
+                :disabled="r.status !== 1"
+                :label="roleLabel(r)"
+                :value="r.roleCode"
             />
           </el-select>
-          <div class="tenant-tip">角色由角色配置页维护：停用角色不可分配，名称/职责以角色配置为准</div>
+          <div class="company-tip">角色由角色配置页维护：停用角色不可分配，名称/职责以角色配置为准</div>
         </el-form-item>
         <el-form-item label="状态">
-          <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
+          <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用"
+                     inactive-text="禁用"/>
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="submitting" @click="onSave">保存</el-button>
+          <el-button :loading="submitting" type="primary" @click="onSave">保存</el-button>
         </div>
       </template>
     </el-dialog>
@@ -128,21 +136,21 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { pageUsers, createUser, updateUser, listRoles } from '@/api/system'
-import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '@/lib/pagination'
-import { useTableMaxHeight } from '@/lib/useTableMaxHeight'
+import {computed, onMounted, reactive, ref} from 'vue'
+import {ElMessage, ElMessageBox} from 'element-plus'
+import {Plus, Refresh, Search} from '@element-plus/icons-vue'
+import {createUser, listRoles, pageUsers, updateUser} from '@/api/system'
+import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
+import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 
 // 角色下拉的兜底清单（接口不可用时页面仍可操作；正常以角色配置页档案为准）
 const DEFAULT_ROLES = [
-  { roleCode: 'ADMIN', roleName: '系统管理员', status: 1 },
-  { roleCode: 'OPERATOR', roleName: 'CA操作员', status: 1 },
-  { roleCode: 'APPROVER', roleName: '审核员', status: 1 },
-  { roleCode: 'AUDITOR', roleName: '审计员', status: 1 },
-  { roleCode: 'SECURITY_ADMIN', roleName: '安全管理员', status: 1 },
-  { roleCode: 'KEY_ADMIN', roleName: '密钥管理员', status: 1 }
+  {roleCode: 'ADMIN', roleName: '系统管理员', status: 1},
+  {roleCode: 'OPERATOR', roleName: 'CA操作员', status: 1},
+  {roleCode: 'APPROVER', roleName: '审核员', status: 1},
+  {roleCode: 'AUDITOR', roleName: '审计员', status: 1},
+  {roleCode: 'SECURITY_ADMIN', roleName: '安全管理员', status: 1},
+  {roleCode: 'KEY_ADMIN', roleName: '密钥管理员', status: 1}
 ]
 const roleOptions = ref([...DEFAULT_ROLES])
 const roleMap = computed(() => Object.fromEntries(roleOptions.value.map(r => [r.roleCode, r])))
@@ -154,16 +162,16 @@ function roleLabel(r) {
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, roleCode: '' })
+const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, roleCode: ''})
 
 // 两卡式列表页：表格只设最大高度，超高内部滚动
-const { queryCardRef, footerRef, tableMaxHeight } = useTableMaxHeight()
+const {queryCardRef, footerRef, tableMaxHeight} = useTableMaxHeight()
 const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
-const form = reactive({ id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1 })
+const form = reactive({id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1})
 
 function onRowDetail(row) {
   detail.value = row
@@ -173,10 +181,18 @@ function onRowDetail(row) {
 function roleText(r) {
   return roleMap.value[r]?.roleName || r
 }
+
 // 角色 → el-tag 颜色；OPERATOR 给一个真实存在的类型（success），未知角色兜底为 info，
 // 绝不能返回空串，否则 el-tag 的 type prop 校验会告警 "got value \"\""
 function roleTag(r) {
-  return { ADMIN: 'danger', OPERATOR: 'success', APPROVER: 'warning', AUDITOR: 'info', SECURITY_ADMIN: 'primary', KEY_ADMIN: 'warning' }[r] || 'info'
+  return {
+    ADMIN: 'danger',
+    OPERATOR: 'success',
+    APPROVER: 'warning',
+    AUDITOR: 'info',
+    SECURITY_ADMIN: 'primary',
+    KEY_ADMIN: 'warning'
+  }[r] || 'info'
 }
 
 async function load() {
@@ -219,13 +235,20 @@ function handleCurrentChange(val) {
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1 })
+  Object.assign(form, {id: null, username: '', password: '', realName: '', roleCode: 'OPERATOR', status: 1})
   dialogVisible.value = true
 }
 
 function openEdit(row) {
   editing.value = true
-  Object.assign(form, { id: row.id, username: row.username, password: '', realName: row.realName, roleCode: row.roleCode, status: row.status })
+  Object.assign(form, {
+    id: row.id,
+    username: row.username,
+    password: '',
+    realName: row.realName,
+    roleCode: row.roleCode,
+    status: row.status
+  })
   dialogVisible.value = true
 }
 
@@ -249,7 +272,12 @@ async function onSave() {
   submitting.value = true
   try {
     if (editing.value) {
-      await updateUser(form.id, { realName: form.realName, roleCode: form.roleCode, status: String(form.status), password: form.password || undefined })
+      await updateUser(form.id, {
+        realName: form.realName,
+        roleCode: form.roleCode,
+        status: String(form.status),
+        password: form.password || undefined
+      })
       ElMessage.success('账号已更新')
     } else {
       await createUser({
@@ -270,8 +298,8 @@ async function onSave() {
 
 async function toggleStatus(row) {
   const target = row.status === 1 ? 0 : 1
-  await ElMessageBox.confirm(`确定${target === 0 ? '禁用' : '启用'}账号 ${row.username} 吗？`, '提示', { type: 'warning' })
-  await updateUser(row.id, { status: String(target) })
+  await ElMessageBox.confirm(`确定${target === 0 ? '禁用' : '启用'}账号 ${row.username} 吗？`, '提示', {type: 'warning'})
+  await updateUser(row.id, {status: String(target)})
   ElMessage.success('操作成功')
   load()
 }
@@ -293,7 +321,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.tenant-tip {
+.company-tip {
   font-size: 12px;
   color: #909399;
   line-height: 1.6;

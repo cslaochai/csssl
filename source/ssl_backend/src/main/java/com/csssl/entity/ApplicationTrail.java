@@ -23,8 +23,8 @@ public class ApplicationTrail {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 受理租户（统一社会信用代码；default=存量单根兼容值） */
-    private String tenantUscc;
+    /** 受理公司（统一社会信用代码；default=存量单根兼容值） */
+    private String companyUscc;
 
     /** 申请单 id */
     private Long applicationId;
