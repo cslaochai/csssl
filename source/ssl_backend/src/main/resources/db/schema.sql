@@ -543,3 +543,63 @@ INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
     ('ADMIN', 'menu:audit'),
     ('ADMIN', 'audit:view'),
     ('ADMIN', 'ca:share:view');
+
+-- ===== 申请单审批轨迹（按步记录：提交/指配/审核/签发/撤销/催办） =====
+CREATE TABLE IF NOT EXISTS ssl_application_trail (
+    id                BIGINT       NOT NULL AUTO_INCREMENT,
+    tenant_uscc       VARCHAR(32)  NOT NULL DEFAULT 'default' COMMENT '受理租户（统一社会信用代码；default=存量单根兼容值）',
+    application_id    BIGINT       NOT NULL COMMENT '申请单id',
+    apply_no          VARCHAR(32)  NULL COMMENT '申请单号（快照，便于检索）',
+    step              VARCHAR(32)  NOT NULL COMMENT '步骤：SUBMIT/ASSIGN/APPROVE/REJECT/ISSUE/CANCEL/URGE',
+    operator_username VARCHAR(64)  NOT NULL COMMENT '操作人账号',
+    operator_real_name VARCHAR(64) NULL COMMENT '操作人真实姓名',
+    operator_role    VARCHAR(32)  NULL COMMENT '操作人角色编码',
+    from_status      VARCHAR(16)  NULL COMMENT '动作前状态',
+    to_status        VARCHAR(16)  NULL COMMENT '动作后状态',
+    comment          VARCHAR(500) NULL COMMENT '意见/备注',
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_trail_app (application_id),
+    KEY idx_trail_tenant (tenant_uscc, application_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='证书申请单审批轨迹（按步留痕）';
+
+-- ===== 站内信 / 消息中心 =====
+CREATE TABLE IF NOT EXISTS ssl_message (
+    id                 BIGINT       NOT NULL AUTO_INCREMENT,
+    tenant_uscc        VARCHAR(32)  NOT NULL DEFAULT 'default' COMMENT '所属租户（统一社会信用代码）',
+    recipient_username VARCHAR(64)  NOT NULL COMMENT '接收人账号',
+    recipient_real_name VARCHAR(64) NULL COMMENT '接收人真实姓名',
+    sender_username    VARCHAR(64)  NULL COMMENT '发送人账号（系统催办留 SYSTEM）',
+    type               VARCHAR(32)  NOT NULL COMMENT '消息类型：APP_URGE-催办 APP_SUBMITTED-新待审 APP_APPROVED-审批结果 APP_REJECTED-驳回通知 APP_ISSUED-已签发',
+    title              VARCHAR(200) NOT NULL COMMENT '消息标题',
+    content            VARCHAR(1000) NULL COMMENT '消息正文',
+    biz_type           VARCHAR(32)  NULL COMMENT '关联业务：CERT_APPLICATION',
+    biz_id             VARCHAR(64)  NULL COMMENT '关联业务ID（申请单id）',
+    read_flag          TINYINT      NOT NULL DEFAULT 0 COMMENT '0-未读 1-已读',
+    read_at            DATETIME     NULL COMMENT '阅读时间',
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_msg_recipient (recipient_username, read_flag),
+    KEY idx_msg_tenant (tenant_uscc, recipient_username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='站内信/消息中心';
+
+-- 幂等加列：提交时指定的具体审批人（账号 + 展示姓名）
+SET @c_asg1 = (SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'assignee_username');
+SET @s_asg1 = IF(@c_asg1 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN assignee_username VARCHAR(64) NULL COMMENT ''提交时指定的审批人账号'' AFTER reviewed_at', 'SELECT 1');
+PREPARE s_asg1 FROM @s_asg1; EXECUTE s_asg1; DEALLOCATE PREPARE s_asg1;
+
+SET @c_asg2 = (SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'assignee_real_name');
+SET @s_asg2 = IF(@c_asg2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN assignee_real_name VARCHAR(64) NULL COMMENT ''指定审批人真实姓名'' AFTER assignee_username', 'SELECT 1');
+PREPARE s_asg2 FROM @s_asg2; EXECUTE s_asg2; DEALLOCATE PREPARE s_asg2;
+
+-- 幂等播种：催办权（app:urge）给操作员/RA管理员；审批人名单查看权（app:listApprovers）给提交侧角色。
+-- 注意：已存在角色 DataInitializer 只裁剪不补授，新权限必须在此 DDL 显式播种（同 cert:op:approve 范式）。
+-- 消息查看（msg:view）面向全部登录用户，由接口 isAuthenticated() 收口，不进入角色法定上限。
+INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
+    ('OPERATOR', 'app:urge'),
+    ('RA_ADMIN', 'app:urge'),
+    ('OPERATOR', 'app:listApprovers'),
+    ('RA_ADMIN', 'app:listApprovers'),
+    ('ADMIN', 'app:listApprovers');

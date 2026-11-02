@@ -46,15 +46,17 @@ public enum RoleCodeEnum {
             PermissionCatalog.MENU_USERS, PermissionCatalog.MENU_ROLES, PermissionCatalog.MENU_AUDIT,
             PermissionCatalog.CERT_LIST, PermissionCatalog.USER_LIST, PermissionCatalog.AUDIT_VIEW,
             PermissionCatalog.CA_SHARE_VIEW,
-            PermissionCatalog.USER_CREATE, PermissionCatalog.USER_UPDATE)),
+            PermissionCatalog.USER_CREATE, PermissionCatalog.USER_UPDATE,
+            PermissionCatalog.APP_LIST_APPROVERS)),
 
     OPERATOR("OPERATOR", "CA操作员", "证书申请录入、签发、吊销/挂起/更新；签发与审核分离", 20, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
-            PermissionCatalog.MENU_CRL, PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
+            PermissionCatalog.MENU_CRL, PermissionCatalog.MENU_OCSP,             PermissionCatalog.MENU_TSA,
             PermissionCatalog.APP_SUBMIT, PermissionCatalog.APP_ISSUE, PermissionCatalog.APP_CANCEL,
             PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_ISSUE, PermissionCatalog.CERT_REVOKE,
             PermissionCatalog.CERT_SUSPEND, PermissionCatalog.CERT_RENEW, PermissionCatalog.CERT_REKEY,
-            PermissionCatalog.CERT_DOWNLOAD, PermissionCatalog.CRL_DOWNLOAD)),
+            PermissionCatalog.CERT_DOWNLOAD, PermissionCatalog.CRL_DOWNLOAD,
+            PermissionCatalog.APP_URGE, PermissionCatalog.APP_LIST_APPROVERS)),
 
     APPROVER("APPROVER", "审核员", "审核证书申请与证书操作单（吊销/挂起复核）；不得与发起人同一人", 30, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
@@ -104,7 +106,8 @@ public enum RoleCodeEnum {
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CRL,
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
             PermissionCatalog.APP_APPROVE, PermissionCatalog.APP_REJECT, PermissionCatalog.APP_CANCEL,
-            PermissionCatalog.USER_LIST, PermissionCatalog.USER_CREATE, PermissionCatalog.USER_UPDATE)),
+            PermissionCatalog.USER_LIST, PermissionCatalog.USER_CREATE, PermissionCatalog.USER_UPDATE,
+            PermissionCatalog.APP_URGE, PermissionCatalog.APP_LIST_APPROVERS)),
 
     CERT_OFFICER("CERT_OFFICER", "证书签发操作员", "仅执行证书签发/吊销/挂起/更新/换密钥/下载（不含申请录入）", 100, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_CERTS, PermissionCatalog.MENU_CRL,

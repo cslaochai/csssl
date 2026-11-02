@@ -284,6 +284,14 @@
         <el-form-item label="用途说明">
           <el-input v-model="submitForm.description"/>
         </el-form-item>
+        <el-form-item label="指定审批人">
+          <el-select v-model="submitAssignee" style="width: 100%"
+                     placeholder="选填：预先指派审核员（便于催办）" clearable :loading="approversLoading">
+            <el-option v-for="a in approvers" :key="a.username"
+                       :label="a.realName ? `${a.realName}（${a.username}）` : a.username" :value="a.username"/>
+          </el-select>
+          <div class="dn-tip">提交时指派具体审批人后，对方会收到站内信待办，您也可在详情页一键催办；不指定则按角色（审核员/RA管理员）流转。</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -350,7 +358,9 @@
     </el-dialog>
 
     <!-- 详情 -->
-    <el-dialog v-model="detailVisible" title="申请单详情" width="560px">
+    <el-dialog v-model="detailVisible" title="申请单详情" width="620px">
+      <el-alert v-if="detail && detail.status === 'PENDING'" type="warning" :closable="false" show-icon
+                :title="nextApproverTitle" style="margin-bottom: 12px"/>
       <el-descriptions :column="1" border>
         <el-descriptions-item label="申请单号">{{ detail?.applyNo }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
@@ -382,7 +392,23 @@
           }} / {{ detail?.reviewedAt || '-' }}
         </el-descriptions-item>
         <el-descriptions-item label="审核意见">{{ detail?.reviewComment || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="指定审批人">{{ detail?.assigneeRealName ? `${detail.assigneeRealName}（${detail.assigneeUsername}）` : '未指定（按角色流转）' }}</el-descriptions-item>
       </el-descriptions>
+      <div class="trail-title">审批轨迹</div>
+      <el-timeline v-if="trail.length" class="trail">
+        <el-timeline-item v-for="t in trail" :key="t.id" :timestamp="t.createdAt" :type="trailType(t.step)" :hollow="t.step === 'URGE'">
+          <div class="trail-step">{{ trailStepText(t.step) }}</div>
+          <div class="trail-who">{{ t.operatorRealName || t.operatorUsername }}<span v-if="t.operatorRole">（{{ t.operatorRole }}）</span></div>
+          <div v-if="t.comment" class="trail-comment">{{ t.comment }}</div>
+        </el-timeline-item>
+      </el-timeline>
+      <div v-else class="empty-tip">暂无轨迹</div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button v-if="canUrge(detail)" type="warning" :loading="urging" @click="onUrge(detail)">催办审批人</el-button>
+          <el-button @click="detailVisible = false">关闭</el-button>
+        </div>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -397,6 +423,9 @@ import {
   cancelApplication,
   cancelCertOp,
   issueApplication,
+  listApprovers,
+  listTrail,
+  urgeApplication,
   listTenantsCached,
   pageApplications,
   pageCertOps,
@@ -483,11 +512,17 @@ const detailVisible = ref(false)
 const reviewAction = ref('approve')
 const reviewComment = ref('')
 const detail = ref(null)
+const trail = ref([])
+const urging = ref(false)
+const approvers = ref([])
+const approversLoading = ref(false)
+const submitAssignee = ref('')
 const submitting = ref(false)
 
 const submitForm = reactive({
   applicantType: 'PERSON', applicantName: '', templateId: null,
-  subjectDn: '', san: '', publicKeyPem: '', description: ''
+  subjectDn: '', san: '', publicKeyPem: '', description: '',
+  assigneeUsername: null, assigneeRealName: null
 })
 
 function templateName(id) {
@@ -562,12 +597,14 @@ function submitSubjectOOf(uscc) {
 
 function onSubmitTenantChange() {
   submitO.value = submitSubjectOOf(submitTenant.value)
+  loadApprovers()
 }
 
 function openSubmit() {
   Object.assign(submitForm, {
     applicantType: 'PERSON', applicantName: '', templateId: null,
-    subjectDn: '', san: '', publicKeyPem: '', description: ''
+    subjectDn: '', san: '', publicKeyPem: '', description: '',
+    assigneeUsername: null, assigneeRealName: null
   })
   submitTenant.value = query.tenantUscc
       || tenantOptions.value.find(o => o.status === 'ACTIVE')?.uscc
@@ -595,6 +632,8 @@ async function onSubmit() {
     ElMessage.warning('请完整填写申请信息（含公钥PEM）')
     return
   }
+  submitForm.assigneeUsername = submitAssignee.value || null
+  submitForm.assigneeRealName = approvers.value.find(a => a.username === submitAssignee.value)?.realName || null
   submitting.value = true
   try {
     await submitApplication({...submitForm}, submitTenant.value)
@@ -658,6 +697,63 @@ async function onCancel(row) {
 function onDetail(row) {
   detail.value = row
   detailVisible.value = true
+  trail.value = []
+  try {
+    listTrail(row.id).then(res => { trail.value = res.data || [] })
+  } catch (e) {}
+}
+
+async function loadApprovers() {
+  if (!submitTenant.value) return
+  approversLoading.value = true
+  try {
+    const res = await listApprovers(submitTenant.value)
+    approvers.value = res.data || []
+  } catch (e) {
+  } finally {
+    approversLoading.value = false
+  }
+}
+
+async function onUrge(row) {
+  if (!row) return
+  await ElMessageBox.confirm(`向${row.assigneeRealName ? '审批人 ' + row.assigneeRealName : '本租户审核员'}发送催办提醒？`, '催办', { type: 'warning' })
+  urging.value = true
+  try {
+    await urgeApplication(row.id, row.tenantUscc)
+    ElMessage.success('已发送催办提醒')
+    const res = await listTrail(row.id)
+    trail.value = res.data || []
+  } finally {
+    urging.value = false
+  }
+}
+
+function canUrge(row) {
+  return row && row.status === 'PENDING' && row.assigneeUsername && hasPerm('app:urge')
+}
+
+const nextApproverTitle = computed(() => {
+  const d = detail.value
+  if (!d) return ''
+  if (d.status === 'PENDING') {
+    return d.assigneeRealName
+      ? `当前环节：等待【${d.assigneeRealName}】审批`
+      : '当前环节：等待【审核员 / RA业务管理员】审批（未指定具体人）'
+  }
+  if (d.status === 'APPROVED') return '当前环节：已批准，等待操作员签发'
+  if (d.status === 'ISSUED') return '当前环节：已签发'
+  if (d.status === 'REJECTED') return '当前环节：已驳回'
+  if (d.status === 'CANCELLED') return '当前环节：已撤销'
+  return ''
+})
+
+function trailStepText(step) {
+  return { SUBMIT: '提交申请', ASSIGN: '指定审批人', APPROVE: '审核批准', REJECT: '审核驳回', ISSUE: '签发证书', CANCEL: '撤销申请', URGE: '催办' }[step] || step
+}
+
+function trailType(step) {
+  return { SUBMIT: 'primary', ASSIGN: 'info', APPROVE: 'success', REJECT: 'danger', ISSUE: 'success', CANCEL: 'info', URGE: 'warning' }[step] || ''
 }
 
 // 操作列口径：前 3 个平铺，其余收进「更多」下拉（列表页统一模式）
@@ -675,6 +771,9 @@ function appActions(row) {
     acts.push({label: '签发', run: () => onIssue(row)})
   }
   acts.push({label: '详情', run: () => onDetail(row)})
+  if (row.status === 'PENDING' && row.assigneeUsername && hasPerm('app:urge')) {
+    acts.push({label: '催办', type: 'warning', run: () => onUrge(row)})
+  }
   if (['PENDING', 'APPROVED'].includes(row.status) && hasPerm('app:cancel')) {
     acts.push({label: '撤销', run: () => onCancel(row)})
   }
@@ -826,5 +925,40 @@ onMounted(async () => {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.trail-title {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.trail :deep(.el-timeline-item__timestamp) {
+  color: #909399;
+  font-size: 12px;
+}
+
+.trail-step {
+  font-weight: 600;
+  color: #303133;
+}
+
+.trail-who {
+  font-size: 13px;
+  color: #606266;
+  margin-top: 2px;
+}
+
+.trail-comment {
+  font-size: 13px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.empty-tip {
+  color: #909399;
+  font-size: 13px;
+  padding: 8px 0 4px;
 }
 </style>

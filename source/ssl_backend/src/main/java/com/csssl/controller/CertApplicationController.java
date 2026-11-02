@@ -1,13 +1,17 @@
 package com.csssl.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.dto.ApplicationAuditDTO;
 import com.csssl.dto.ApplicationPageQueryDTO;
 import com.csssl.dto.ApplicationSubmitDTO;
+import com.csssl.entity.ApplicationTrail;
 import com.csssl.vo.CertVO;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.LoginUser;
+import com.csssl.entity.SysUser;
+import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.CertApplicationService;
 import com.csssl.service.HisPushService;
 import com.csssl.util.TenantScope;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import java.util.List;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -42,6 +47,8 @@ public class CertApplicationController {
     private final CertApplicationService applicationService;
 
     private final HisPushService hisPushService;
+
+    private final SysUserMapper sysUserMapper;
 
     /** 申请单分页查询（登录即可查看；租户用户强制本租户，全局用户可按 ?tenantUscc= 过滤，不传=全量只读） */
     @GetMapping
@@ -124,6 +131,37 @@ public class CertApplicationController {
                 TenantScope.requireExplicitTenant(loginUser.getTenantUscc(), tenantUscc));
         hisPushService.pushApplication(app);
         return Result.success("已撤销", app);
+    }
+
+    /** 本租户审批人名单（提交表单下拉用；受限，不依赖 user:list） */
+    @PreAuthorize("hasAuthority('app:listApprovers')")
+    @GetMapping("/approvers")
+    public Result<List<SysUser>> listApprovers(@RequestParam(required = false) String tenantUscc,
+                                              HttpServletRequest request) {
+        LoginUser loginUser = UserUtils.requireLoginUser();
+        String scope = TenantScope.readTenantScope(loginUser.getTenantUscc(), tenantUscc);
+        List<SysUser> list = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .in(SysUser::getRoleCode, "APPROVER", "RA_ADMIN")
+                .eq(scope != null && !scope.isBlank(), SysUser::getTenantUscc, scope)
+                .eq(SysUser::getStatus, 1)
+                .orderByAsc(SysUser::getId));
+        list.forEach(u -> u.setPassword(null));
+        return Result.success("查询成功", list);
+    }
+
+    /** 单据审批轨迹（按步时间正序，面向业务用户） */
+    @GetMapping("/{id}/trail")
+    public Result<List<ApplicationTrail>> listTrail(@PathVariable Long id) {
+        return Result.success("查询成功", applicationService.listTrail(id));
+    }
+
+    /** 催办：向被指派审批人推送站内信并补 URGE 轨迹 */
+    @PreAuthorize("hasAuthority('app:urge')")
+    @PostMapping("/{id}/urge")
+    public Result<Void> urge(@PathVariable Long id, HttpServletRequest request) {
+        LoginUser loginUser = UserUtils.requireLoginUser();
+        applicationService.urge(id, loginUser, clientIp(request));
+        return Result.success("已催办", null);
     }
 
     private String clientIp(HttpServletRequest request) {

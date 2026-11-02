@@ -151,6 +151,16 @@ public class CertApplication {
     private String reviewComment;
 
     /**
+     * 提交时指定的具体审批人账号（录入与审核分离：提交人可预先指派审批员，便于催办）
+     */
+    private String assigneeUsername;
+
+    /**
+     * 指定审批人真实姓名（展示用；登录账号见 assigneeUsername）
+     */
+    private String assigneeRealName;
+
+    /**
      * 签发证书ID
      */
     @JsonSerialize(using = ToStringSerializer.class)

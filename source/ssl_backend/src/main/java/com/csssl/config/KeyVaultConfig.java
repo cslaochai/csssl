@@ -19,7 +19,8 @@ import java.util.regex.Pattern;
  * 密钥保险库单例：CaService 与 TsaService 共用同一实例（default 租户域），
  * 消除各自 new KeyVault 的重复 SM4 初始化与主密钥首启生成竞态（master.key 语义不变）。
  * 私钥密文统一落库 ssl_key_vault（tenant_uscc 分域）；store-dir 仅保留主密钥文件、
- * 证书/CRL 公开材料与根密钥门限份额。
+ * 证书/CRL 公开材料与根密钥门限份额。注：根CA私钥刻意不落库（仅 root/key.pem.enc 文件形态 +
+ * 门限份额），本保险库只承载 SUB_CA/签发/TSA/审计签名/接入密钥等。
  * 路线A多租户：{@link TenantVaultResolver} 按 tenantUscc 解析独立保险库——default 复用上述单例
  * （存量路径/主密钥零变化），其他租户主密钥独立生成落盘 tenants/{tenantUscc}/master.key。
  */
@@ -63,8 +64,9 @@ public class KeyVaultConfig {
 
     /**
      * 租户保险库解析器：存量单根（LEGACY_NAMESPACE）→ 现单例（SSL_MASTER_KEY/master.key，兼容铁律）；
-     * 其他租户主密钥首启自动生成落盘 tenants/{tenantUscc}/master.key——刻意不复用环境变量主密钥，
-     * 保证租户域间密钥材料完全隔离。私钥密文统一落库 ssl_key_vault，tenant_uscc 为租户域。
+ * 其他租户主密钥首启自动生成落盘 tenants/{tenantUscc}/master.key——刻意不复用环境变量主密钥，
+ * 保证租户域间密钥材料完全隔离。私钥密文统一落库 ssl_key_vault，tenant_uscc 为租户域
+ * （根CA私钥例外，仅文件形态，不进本表）。
      */
     public static class TenantVaultResolver {
 
@@ -112,7 +114,7 @@ public class KeyVaultConfig {
 
         /**
          * 租户落盘根目录：存量单根 → store-dir；其他 → store-dir/tenants/{tenantUscc}
-         * （仅承载主密钥文件与证书/CRL 公开材料；私钥密文已统一落库）
+         * （承载主密钥文件、证书/CRL 公开材料、根CA私钥文件与门限份额；SUB_CA/签发等私钥密文统一落库）
          */
         public Path tenantStoreDir(String tenantUscc) {
             checkTenantUscc(tenantUscc);

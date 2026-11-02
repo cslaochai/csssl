@@ -4,11 +4,17 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.dto.ApplicationSubmitDTO;
 import com.csssl.dto.PublicKeyIssueDTO;
+import com.csssl.entity.ApplicationTrail;
 import com.csssl.entity.CaTenant;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.CertTemplate;
+import com.csssl.entity.LoginUser;
+import com.csssl.entity.SysUser;
 import com.csssl.enums.CertApplicationStatusEnum;
 import com.csssl.mapper.CertApplicationMapper;
+import com.csssl.mapper.SysUserMapper;
+import com.csssl.service.ApplicationTrailService;
+import com.csssl.service.MessageService;
 import com.csssl.util.TenantScope;
 import com.csssl.vo.CertVO;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,7 +31,9 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * RA 用户注册流程（GM/T 0034 §5.2.2 用户注册管理系统）：
@@ -50,6 +58,9 @@ public class CertApplicationService {
     private final TenantService tenantService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final ApplicationTrailService trailService;
+    private final MessageService messageService;
+    private final SysUserMapper sysUserMapper;
 
     /**
      * 数据域强制：申请单归属租户必须等于操作者有效域（租户用户越域 403；全局用户须显式传对 tenantUscc）
@@ -116,6 +127,17 @@ public class CertApplicationService {
         auditService.record(username, "RA_SUBMIT", app.getApplyNo(),
                 "提交证书申请：" + app.getApplicantName() + "（" + app.getApplicantType() + "，模板 "
                         + templateCodeOf(app.getTemplateId()) + "）", ip, tenant);
+        trailService.record(tenant, app.getId(), app.getApplyNo(), "SUBMIT",
+                username, realNameOrAccount(realName, username), null, null, app.getStatus(), null);
+        if (app.getAssigneeUsername() != null) {
+            trailService.record(tenant, app.getId(), app.getApplyNo(), "ASSIGN",
+                    username, realNameOrAccount(realName, username), null, null, app.getStatus(),
+                    "指定审批人：" + app.getAssigneeRealName());
+            messageService.send(app.getTenantUscc(), app.getAssigneeUsername(), app.getAssigneeRealName(),
+                    username, "APP_SUBMITTED", "您有一条新的证书申请待审批",
+                    "申请单 " + app.getApplyNo() + " 待您审批（提交人：" + app.getAppliedByName() + "）",
+                    "CERT_APPLICATION", String.valueOf(app.getId()));
+        }
         return app;
     }
 
@@ -182,6 +204,22 @@ public class CertApplicationService {
         app.setAppliedByName(realNameOrAccount(realName, username));
         app.setAppliedAt(LocalDateTime.now());
         app.setCreatedAt(LocalDateTime.now());
+        // 提交时指定具体审批人（可选）：仅允许本租户启用状态的 APPROVER/RA_ADMIN，且与提交人不同人
+        String assignee = body.getAssigneeUsername();
+        if (assignee != null && !assignee.isBlank()) {
+            SysUser approver = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                    .eq(SysUser::getUsername, assignee.trim())
+                    .eq(tenant != null && !CaTenant.PRIMARY_TENANT_USCC.equals(tenant), SysUser::getTenantUscc, tenant)
+                    .eq(SysUser::getStatus, 1));
+            if (approver == null || !Set.of("APPROVER", "RA_ADMIN").contains(approver.getRoleCode())) {
+                throw new IllegalArgumentException("指定的审批人不存在或不具审批权限（须为本租户启用状态的审核员/RA管理员）");
+            }
+            if (approver.getUsername().equals(username)) {
+                throw new SecurityException("指定的审批人不能与提交人同一人（GM/T 0034 §10.1g 分权制衡）");
+            }
+            app.setAssigneeUsername(approver.getUsername());
+            app.setAssigneeRealName(approver.getRealName());
+        }
         applicationMapper.insert(app);
         return app;
     }
@@ -218,6 +256,11 @@ public class CertApplicationService {
         applicationMapper.updateById(app);
         auditService.record(username, "RA_APPROVE", app.getApplyNo(),
                 "批准证书申请：" + app.getApplicantName() + "（已固化模板策略快照）", ip, app.getTenantUscc());
+        trailService.record(app.getTenantUscc(), app.getId(), app.getApplyNo(), "APPROVE",
+                username, realNameOrAccount(realName, username), null, "PENDING", "APPROVED", blankToNull(comment));
+        messageService.send(app.getTenantUscc(), app.getAppliedBy(), app.getAppliedByName(),
+                username, "APP_APPROVED", "证书申请已批准",
+                "您的申请单 " + app.getApplyNo() + " 已批准，等待签发", "CERT_APPLICATION", String.valueOf(app.getId()));
         return app;
     }
 
@@ -239,6 +282,12 @@ public class CertApplicationService {
         applicationMapper.updateById(app);
         auditService.record(username, "RA_REJECT", app.getApplyNo(),
                 "驳回证书申请：" + app.getApplicantName(), ip, app.getTenantUscc());
+        trailService.record(app.getTenantUscc(), app.getId(), app.getApplyNo(), "REJECT",
+                username, realNameOrAccount(realName, username), null, "PENDING", "REJECTED", comment.trim());
+        messageService.send(app.getTenantUscc(), app.getAppliedBy(), app.getAppliedByName(),
+                username, "APP_REJECTED", "证书申请被驳回",
+                "您的申请单 " + app.getApplyNo() + " 被驳回" + (comment != null && !comment.isBlank() ? "：" + comment.trim() : ""),
+                "CERT_APPLICATION", String.valueOf(app.getId()));
         return app;
     }
 
@@ -274,6 +323,11 @@ public class CertApplicationService {
         applicationMapper.updateById(app);
         auditService.record(username, "RA_ISSUE", app.getApplyNo(),
                 "按申请签发证书：" + app.getApplicantName() + "（证书 id=" + vo.getId() + "）", ip, app.getTenantUscc());
+        trailService.record(app.getTenantUscc(), app.getId(), app.getApplyNo(), "ISSUE",
+                username, realNameOrAccount(null, username), null, "APPROVED", "ISSUED", null);
+        messageService.send(app.getTenantUscc(), app.getAppliedBy(), app.getAppliedByName(),
+                username, "APP_ISSUED", "证书已签发",
+                "您的申请单 " + app.getApplyNo() + " 已签发（证书 id=" + vo.getId() + "）", "CERT_APPLICATION", String.valueOf(app.getId()));
         return vo;
     }
 
@@ -301,12 +355,16 @@ public class CertApplicationService {
                 && !CertApplicationStatusEnum.APPROVED.is(app.getStatus())) {
             throw new IllegalArgumentException("仅「待审核/已批准」状态的申请单可撤销（当前状态：" + statusText(app.getStatus()) + "）");
         }
+        String fromStatus = app.getStatus();
         app.setStatus(CertApplicationStatusEnum.CANCELLED.getCode());
         applicationMapper.updateById(app);
         auditService.record(username, "RA_CANCEL", app.getApplyNo(),
                 "撤销证书申请：" + app.getApplicantName()
                         + (reason == null || reason.isBlank() ? "" : "（原因：" + reason.trim() + "）"),
                 ip, app.getTenantUscc());
+        trailService.record(app.getTenantUscc(), app.getId(), app.getApplyNo(), "CANCEL",
+                username, realNameOrAccount(null, username), role, fromStatus, "CANCELLED",
+                reason == null || reason.isBlank() ? null : reason.trim());
         return app;
     }
 
@@ -434,5 +492,58 @@ public class CertApplicationService {
      */
     private String realNameOrAccount(String realName, String username) {
         return realName != null && !realName.isBlank() ? realName : (username == null ? null : username);
+    }
+
+    /**
+     * 申请单审批轨迹（按步时间正序；先校验存在 + 数据域）
+     */
+    public List<ApplicationTrail> listTrail(Long id) {
+        detail(id);
+        return trailService.listByApplication(id);
+    }
+
+    /**
+     * 催办：向被指派审批人推送站内信（无指派时通知本租户全部 APPROVER/RA_ADMIN），并补 URGE 轨迹 + 审计。
+     * 仅提交人（及 RA 业务管理员）可催办，且申请单须处于「待审核」。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void urge(Long id, LoginUser operator, String ip) {
+        String effTenant = operator.getTenantUscc() == null || operator.getTenantUscc().isBlank()
+                ? CaTenant.PRIMARY_TENANT_USCC : operator.getTenantUscc();
+        CertApplication app = applicationMapper.selectById(id);
+        if (app == null) {
+            throw new IllegalArgumentException("申请单不存在（id=" + id + "）");
+        }
+        requireTenantMatch(app, effTenant);
+        if (!CertApplicationStatusEnum.PENDING.is(app.getStatus())) {
+            throw new IllegalArgumentException("仅「待审核」状态的申请单可催办（当前状态：" + statusText(app.getStatus()) + "）");
+        }
+        String recipientUsername;
+        String recipientRealName;
+        if (app.getAssigneeUsername() != null && !app.getAssigneeUsername().isBlank()) {
+            recipientUsername = app.getAssigneeUsername();
+            recipientRealName = app.getAssigneeRealName();
+        } else {
+            // 未指定审批人：通知本租户全部启用状态的审核员/RA管理员
+            SysUser approver = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                    .in(SysUser::getRoleCode, "APPROVER", "RA_ADMIN")
+                    .eq(effTenant != null && !CaTenant.PRIMARY_TENANT_USCC.equals(effTenant), SysUser::getTenantUscc, effTenant)
+                    .eq(SysUser::getStatus, 1)
+                    .last("LIMIT 1"));
+            if (approver == null) {
+                throw new IllegalStateException("本租户暂无启用状态的审核员/RA管理员，无法催办");
+            }
+            recipientUsername = approver.getUsername();
+            recipientRealName = approver.getRealName();
+        }
+        messageService.send(app.getTenantUscc(), recipientUsername, recipientRealName,
+                operator.getUsername(), "APP_URGE", "证书申请待审批催办",
+                "申请单 " + app.getApplyNo() + " 待审批催办（提交人：" + app.getAppliedByName() + "）",
+                "CERT_APPLICATION", String.valueOf(app.getId()));
+        trailService.record(app.getTenantUscc(), app.getId(), app.getApplyNo(), "URGE",
+                operator.getUsername(), realNameOrAccount(operator.getRealName(), operator.getUsername()),
+                operator.getRoleCode(), "PENDING", "PENDING", "催办审批人：" + recipientRealName);
+        auditService.record(operator.getUsername(), "RA_URGE", app.getApplyNo(),
+                "催办审批人 " + recipientRealName + " 处理申请单", ip, app.getTenantUscc());
     }
 }

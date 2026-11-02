@@ -54,4 +54,14 @@ public class ApplicationSubmitDTO {
      * 用途说明（可选）
      */
     private String description;
+
+    /**
+     * 提交时指定的审批人账号（可选；须为本租户具审批权的启用账号，且与提交人不同人）
+     */
+    private String assigneeUsername;
+
+    /**
+     * 提交时指定的审批人真实姓名（前端选中后回填展示，后端以账号校验为准）
+     */
+    private String assigneeRealName;
 }

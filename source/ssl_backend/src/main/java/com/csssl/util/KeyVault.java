@@ -15,6 +15,8 @@ import java.security.SecureRandom;
 
 /**
  * 密钥保险库：私钥 SM4 加密后落库（表 ssl_key_vault，hex 密文），杜绝私钥明文落盘。
+ * 注：根CA私钥刻意不进本保险库（仅 root/key.pem.enc 文件形态 + 门限份额），本类仅承载
+ * SUB_CA/签发/TSA/审计签名/接入密钥等。新增的 encryptHex/decryptStr 供根私钥文件化复用同一主密钥。
  * <ul>
  *   <li>主密钥（KEK/master key）：32位十六进制（16字节 SM4 密钥），刻意不入库——生产通过
  *       SSL_MASTER_KEY 注入或 store-dir/master.key 文件，与密文异存储，拖库拿不到明文。</li>
@@ -129,6 +131,37 @@ public class KeyVault {
                 ".key.pem.enc.migrated", ".key.pem.migrated"}) {
             deleteQuietly(legacyFile(relDir, name, suffix));
         }
+    }
+
+    /**
+     * 仅查询库内条目（不解密、不触发存量迁移），供调用方判断「库→文件」迁移是否需要执行。
+     */
+    public KeyVaultEntry peekEntry(String relDir, String name) {
+        return mapper.selectEntry(scopeTenantUscc, relDir, name);
+    }
+
+    /**
+     * 仅删除库内条目（不清文件），供根私钥库→文件迁移后清理残留库行。
+     */
+    public void deleteDbEntry(String relDir, String name) {
+        KeyVaultEntry entry = mapper.selectEntry(scopeTenantUscc, relDir, name);
+        if (entry != null) {
+            mapper.deleteById(entry.getId());
+        }
+    }
+
+    /**
+     * 明文 SM4 加密为 hex 密文（与库内密文同源主密钥），供根私钥文件化落盘复用。
+     */
+    public String encryptHex(String plain) {
+        return sm4.encryptHex(plain);
+    }
+
+    /**
+     * hex 密文 SM4 解密为明文（与库内解密同源主密钥），供根私钥文件化加载复用。
+     */
+    public String decryptStr(String cipherHex) {
+        return sm4.decryptStr(cipherHex.trim());
     }
 
     /**

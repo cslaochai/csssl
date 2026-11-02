@@ -51,6 +51,8 @@ public final class PermissionCatalog {
     public static final String APP_REJECT = "app:reject";
     public static final String APP_ISSUE = "app:issue";
     public static final String APP_CANCEL = "app:cancel";
+    public static final String APP_URGE = "app:urge";
+    public static final String APP_LIST_APPROVERS = "app:listApprovers";
 
     public static final String CERT_LIST = "cert:list";
     public static final String CERT_ISSUE = "cert:issue";
@@ -125,6 +127,8 @@ public final class PermissionCatalog {
         action("RA申请", APP_REJECT, "审核驳回", "审核意见落库并留痕");
         action("RA申请", APP_ISSUE, "按申请签发", "对已批准申请签发证书");
         action("RA申请", APP_CANCEL, "撤销申请", "仅提交人本人或系统管理员可撤销");
+        action("RA申请", APP_URGE, "催办审批人", "向被指派审批人发站内信提醒（仅提交人）");
+        action("RA申请", APP_LIST_APPROVERS, "查看本租户审批人", "提交表单下拉可选，不依赖 user:list");
 
         // ---------- 证书业务 ----------
         action("证书业务", CERT_LIST, "查看证书台账", "证书列表与详情查询");

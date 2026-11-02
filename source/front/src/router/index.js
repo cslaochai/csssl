@@ -124,6 +124,30 @@ const routes = [
         name: 'audit',
         component: () => import('@/views/Audit.vue'),
         meta: { title: '审计日志', perm: 'menu:audit', roles: ['AUDITOR', 'ADMIN'], group: 'platform', icon: 'Memo' }
+      },
+      {
+        path: 'approval-flow',
+        name: 'approval-flow',
+        component: () => import('@/views/ApprovalFlow.vue'),
+        // 全员可见的只读说明页：审批按角色而非指派到人，告知各业务「下一个审核人」所属角色
+        meta: {
+          title: '审批流说明',
+          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER'],
+          group: 'platform',
+          icon: 'Aim'
+        }
+      },
+      {
+        path: 'messages',
+        name: 'messages',
+        component: () => import('@/views/MessageCenter.vue'),
+        // 消息中心：全员可见本人消息（本人私有，任何登录用户可读自己的消息）
+        meta: {
+          title: '消息中心',
+          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'TENANT_ADMIN', 'TENANT_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'CERT_OFFICER', 'AUDIT_ADMIN'],
+          group: 'platform',
+          icon: 'Bell'
+        }
       }
     ]
   },

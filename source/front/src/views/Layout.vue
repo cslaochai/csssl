@@ -29,6 +29,11 @@
           <span class="clock-week">{{ currentWeekday }}</span>
         </div>
         <div class="header-divider"></div>
+        <el-badge :value="unreadCount" :hidden="unreadCount === 0" :max="99" type="danger">
+          <button class="header-icon-btn" title="消息中心" @click="goMessages">
+            <el-icon><Bell /></el-icon>
+          </button>
+        </el-badge>
         <el-dropdown trigger="click" @command="onCommand">
           <button class="header-icon-btn" title="设置">
             <el-icon><Setting /></el-icon>
@@ -121,7 +126,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { logout, changePassword, getMyPerms } from '@/api/system'
+import { logout, changePassword, getMyPerms, unreadMessageCount } from '@/api/system'
 import { encryptPassword, resetPublicKeyCache as resetSm2Cache } from '@/lib/password'
 import { hasPerm, permReady, loadRoleName, savePerms, saveRoleName, clearPerms } from '@/lib/perm'
 import logo from '@/assets/logo.svg'
@@ -142,6 +147,22 @@ const roleName = ref(loadRoleName())
 const roleText = computed(() => roleName.value || role.value)
 // 权限版本号：刷新权限后自增，驱动侧栏重算（localStorage 本身非响应式）
 const permVersion = ref(0)
+
+// 消息中心未读红点（登录后轮询；切页也刷一次）
+const unreadCount = ref(0)
+let unreadTimer = null
+async function loadUnread() {
+  if (!localStorage.getItem('token')) return
+  try {
+    const res = await unreadMessageCount()
+    unreadCount.value = res.data || 0
+  } catch (e) {
+    // 会话失效由拦截器统一处理，这里不重复提示
+  }
+}
+function goMessages() {
+  router.push('/messages')
+}
 
 // ========== 侧栏折叠（与 HIS 一致：按钮在顶栏，侧栏收成图标） ==========
 const sidebarCollapsed = ref(false)
@@ -181,7 +202,10 @@ const updateClock = () => {
 // 后端权限随时可能调整（角色配置/角色法定边界升级）：每次切页静默刷新一次，
 // 避免SPA长期驻留时按重启前的旧权限继续显示操作按钮
 watch(() => route.path, () => {
-  if (localStorage.getItem('token')) refreshMyPerms()
+  if (localStorage.getItem('token')) {
+    refreshMyPerms()
+    loadUnread()
+  }
 })
 
 /** 角色配置页保存后广播：侧栏与顶栏角色名即时重建，无需重新登录 */
@@ -212,12 +236,17 @@ onMounted(async () => {
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
   window.addEventListener('perms-updated', onPermsUpdated)
+  window.addEventListener('messages-updated', loadUnread)
   await refreshMyPerms()
+  await loadUnread()
+  unreadTimer = setInterval(loadUnread, 30000)
 })
 
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
+  if (unreadTimer) clearInterval(unreadTimer)
   window.removeEventListener('perms-updated', onPermsUpdated)
+  window.removeEventListener('messages-updated', loadUnread)
 })
 
 // ===== 菜单树：页面属性（标题/图标/角色）单一来源=路由 meta，此处只定义分组 =====

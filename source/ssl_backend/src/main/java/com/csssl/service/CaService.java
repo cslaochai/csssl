@@ -5,6 +5,7 @@ import com.csssl.config.CssslProperties;
 import com.csssl.config.KeyVaultConfig;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaTenant;
+import com.csssl.entity.KeyVaultEntry;
 import com.csssl.enums.TenantStatusEnum;
 import com.csssl.mapper.CaCertMapper;
 import com.csssl.mapper.CaTenantMapper;
@@ -46,7 +47,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *       原始单点加密文件删除，对齐 §8.2.4.3 门限控制与密评"根密钥不得单点持有"）。</li>
  *   <li>SUB_CA（服务签发二级CA）：由根签发，承载在线签发/CRL/OCSP 签名；到期由每日预检
  *       {@link #dailyPrecheck()} 在根未封存时轮换，日常签发路径只取现有 SUB_CA、绝不隐式触发需根私钥的操作。</li>
- *   <li>私钥一律经 {@link KeyVault} SM4 加密落盘（key.pem.enc），数据库只存证书与元信息。</li>
+ *   <li>私钥存储策略（刻意区分）：根CA私钥不落库——SM4 加密后仅落盘 root/key.pem.enc
+ *       （封存态 key.pem.enc.sealed），门限分持就绪后该单点文件删除、仅余份额文件，杜绝"单库被拖走即失守"；
+ *       二级CA与签发证书私钥仍经 {@link KeyVault} 落库 ssl_key_vault（SM4），数据库证书表只存证书与元信息。</li>
  * </ul>
  *
  * <p>路线A多租户（按租户独立根CA）：本类维护 {@code tenantUscc → TenantCaState} 根池，
@@ -164,6 +167,125 @@ public class CaService implements ApplicationRunner {
         return sharesDir(tenantUscc).resolve("shares-" + index + ".json");
     }
 
+    // ==================== 根私钥文件化（不落库，仅落盘 root/key.pem.enc / .sealed） ====================
+    // 设计取舍：根CA私钥刻意不进 ssl_key_vault——单库被整库拖走即失守。改为同租户主密钥 SM4 加密后
+    // 落盘 root/key.pem.enc（封存态 key.pem.enc.sealed），门限分持就绪后该单点文件删除、仅余份额文件。
+    // 二级CA与签发证书私钥仍走 KeyVault 落库（与既有安全策略一致，用户明确允许）。
+
+    /** 根私钥加密文件（SM4，同租户主密钥） */
+    private static final String ROOT_KEY_ENC_FILE = "key.pem.enc";
+    /** 根私钥封存态文件（离线化，语义等同原 .sealed 改名） */
+    private static final String ROOT_KEY_SEALED_FILE = "key.pem.enc.sealed";
+
+    private Path rootKeyEncPath(String tenantUscc) {
+        return rootDir(tenantUscc).resolve(ROOT_KEY_ENC_FILE);
+    }
+
+    private Path rootKeySealedPath(String tenantUscc) {
+        return rootDir(tenantUscc).resolve(ROOT_KEY_SEALED_FILE);
+    }
+
+    /** 根私钥是否以单点加密文件形态存在（在线或封存，未门限分持） */
+    private boolean rootKeyFileExists(String tenantUscc) {
+        return Files.exists(rootKeyEncPath(tenantUscc)) || Files.exists(rootKeySealedPath(tenantUscc));
+    }
+
+    /** 根私钥是否已封存（离线） */
+    private boolean rootKeyFileSealed(String tenantUscc) {
+        return Files.exists(rootKeySealedPath(tenantUscc));
+    }
+
+    /** 根私钥 SM4 加密落盘（root/key.pem.enc），全程不落库 */
+    private void storeRootKeyFile(String tenantUscc, String keyPem) {
+        try {
+            Files.createDirectories(rootDir(tenantUscc));
+            String cipher = vaultFor(tenantUscc).encryptHex(keyPem);
+            Files.writeString(rootKeyEncPath(tenantUscc), cipher, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("根私钥落盘失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 读取根私钥 PEM：封存态抛明确异常（须先解封）；不存在返回 null（交由调用方判门限/缺失）。
+     */
+    private String loadRootKeyFile(String tenantUscc) {
+        if (rootKeyFileSealed(tenantUscc)) {
+            throw new IllegalStateException("根私钥已封存离线（" + tenantUscc + "/root），请先在管理端解封");
+        }
+        Path enc = rootKeyEncPath(tenantUscc);
+        if (!Files.exists(enc)) {
+            return null;
+        }
+        try {
+            String cipher = Files.readString(enc, StandardCharsets.UTF_8).trim();
+            return vaultFor(tenantUscc).decryptStr(cipher);
+        } catch (IOException e) {
+            throw new IllegalStateException("根私钥文件读取失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 封存根私钥：key.pem.enc → key.pem.enc.sealed */
+    private void sealRootKeyFile(String tenantUscc) {
+        Path enc = rootKeyEncPath(tenantUscc);
+        if (Files.exists(enc)) {
+            try {
+                Files.move(enc, rootKeySealedPath(tenantUscc));
+            } catch (IOException e) {
+                throw new IllegalStateException("根私钥封存失败: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /** 解封根私钥：key.pem.enc.sealed → key.pem.enc */
+    private void unsealRootKeyFile(String tenantUscc) {
+        Path sealed = rootKeySealedPath(tenantUscc);
+        if (Files.exists(sealed)) {
+            try {
+                Files.move(sealed, rootKeyEncPath(tenantUscc));
+            } catch (IOException e) {
+                throw new IllegalStateException("根私钥解封失败: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /** 删除根私钥全部单点文件形态（门限分持就绪后调用） */
+    private void deleteRootKeyFile(String tenantUscc) {
+        try {
+            Files.deleteIfExists(rootKeyEncPath(tenantUscc));
+        } catch (IOException ignored) {
+        }
+        try {
+            Files.deleteIfExists(rootKeySealedPath(tenantUscc));
+        } catch (IOException ignored) {
+        }
+    }
+
+    /**
+     * 兼容升级：旧版根私钥可能落库 ssl_key_vault，迁移为单文件形态后清除库内条目（全程不落库）。
+     * 已文件化或库内无条目则跳过；保留封存/在线态。
+     */
+    private void migrateRootKeyFromDbIfNeeded(String tenantUscc, KeyVault ov) {
+        if (rootKeyFileExists(tenantUscc)) {
+            return;
+        }
+        KeyVaultEntry entry = ov.peekEntry("root", "key");
+        if (entry == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(rootDir(tenantUscc));
+            Path target = (entry.getSealed() != null && entry.getSealed() == 1)
+                    ? rootKeySealedPath(tenantUscc) : rootKeyEncPath(tenantUscc);
+            Files.writeString(target, entry.getCipherHex(), StandardCharsets.UTF_8);
+            ov.deleteDbEntry("root", "key");
+            log.warn("[根CA][{}] 已将根私钥从 ssl_key_vault 迁移为单文件形态（{}），不再落库",
+                    tenantUscc, entry.getSealed() != null && entry.getSealed() == 1 ? "封存态" : "在线态");
+        } catch (IOException e) {
+            throw new IllegalStateException("根私钥库→文件迁移失败: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * 租户记录（不存在即拒绝操作——路径/密钥材料都锚定注册表，防未登记租户污染磁盘）
      */
@@ -216,16 +338,18 @@ public class CaService implements ApplicationRunner {
         TenantCaState st = stateOf(tenantUscc);
         KeyVault ov = vaultFor(tenantUscc);
         synchronized (st.lock) {
+            migrateRootKeyFromDbIfNeeded(tenantUscc, ov);
             CaCert root = doFindRoot(tenantUscc);
 
-            if (root != null && (ov.keyExists("root", "key") || doSharesExist(tenantUscc))) {
+            if (root != null && (rootKeyFileExists(tenantUscc) || doSharesExist(tenantUscc))) {
                 markExpiredIfNeeded(root);
                 return root;
             }
-            if (root != null && !ov.keyExists("root", "key") && !doSharesExist(tenantUscc)) {
+            if (root != null && !rootKeyFileExists(tenantUscc) && !doSharesExist(tenantUscc)) {
                 throw new IllegalStateException("根CA私钥缺失（" + rootDir(tenantUscc) + "），无法签发二级CA，请恢复密钥或重建根CA");
             }
-            if (root == null && Files.exists(rootCertFile(tenantUscc)) && ov.keyExists("root", "key")) {
+            if (root == null && Files.exists(rootCertFile(tenantUscc))
+                    && (rootKeyFileExists(tenantUscc) || doSharesExist(tenantUscc))) {
                 CaCert rebuilt = doRebuildFromFiles(tenantUscc);
                 log.warn("[根CA][{}] 数据库记录缺失，已从落盘文件重建（serial={}）", tenantUscc, rebuilt.getSerialHex());
                 return rebuilt;
@@ -266,7 +390,8 @@ public class CaService implements ApplicationRunner {
         } catch (IOException e) {
             throw new IllegalStateException("根CA落盘失败: " + e.getMessage(), e);
         }
-        ov.storeKey("root", "key", PemUtil.keyToPem(keyPair.getPrivate()));
+        // 根私钥刻意不落库：SM4 加密后落盘 root/key.pem.enc（与二级CA/签发证书走库的策略分离）
+        storeRootKeyFile(tenantUscc, PemUtil.keyToPem(keyPair.getPrivate()));
 
         CaCert row = new CaCert();
         row.setTenantUscc(tenantUscc);
@@ -401,7 +526,7 @@ public class CaService implements ApplicationRunner {
         if (root == null) {
             throw new IllegalStateException("根CA未初始化");
         }
-        String keyPem = ov.loadKey("root", "key");
+        String keyPem = loadRootKeyFile(tenantUscc);
         if (keyPem == null) {
             if (doSharesExist(tenantUscc)) {
                 throw new IllegalStateException("根私钥已切换为 Shamir(3,5) 门限分持，请由密钥管理员提交任意 3 份份额解封后再轮换 SUB_CA");
@@ -429,10 +554,10 @@ public class CaService implements ApplicationRunner {
         if (doSharesExist(tenantUscc)) {
             return ROOT_KEY_SHARES;
         }
-        if (ov.isSealed("root", "key")) {
+        if (rootKeyFileSealed(tenantUscc)) {
             return ROOT_KEY_SEALED;
         }
-        return ov.keyExists("root", "key") ? ROOT_KEY_ONLINE : ROOT_KEY_MISSING;
+        return rootKeyFileExists(tenantUscc) ? ROOT_KEY_ONLINE : ROOT_KEY_MISSING;
     }
 
     /**
@@ -455,8 +580,8 @@ public class CaService implements ApplicationRunner {
             }
             doEnsureSubCa(tenantUscc, ov, st);
             st.rootKeyCache = null;
-            if (ov.keyExists("root", "key")) {
-                ov.sealKey("root", "key");
+            if (rootKeyFileExists(tenantUscc)) {
+                sealRootKeyFile(tenantUscc);
             }
             log.info("[根CA][{}] 根私钥已封存（serial={}，门限分持态={}），日常签发由 SUB_CA 承担",
                     tenantUscc, root.getSerialHex(), doSharesExist(tenantUscc));
@@ -483,8 +608,8 @@ public class CaService implements ApplicationRunner {
             if (doSharesExist(tenantUscc)) {
                 throw new IllegalStateException("根私钥已切换为 Shamir(3,5) 门限分持，请用份额解封接口提交任意 3 份");
             }
-            ov.unsealKey("root", "key");
-            if (ov.isSealed("root", "key")) {
+            unsealRootKeyFile(tenantUscc);
+            if (rootKeyFileSealed(tenantUscc)) {
                 throw new IllegalStateException("根私钥文件缺失（已封存），无法解封");
             }
             log.info("[根CA][{}] 根私钥已解封，恢复在线态", tenantUscc);
@@ -596,9 +721,9 @@ public class CaService implements ApplicationRunner {
         if (root == null) {
             throw new IllegalStateException("根CA未初始化，无法生成门限份额");
         }
-        String keyPem = ov.loadKey("root", "key");
+        String keyPem = loadRootKeyFile(tenantUscc);
         if (keyPem == null) {
-            throw new IllegalStateException("根私钥不可用（无 SM4 加密副本可拆分），无法生成门限份额");
+            throw new IllegalStateException("根私钥不可用（无加密副本可拆分），无法生成门限份额");
         }
         try {
             Files.createDirectories(sharesDir(tenantUscc));
@@ -611,9 +736,9 @@ public class CaService implements ApplicationRunner {
         } catch (Exception e) {
             throw new IllegalStateException("门限份额生成失败（原始根私钥未删除）: " + e.getMessage(), e);
         }
-        // 5 份份额全部落盘成功后才删除单点加密文件
+        // 5 份份额全部落盘成功后才删除单点加密文件（根私钥刻意不落库，仅清文件形态）
         if (doSharesExist(tenantUscc)) {
-            ov.deleteKey("root", "key");
+            deleteRootKeyFile(tenantUscc);
             st.rootKeyCache = null;
             log.warn("[根CA][{}] 根私钥已切换为 Shamir(3,5) 门限分持（serial={}）：5 份份额落盘，原始加密文件已删除，恢复需任意 3 份",
                     tenantUscc, root.getSerialHex());
@@ -727,8 +852,9 @@ public class CaService implements ApplicationRunner {
         TenantCaState st = stateOf(tenantUscc);
         KeyVault ov = vaultFor(tenantUscc);
         synchronized (st.lock) {
+            migrateRootKeyFromDbIfNeeded(tenantUscc, ov);
             CaCert root = doFindRoot(tenantUscc);
-            if (root != null && (ov.keyExists("root", "key") || doSharesExist(tenantUscc))) {
+            if (root != null && (rootKeyFileExists(tenantUscc) || doSharesExist(tenantUscc))) {
                 // 幂等修复路径：首建中途失败会留下"有根无SUB_CA"的裸域，此处补建（已有有效SUB_CA即直接复用）
                 doEnsureSubCa(tenantUscc, ov, st);
                 return doStatus(tenantUscc, ov);
@@ -741,6 +867,7 @@ public class CaService implements ApplicationRunner {
                 certMapper.updateById(root);
                 // 清理旧根密钥残留（含半套旧份额）：防遗留份额文件被"份额齐全"判据误命中、跳过新根门限化
                 doClearRootKeyMaterial(tenantUscc, ov);
+                ov.deleteDbEntry("root", "key");
                 log.warn("[根CA][{}] 旧根私钥缺失，已吊销（serial={}）并重建新根", tenantUscc, root.getSerialHex());
             }
             CaCert created = doGenerateRoot(tenantUscc, ov);
@@ -1070,7 +1197,7 @@ public class CaService implements ApplicationRunner {
         CaCert root = doFindRoot(tenantUscc);
         if (root == null) {
             vo.setInitialized(false);
-            if (Files.exists(rootCertFile(tenantUscc)) || ov.keyExists("root", "key")) {
+            if (Files.exists(rootCertFile(tenantUscc)) || rootKeyFileExists(tenantUscc)) {
                 vo.setMessage("证书文件存在但数据库记录缺失，调用初始化接口可自动恢复");
             } else {
                 vo.setMessage("根CA未初始化，首次启动或点击「初始化根CA」自动生成");

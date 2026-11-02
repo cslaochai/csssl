@@ -252,6 +252,34 @@ export function cancelApplication(id, tenantUscc) {
   return request.post(`/admin/applications/${id}/cancel`, null, { params: { tenantUscc } })
 }
 
+// ===== 申请单：审批人名单 / 轨迹 / 催办 =====
+/** 本租户审批人名单（提交表单下拉；不依赖 user:list） */
+export function listApprovers(tenantUscc) {
+  return request.get('/admin/applications/approvers', { params: { tenantUscc } })
+}
+/** 单据审批轨迹（按步时间正序） */
+export function listTrail(id) {
+  return request.get(`/admin/applications/${id}/trail`)
+}
+/** 催办被指派审批人 */
+export function urgeApplication(id, tenantUscc) {
+  return request.post(`/admin/applications/${id}/urge`, null, { params: { tenantUscc } })
+}
+
+// ===== 站内信 / 消息中心 =====
+/** 我的消息分页：{pageNo,pageSize} */
+export function pageMyMessages(params) {
+  return request.get('/admin/messages', { params })
+}
+/** 未读消息数（登录后铃铛红点） */
+export function unreadMessageCount() {
+  return request.get('/admin/messages/unread-count')
+}
+/** 标记已读：ids 数组，空=全部已读 */
+export function markMessagesRead(ids) {
+  return request.post('/admin/messages/read', ids)
+}
+
 // ===== 证书操作审批单（吊销/挂起/解除挂起双人复核，批准即执行进 CRL） =====
 export function submitCertOp(data, tenantUscc) {
   return request.post('/admin/cert-ops', data, { params: { tenantUscc } })
