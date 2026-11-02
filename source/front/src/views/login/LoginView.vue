@@ -31,8 +31,8 @@
       </div>
     </div>
 
-    <!-- 登录凭证（演示环境测试账号一览：口令统一 123456，可复制账号或一键填入） -->
-    <el-dialog v-model="credVisible" title="登录凭证（密码：123456）" width="850px" top="10vh">
+    <!-- 登录凭证（演示环境测试账号一览：口令统一 123456，可复制账号或一键登录） -->
+    <el-dialog v-model="credVisible" title="登录凭证（密码：123456，可一键登录）" width="900px" top="8vh">
       <div class="cred-body">
         <el-input
             v-model="credKeyword"
@@ -43,10 +43,11 @@
         />
         <el-table :data="sortedCredRows" border size="small" :span-method="credSpanMethod">
           <el-table-column label="角色" min-width="110" prop="role"/>
-          <el-table-column label="账号（姓名）" min-width="180">
+          <el-table-column label="账号（姓名）" min-width="230">
             <template #default="{row}">
               <span class="cred-login">{{ row.login }}</span>
               <el-button link type="primary" size="small" @click="handleCopyAccount(row.login)">复制账号</el-button>
+              <el-button link type="success" size="small" @click="handleFillAndLogin(row)">一键登录</el-button>
               <span class="cred-name">（{{ row.name }}）</span>
             </template>
           </el-table-column>
@@ -148,7 +149,37 @@ const credRows = [
     login: 'hejing',
     name: '何静',
     ability: '审核申请单、审批操作单（批准即执行，不得与发起人同一人）',
-  }
+  },
+  {
+    role: '密钥管理员',
+    login: 'keyman1',
+    name: '密钥保管人甲',
+    ability: '根CA私钥门限分持与份额保管（5 名保管人之一）；审批二级CA重建（3/5 门限）；查看与导出自己那份份额'
+  },
+  {
+    role: '密钥管理员',
+    login: 'keyman2',
+    name: '密钥保管人乙',
+    ability: '根CA私钥门限分持与份额保管（5 名保管人之一）；审批二级CA重建（3/5 门限）；查看与导出自己那份份额'
+  },
+  {
+    role: '密钥管理员',
+    login: 'keyman3',
+    name: '密钥保管人丙',
+    ability: '根CA私钥门限分持与份额保管（5 名保管人之一）；审批二级CA重建（3/5 门限）；查看与导出自己那份份额'
+  },
+  {
+    role: '密钥管理员',
+    login: 'keyman4',
+    name: '密钥保管人丁',
+    ability: '根CA私钥门限分持与份额保管（5 名保管人之一）；审批二级CA重建（3/5 门限）；查看与导出自己那份份额'
+  },
+  {
+    role: '密钥管理员',
+    login: 'keyman5',
+    name: '密钥保管人戊',
+    ability: '根CA私钥门限分持与份额保管（5 名保管人之一）；审批二级CA重建（3/5 门限）；查看与导出自己那份份额'
+  },
 ]
 
 // 凭据关键词筛选（纯前端）：角色 / 登录名 / 姓名 模糊匹配
@@ -201,6 +232,15 @@ const handleCopyAccount = async (login) => {
   } else {
     ElMessage.error('复制失败，请手动选择文本')
   }
+}
+
+// 一键填入测试账号（口令统一 123456），并关闭弹窗直接登录
+const handleFillAndLogin = async (row) => {
+  form.username = row.login
+  form.password = '123456'
+  credVisible.value = false
+  formRef.value?.clearValidate()
+  await onSubmit()
 }
 
 const rules = {

@@ -131,6 +131,12 @@
     <!-- 新建公司（直接执行） -->
     <el-dialog v-model="createVisible" :close-on-click-modal="false" title="新建公司" width="650px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="140px">
+        <el-form-item label="公司名称" prop="companyName">
+          <el-input v-model="form.companyName" placeholder="如 医保结算中心"/>
+        </el-form-item>
+        <el-form-item label="主体O" prop="subjectO">
+          <el-input v-model="form.subjectO" placeholder="该公司全部证书的主体O，如 长沙麓康医院"/>
+        </el-form-item>
         <el-form-item label="统一社会信用代码" prop="uscc">
           <el-input
               v-model="form.uscc"
@@ -139,12 +145,6 @@
               placeholder="18 位，如 91430100MA4L5K2N3T"
               @input="onUsccInput"
           />
-        </el-form-item>
-        <el-form-item label="公司名称" prop="companyName">
-          <el-input v-model="form.companyName" placeholder="如 医保结算中心"/>
-        </el-form-item>
-        <el-form-item label="主体O" prop="subjectO">
-          <el-input v-model="form.subjectO" placeholder="该公司全部证书的主体O，如 长沙麓康医院"/>
         </el-form-item>
         <el-form-item label="算法" prop="algorithm">
           <el-radio-group v-model="form.algorithm">
@@ -161,6 +161,7 @@
               collapse-tags-tooltip
               filterable
               multiple
+              :empty-text="simpleUsers.length ? '没有匹配的密钥管理员' : '暂无密钥管理员账号，请先在「用户与角色管理」创建角色为「密钥管理员」的账号'"
               placeholder="指定 5 名根私钥份额保管人（一人一份）"
               style="width: 100%"
           >
@@ -172,9 +173,6 @@
                 :value="u.username"
             />
           </el-select>
-          <div class="form-tip">根CA私钥将拆分为 5 份 Shamir(3,5) 门限份额、一人一份；后续动用根私钥重建二级CA 须 3/5
-            名保管人审批。<b>保管人必须为"密钥管理员(KEY_ADMIN)"角色</b>（其职责即根密钥门限分持/封存/解封与份额保管，天然排除系统管理员等冲突角色）；仅可选择<b>平台级</b>或本公司账号；禁用账号不可选。
-          </div>
         </el-form-item>
         <el-form-item label="联系人">
           <el-input v-model="form.contact" placeholder="公司CA管理员，可选"/>
@@ -276,8 +274,6 @@
           <el-button size="small" @click="onDownloadMyShare">下载我的份额(JSON)</el-button>
         </div>
       </template>
-      <el-alert v-else-if="holdersList.length" :closable="false" class="dialog-tip" title="你不是该公司密钥保管人，无份额可见（仅 5 名指定保管人本人可查看各自份额）。"
-                type="info"/>
       <div v-if="hasPerm('ca:share:assign')" style="margin-top: 10px">
         <el-button size="small" type="primary" @click="openReassign">重新指定保管人</el-button>
       </div>
@@ -316,7 +312,7 @@
           type="warning"
       />
       <el-descriptions v-if="cred" :column="1" border class="cred-desc">
-        <el-descriptions-item label="接入ID（App ID）">
+        <el-descriptions-item label="接入ID（App ID）" label-width="150px">
           <span class="cell-mono">{{ cred.appId }}</span>
           <el-button link size="small" type="primary" @click="onCopy(cred.appId)">复制</el-button>
         </el-descriptions-item>
@@ -735,6 +731,10 @@ async function loadSimpleUsers(companyUscc) {
   line-height: 1.5;
   color: #8a94a6;
   margin-top: 6px;
+}
+
+.form-tip-alert {
+  margin-top: 8px;
 }
 
 .share-view :deep(.el-textarea__inner) {

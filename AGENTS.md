@@ -33,11 +33,20 @@
 
 ## 清库重建（历史数据清零）
 
-- 库表结构**不自动建**（`sql.init` 未开启）：清库后必须手工执行 `source/ssl_backend/src/main/resources/db/` 下的两个脚本。
-- **一键脚本**（推荐）：`bash source/ssl_backend/src/main/resources/db/reset-dev-db.sh [host] [port] [db] [user]`
-  → ① `reset.sql` DROP 全部 21 张业务表 → ② 导入 `schema.sql` 重建 18 张表 + 种子 → ③ 清空磁盘 `store-dir`。
+- 库表结构**不自动建**（`sql.init` 未开启）：清库后必须手工执行 `source/ssl_backend/db/` 下的脚本。
+- ⚠️ **运维脚本一律放 `source/ssl_backend/db/`**，不要放 `src/main/resources/db/`：maven resources 插件会把 `target/classes/db/` 整目录**覆盖**回 resources，放那儿的脚本会被静默删掉。（`src/main/resources/db/` 只留 `schema.sql`，应用启动要读它。）
+- **一键脚本**（推荐）：`bash source/ssl_backend/db/reset-dev-db.sh [host] [port] [db] [user]`
+  → ① `reset.sql` DROP 全部 21 张业务表 → ② 导入 `schema.sql` 重建 18 张表 + 种子 → ③ `init-key-admins.sql` 建 5 名平台级密钥管理员 → ④ 清空磁盘 `store-dir`。
   口令经环境变量 `MYSQL_PWD` 传入（不出现在命令行里）；需 PATH 中有 mysql 客户端。
-- **纯 SQL**：`mysql -h <host> -u <user> -p <db> < source/ssl_backend/src/main/resources/db/reset.sql`，再导入 `schema.sql`。
+- **纯 SQL**：`mysql -h <host> -u <user> -p <db> < source/ssl_backend/db/reset.sql`，再导入 `schema.sql`。
+- ⚠️ **`reset.sql` 会连用户账号一起删**。只清业务数据、保留账号 → 改用 `db/reset-keep-users.sql`（保留 `ssl_sys_user` / `ssl_sys_role` / `ssl_role_perm`）。
+- ⚠️ **清库前必须先备份**（库 + 磁盘 `master.key`）：
+  - 备份库：导出为 SQL（结构+数据）即可回灌；但 `cert_pem` 等 PEM 文本含真实换行，回灌时 INSERT 语句**跨多行**，须累积到以 `);` 结尾才算一条。
+  - 备份 `store-dir/master.key`：旧 `ssl_key_vault` 密文依赖它，丢了旧私钥**永久解不开**。
+  - 回灌时若角色编码改造过（如 `TENANT_ADMIN` → `COMPANY_ADMIN`），须先改 `ssl_sys_user.role_code`，再把旧角色的权限点按映射并入新角色，最后删旧角色档案。
 - ⚠️ **磁盘必须一起清**（`store-dir`，默认 `ssl_backend/data/certs`）：残留的**旧根CA Shamir 份额文件**会被 `doEnsureRootShares` 的"5 份齐全"判据误命中 → 新公司拿到旧根私钥的份额 → 后续贴份额解封时签名挑战必然失败（"份额重组密钥与根证书不匹配"）。已修 `CaService.doClearShareFiles`，但清库时清盘仍是首选。
+- 🔑 **「新建公司」的保管人下拉必须先有 5 个 KEY_ADMIN 账号**，否则下拉为空、根本建不了公司（`db/init-key-admins.sql` 建 keyman1~5 / 口令 123456 / 平台级）。
+  根因：下拉只认 KEY_ADMIN 角色（分权制衡，排除系统管理员等冲突角色）；而**建公司时该公司账号尚不存在** → 只能指定**平台级**账号（`company_uscc = NULL`）。公司建好后可在「公司详情 → 重新指定保管人」改指为公司自有账号。
 - 清库后启动后端会自动播种：`admin/123456` + 12 个预置角色 + 角色授权 + 3 个内置证书模板；**公司需手工新建**（新建即建独立根CA + SUB_CA + 5 份门限份额）。
+- 旧根私钥文件丢失时，启动会**自愈重建**主域根CA + SUB_CA + 5 份份额（落 `data/certs/companies/{uscc}/`）；`DataInitializer` 会按"法定上限"裁剪越界授权。两者都是正常行为，看到数量变化不必惊慌。
 - 造测试用统一社会信用代码时注意 GB 32100 字符集**不含 I/O/S/V/Z**，末位校验码 = `(31 - 加权和 mod 31) mod 31`。

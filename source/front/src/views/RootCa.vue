@@ -176,8 +176,6 @@
           <el-button size="small" @click="onDownloadMyShare">下载我的份额(JSON)</el-button>
         </div>
       </template>
-      <el-alert v-else :closable="false" class="dialog-tip" title="你不是该公司密钥保管人，无份额可见（仅 5 名指定保管人本人可查看各自份额）。"
-                type="info"/>
     </div>
 
     <!-- ==================== 二级CA 重建申请（3-of-5 审批） ==================== -->
