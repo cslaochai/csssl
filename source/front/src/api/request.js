@@ -1,9 +1,9 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
-// CSSSL 后端 context-path 为 /ssl（vite 代理 /ssl → http://localhost:8092）
+// CSSSL 后端 context-path 为 /ssl；本地默认直连 /ssl，门户部署构建用 VITE_API_PREFIX=/ssl-api 注入
 const request = axios.create({
-  baseURL: '/ssl',
+  baseURL: import.meta.env.VITE_API_PREFIX || '/ssl',
   timeout: 60000,
   headers: {
     'Content-Type': 'application/json'
@@ -100,7 +100,7 @@ request.interceptors.response.use(
           localStorage.removeItem('caDomain')
           if (!redirectingToLogin) {
             redirectingToLogin = true
-            window.location.href = '/login'
+            window.location.href = `${import.meta.env.BASE_URL}login`
           }
         }
         return Promise.reject(error)
