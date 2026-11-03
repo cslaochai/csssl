@@ -35,7 +35,9 @@
     <!-- 表格卡 -->
     <el-card class="table-card" shadow="never">
       <el-table v-loading="loading" :data="rows" :max-height="tableMaxHeight" stripe style="width: 100%">
-        <el-table-column label="操作人" prop="username" width="130"/>
+        <el-table-column label="操作人" width="130">
+          <template #default="{ row }">{{ row.realName || '无' }}</template>
+        </el-table-column>
         <el-table-column label="公司" width="110">
           <template #default="{ row }">
             <el-tag v-if="!row.companyUscc" size="small" type="info">全局</el-tag>
@@ -75,7 +77,7 @@
     <el-dialog v-model="detailVisible" title="审计记录详情" width="640px">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="时间">{{ detail?.createdAt }}</el-descriptions-item>
-        <el-descriptions-item label="操作人">{{ detail?.username }}</el-descriptions-item>
+        <el-descriptions-item label="操作人">{{ detail?.realName || '无' }}</el-descriptions-item>
         <el-descriptions-item label="公司">{{
             companyNames[detail?.companyUscc] || detail?.companyUscc || '全局'
           }}

@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
@@ -16,10 +19,12 @@ import java.time.LocalDateTime;
  * {@link CaSubCaApproval}），避免非保管人越权放行。</p>
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_ca_subca_ticket")
-public class CaSubCaTicket {
+public class CaSubCaTicket extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
     /**
@@ -43,12 +48,13 @@ public class CaSubCaTicket {
     private String reason;
 
     /**
-     * 发起人账号
+     * 发起人ID（ssl_sys_user.id）
      */
-    private String requestedBy;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long requestedByUserId;
 
     /**
-     * 发起人真实姓名
+     * 发起人真实姓名（写入时快照，不回查用户表）
      */
     private String requestedByName;
 
@@ -77,7 +83,4 @@ public class CaSubCaTicket {
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime executedAt;
-
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 }

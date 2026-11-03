@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.common.ApiException;
 import com.csssl.entity.ApiClient;
 import com.csssl.entity.CaCompany;
+import com.csssl.entity.LoginUser;
 import com.csssl.enums.CompanyStatusEnum;
 import com.csssl.mapper.ApiClientMapper;
 import com.csssl.util.KeyVault;
@@ -65,7 +66,7 @@ public class ApiClientService {
      * 登记 API 客户端（仅全局系统管理员，控制器已校验）：返回一次性 secret。
      */
     public ApiClientSecretVO create(String companyUscc, String clientName, String ipAllowlist,
-                                    String clientCertSha256, String operator, String ip) {
+                                    String clientCertSha256, LoginUser actor, String ip) {
         if (companyUscc == null || companyUscc.isBlank()) {
             throw new IllegalArgumentException("必须指定客户端绑定的公司");
         }
@@ -89,12 +90,11 @@ public class ApiClientService {
         client.setClientCertSha256(blankToNull(clientCertSha256));
         client.setSecretVersion(1);
         client.setStatus(1);
-        client.setCreatedBy(operator);
         client.setCreatedAt(LocalDateTime.now());
         clientMapper.insert(client);
         keyVault.storeKey(VAULT_DIR, appId, secret);
 
-        auditService.record(operator, "API_CLIENT_CREATE", appId,
+        auditService.record(actor, "API_CLIENT_CREATE", appId,
                 "登记外部API客户端：" + name + "（appId=" + appId + "，公司=" + company
                         + (client.getIpAllowlist() == null ? "" : "，IP白名单=" + client.getIpAllowlist()) + "）",
                 ip, company);
@@ -105,7 +105,7 @@ public class ApiClientService {
     /**
      * 轮换 secret：旧 secret 立即失效（secret_version+1）。
      */
-    public ApiClientSecretVO rotate(Long id, String operator, String ip) {
+    public ApiClientSecretVO rotate(Long id, LoginUser actor, String ip) {
         ApiClient client = require(id);
         String secret = generateSecret();
         client.setSecretVersion((client.getSecretVersion() == null ? 1 : client.getSecretVersion()) + 1);
@@ -113,7 +113,7 @@ public class ApiClientService {
         clientMapper.updateById(client);
         keyVault.storeKey(VAULT_DIR, client.getAppId(), secret);
 
-        auditService.record(operator, "API_CLIENT_ROTATE", client.getAppId(),
+        auditService.record(actor, "API_CLIENT_ROTATE", client.getAppId(),
                 "轮换外部API客户端密钥：" + client.getClientName() + "（新版本 " + client.getSecretVersion() + "）",
                 ip, client.getCompanyUscc());
         log.info("[API客户端] secret 已轮换 appId={}, version={}", client.getAppId(), client.getSecretVersion());
@@ -123,11 +123,11 @@ public class ApiClientService {
     /**
      * 启停客户端（停用立即拒绝其请求）。
      */
-    public ApiClientVO setStatus(Long id, boolean enabled, String operator, String ip) {
+    public ApiClientVO setStatus(Long id, boolean enabled, LoginUser actor, String ip) {
         ApiClient client = require(id);
         client.setStatus(enabled ? 1 : 0);
         clientMapper.updateById(client);
-        auditService.record(operator, enabled ? "API_CLIENT_ENABLE" : "API_CLIENT_DISABLE", client.getAppId(),
+        auditService.record(actor, enabled ? "API_CLIENT_ENABLE" : "API_CLIENT_DISABLE", client.getAppId(),
                 (enabled ? "启用" : "停用") + "外部API客户端：" + client.getClientName(),
                 ip, client.getCompanyUscc());
         ApiClientVO vo = ApiClientVO.from(client);
@@ -163,12 +163,12 @@ public class ApiClientService {
     /**
      * 生成/重置公司默认接入凭证：已有则轮换，没有则新登记；secret 只在本次响应返回。
      */
-    public ApiClientSecretVO resetForCompany(String companyUscc, String operator, String ip) {
+    public ApiClientSecretVO resetForCompany(String companyUscc, LoginUser actor, String ip) {
         ApiClient existing = findFirstByCompany(companyUscc);
         if (existing == null) {
-            return create(companyUscc, DEFAULT_CLIENT_NAME, null, null, operator, ip);
+            return create(companyUscc, DEFAULT_CLIENT_NAME, null, null, actor, ip);
         }
-        return rotate(existing.getId(), operator, ip);
+        return rotate(existing.getId(), actor, ip);
     }
 
     /**

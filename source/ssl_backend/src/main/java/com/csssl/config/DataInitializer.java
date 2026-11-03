@@ -44,8 +44,21 @@ public class DataInitializer implements ApplicationRunner {
      */
     private static final Set<String> UPGRADE_PERMS = Set.of(
             PermissionCatalog.CA_SHARE_ASSIGN,
+            PermissionCatalog.CA_SUBCA_REBUILD_VIEW,
             PermissionCatalog.CA_SUBCA_REBUILD_APPLY,
-            PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE);
+            PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE,
+            PermissionCatalog.MENU_APPROVAL_CENTER,
+            // 直发接口删除后，签发只剩「按已批准申请执行」：为上限内含该权限点的存量角色补齐
+            PermissionCatalog.MENU_APPLICATIONS,
+            PermissionCatalog.APP_ISSUE,
+            // 公司管理菜单：存量库升级时 ADMIN 漏播种（schema.sql 只补了 menu:company-ops），
+            // 系统管理员按法定上限应可见菜单做只读巡检，此处随升级补齐
+            PermissionCatalog.MENU_COMPANIES,
+            // 重新指派保管人权（ca:share:assign）收口至公司管理员：为存量 COMPANY_ADMIN 补授；
+            // 密钥管理员新增「公司变更审批」菜单（作为原保管人投票入口），随升级补齐
+            PermissionCatalog.MENU_COMPANY_OPS,
+            // 我的待办（统一聚合页）：四条审批流待办的统一入口，为存量预置角色补齐
+            PermissionCatalog.MENU_MY_APPROVALS);
 
     @Override
     public void run(ApplicationArguments args) {
@@ -58,7 +71,6 @@ public class DataInitializer implements ApplicationRunner {
             admin.setPassword(BCrypt.hashpw("123456", BCrypt.gensalt()));
             admin.setRealName("系统管理员");
             admin.setRoleCode("ADMIN");
-            admin.setCompanyUscc(null); // 默认管理员=全局账号（company_uscc NULL：跨公司总览，公司域操作仍须显式传 companyUscc）
             admin.setStatus(1);
             admin.setCreatedAt(LocalDateTime.now());
             userMapper.insert(admin);

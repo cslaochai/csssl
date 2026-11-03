@@ -7,11 +7,12 @@ import java.time.LocalDateTime;
 
 /**
  * 二级CA 重建申请单逐人审批记录展示项。
+ *
+ * <p>只出真实姓名，不出登录账号（同 {@link CaSubCaHolderVO} 口径）。
  */
 @Data
 public class CaSubCaApprovalVO {
 
-    private String approverUsername;
     private String approverRealName;
     private String decision;
     private String comment;

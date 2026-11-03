@@ -65,10 +65,10 @@
             </el-table-column>
             <el-table-column label="主体DN" min-width="180" prop="subjectDn" show-overflow-tooltip/>
             <el-table-column label="提交人" width="120">
-              <template #default="{ row }">{{ row.appliedByName || row.appliedBy }}</template>
+              <template #default="{ row }">{{ row.appliedByName || '无' }}</template>
             </el-table-column>
             <el-table-column label="指派审批人" show-overflow-tooltip width="120">
-              <template #default="{ row }">{{ row.assigneeRealName || row.assigneeUsername || '-' }}</template>
+              <template #default="{ row }">{{ row.assigneeRealName || '无' }}</template>
             </el-table-column>
             <el-table-column label="审核人" width="100">
               <template #default="{ row }">{{ row.reviewedByName }}</template>
@@ -206,10 +206,13 @@
                 <el-tag :type="opStatusTag(row.status)" size="small">{{ opStatusText(row.status) }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="被指派审批人" width="130">
+              <template #default="{ row }">{{ row.assigneeRealName || '未指派' }}</template>
+            </el-table-column>
             <el-table-column label="审批人" width="130">
               <template #default="{ row }">{{ row.reviewedByName }}</template>
             </el-table-column>
-            <el-table-column align="right" fixed="right" label="操作" width="160">
+            <el-table-column align="right" fixed="right" label="操作" width="240">
               <template #default="{ row }">
                 <el-button
                     v-for="a in visibleOpActions(row)"
@@ -334,7 +337,7 @@
                width="480px">
       <p style="margin-bottom: 12px">
         {{
-          opReviewTarget ? `${opTypeText(opReviewTarget.opType)} ${opReviewTarget.certSubjectCn}（发起人 ${opReviewTarget.requestedByName || opReviewTarget.requestedBy}）` : ''
+          opReviewTarget ? `${opTypeText(opReviewTarget.opType)} ${opReviewTarget.certSubjectCn}（发起人 ${opReviewTarget.requestedByName || '无'}）` : ''
         }}
         <template v-if="opReviewTarget?.reason">{{ `操作原因：${reasonText(opReviewTarget.reason)}。` }}</template>
         <template v-if="opReviewTarget?.validityDays">{{ `新有效期：${opReviewTarget.validityDays} 天。` }}</template>
@@ -359,10 +362,61 @@
       </template>
     </el-dialog>
 
+    <!-- 证书操作单详情（流程图 + 审批轨迹 + 催办） -->
+    <el-dialog v-model="opDetailVisible" :close-on-click-modal="false" title="证书操作单详情" width="640px">
+      <el-alert v-if="opDetail && opDetail.status === 'PENDING'" :closable="false" :title="opNextApproverTitle" show-icon
+                style="margin-bottom: 12px" type="warning"/>
+      <WorkflowDiagram :diagram="opDiagram" style="margin-bottom: 16px"/>
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="操作单号">{{ opDetail?.opNo }}</el-descriptions-item>
+        <el-descriptions-item label="操作类型">{{ opDetail ? opTypeText(opDetail.opType) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="证书主体">{{ opDetail?.certSubjectCn || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="序列号">
+          <span class="cell-mono">{{ opDetail?.certSerialHex || '-' }}</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="所属公司">{{
+            companyNames[opDetail?.companyUscc] || opDetail?.companyUscc || '-'
+          }}
+        </el-descriptions-item>
+        <el-descriptions-item label="操作原因">{{ opDetail?.reason ? reasonText(opDetail.reason) : '无' }}</el-descriptions-item>
+        <el-descriptions-item label="新有效期">{{ opDetail?.validityDays ? opDetail.validityDays + ' 天' : '无' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ opDetail ? opStatusText(opDetail.status) : '' }}</el-descriptions-item>
+        <el-descriptions-item label="发起人/时间">{{ opDetail?.requestedByName || '-' }}
+          / {{ opDetail?.requestedAt }}
+        </el-descriptions-item>
+        <el-descriptions-item label="被指派审批人">{{
+            opDetail?.assigneeRealName || '未指派（按角色流转）'
+          }}
+        </el-descriptions-item>
+        <el-descriptions-item label="审批人/时间">{{ opDetail?.reviewedByName || '-' }}
+          / {{ opDetail?.reviewedAt || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="审批意见">{{ opDetail?.reviewComment || '-' }}</el-descriptions-item>
+      </el-descriptions>
+      <div class="trail-title">审批轨迹</div>
+      <el-timeline v-if="opTrail.length" class="trail">
+        <el-timeline-item v-for="t in opTrail" :key="t.id" :hollow="t.step === 'URGE'" :timestamp="t.createdAt"
+                          :type="trailType(t.step)">
+          <div class="trail-step">{{ trailStepText(t.step) }}</div>
+          <div class="trail-who">{{ t.operatorRealName || '无' }}<span
+              v-if="t.operatorRole">（{{ t.operatorRole }}）</span></div>
+          <div v-if="t.comment" class="trail-comment">{{ t.comment }}</div>
+        </el-timeline-item>
+      </el-timeline>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button v-if="opCanUrge(opDetail)" :loading="opUrging" type="warning" @click="onOpUrge(opDetail)">催办审批人
+          </el-button>
+          <el-button @click="opDetailVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- 详情 -->
     <el-dialog v-model="detailVisible" title="申请单详情" width="620px">
       <el-alert v-if="detail && detail.status === 'PENDING'" :closable="false" :title="nextApproverTitle" show-icon
                 style="margin-bottom: 12px" type="warning"/>
+      <WorkflowDiagram :diagram="diagram" style="margin-bottom: 16px"/>
       <el-descriptions :column="1" border>
         <el-descriptions-item label="申请单号">{{ detail?.applyNo }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
@@ -398,7 +452,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="审核意见">{{ detail?.reviewComment || '-' }}</el-descriptions-item>
         <el-descriptions-item label="指定审批人">{{
-            detail?.assigneeRealName ? `${detail.assigneeRealName}（${detail.assigneeUsername}）` : '未指定（按角色流转）'
+            detail?.assigneeRealName || '未指定（按角色流转）'
           }}
         </el-descriptions-item>
       </el-descriptions>
@@ -407,7 +461,7 @@
         <el-timeline-item v-for="t in trail" :key="t.id" :hollow="t.step === 'URGE'" :timestamp="t.createdAt"
                           :type="trailType(t.step)">
           <div class="trail-step">{{ trailStepText(t.step) }}</div>
-          <div class="trail-who">{{ t.operatorRealName || t.operatorUsername }}<span
+          <div class="trail-who">{{ t.operatorRealName || '无' }}<span
               v-if="t.operatorRole">（{{ t.operatorRole }}）</span></div>
           <div v-if="t.comment" class="trail-comment">{{ t.comment }}</div>
         </el-timeline-item>
@@ -425,6 +479,7 @@
 
 <script setup>
 import {computed, onMounted, reactive, ref} from 'vue'
+import {useRoute, useRouter} from 'vue-router'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {ArrowDown, Refresh, Search} from '@element-plus/icons-vue'
 import {
@@ -433,9 +488,12 @@ import {
   cancelApplication,
   cancelCertOp,
   companyNameMap,
+  detailApplication,
+  detailCertOp,
   issueApplication,
   listApprovers,
   listCompaniesCached,
+  listCertOpTrail,
   listTrail,
   pageApplications,
   pageCertOps,
@@ -443,11 +501,17 @@ import {
   rejectApplication,
   rejectCertOp,
   submitApplication,
-  urgeApplication
+  urgeApplication,
+  urgeCertOp
 } from '@/api/system'
+import {getWorkflowDiagram} from '@/api/workflow'
+import WorkflowDiagram from '@/views/WorkflowDiagram.vue'
 import {hasPerm} from '@/lib/perm'
 import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
 import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
+
+const route = useRoute()
+const router = useRouter()
 
 const loading = ref(false)
 const rows = ref([])
@@ -467,6 +531,26 @@ const opReviewVisible = ref(false)
 const opReviewAction = ref('approve')
 const opReviewComment = ref('')
 const opReviewTarget = ref(null)
+
+// 证书操作单详情（流程图 + 审批轨迹 + 催办）
+const opDetailVisible = ref(false)
+const opDetail = ref(null)
+const opDiagram = ref(null)
+const opTrail = ref([])
+const opUrging = ref(false)
+const opNextApproverTitle = computed(() => {
+  const d = opDetail.value
+  if (!d) return ''
+  if (d.status === 'PENDING') {
+    return d.assigneeRealName
+        ? `当前环节：等待【${d.assigneeRealName}】审批`
+        : '当前环节：等待【审核员】审批（未指定具体人）'
+  }
+  if (d.status === 'EXECUTED') return '当前环节：已批准并执行'
+  if (d.status === 'REJECTED') return '当前环节：已驳回'
+  if (d.status === 'CANCELLED') return '当前环节：已撤销'
+  return ''
+})
 
 // 按钮权限点与后端接口校验一一对应；旧会话（无权限缓存）回退角色判断，服务端仍强校验
 const username = localStorage.getItem('username') || ''
@@ -523,6 +607,7 @@ const reviewAction = ref('approve')
 const reviewComment = ref('')
 const detail = ref(null)
 const trail = ref([])
+const diagram = ref(null)
 const urging = ref(false)
 const approvers = ref([])
 const approversLoading = ref(false)
@@ -547,13 +632,6 @@ function statusText(s) {
 
 function statusTag(s) {
   return {PENDING: 'warning', APPROVED: '', REJECTED: 'danger', ISSUED: 'success', CANCELLED: 'info'}[s] || ''
-}
-
-// 展示「真实姓名（登录账号）」；历史数据无真实姓名时回退为登录账号；都缺则 -
-function nameLabel(by, byName) {
-  if (!by && !byName) return '-'
-  if (byName && by && byName !== by) return `${byName}（${by}）`
-  return byName || by
 }
 
 async function loadTemplates() {
@@ -716,9 +794,13 @@ function onDetail(row) {
   detail.value = row
   detailVisible.value = true
   trail.value = []
+  diagram.value = null
   try {
     listTrail(row.id).then(res => {
       trail.value = res.data || []
+    })
+    getWorkflowDiagram('CERT_APPLICATION', row.status, row.assigneeRealName).then(res => {
+      diagram.value = res.data || null
     })
   } catch (e) {
   }
@@ -751,7 +833,8 @@ async function onUrge(row) {
 }
 
 function canUrge(row) {
-  return row && row.status === 'PENDING' && row.assigneeUsername && hasPerm('app:urge')
+  // 可否催办由服务端逐行回算（待审核且已指派审批人）；审批人登录账号不再随出参下发
+  return !!row && !!row.urgeable && hasPerm('app:urge')
 }
 
 const nextApproverTitle = computed(() => {
@@ -809,7 +892,7 @@ function appActions(row) {
     acts.push({label: '签发', run: () => onIssue(row)})
   }
   acts.push({label: '详情', run: () => onDetail(row)})
-  if (row.status === 'PENDING' && row.assigneeUsername && hasPerm('app:urge')) {
+  if (row.status === 'PENDING' && row.urgeable && hasPerm('app:urge')) {
     acts.push({label: '催办', type: 'warning', run: () => onUrge(row)})
   }
   if (['PENDING', 'APPROVED'].includes(row.status) && hasPerm('app:cancel')) {
@@ -879,15 +962,20 @@ function handleOpCurrentChange(val) {
 }
 
 // 撤销=发起人本人（后端硬校验，前端仅按可判条件显示）
+// reviewable 由后端按「本单被指派人 == 当前登录人」现算，与 approve/reject 接口同一口径；不可审的直接不给按钮
 function opActions(row) {
   const acts = []
-  if (row.status === 'PENDING' && canOpApprove) {
+  if (row.status === 'PENDING' && row.reviewable) {
     acts.push({label: '批准', type: 'success', run: () => openOpReview(row, 'approve')})
   }
-  if (row.status === 'PENDING' && canOpApprove) {
+  if (row.status === 'PENDING' && row.reviewable) {
     acts.push({label: '驳回', type: 'danger', run: () => openOpReview(row, 'reject')})
   }
-  if (row.status === 'PENDING' && row.requestedBy === username) {
+  acts.push({label: '详情', run: () => onOpDetail(row)})
+  if (row.status === 'PENDING' && row.urgeable && hasPerm('app:urge')) {
+    acts.push({label: '催办', type: 'warning', run: () => onOpUrge(row)})
+  }
+  if (row.revocable) {
     acts.push({label: '撤销', run: () => onOpCancel(row)})
   }
   return acts
@@ -932,12 +1020,77 @@ async function onOpCancel(row) {
   loadOps()
 }
 
+async function onOpDetail(row) {
+  opDetail.value = row
+  opDetailVisible.value = true
+  opTrail.value = []
+  opDiagram.value = null
+  try {
+    listCertOpTrail(row.id).then(res => {
+      opTrail.value = res.data || []
+    })
+    getWorkflowDiagram('CERT_OP', row.status, row.assigneeRealName).then(res => {
+      opDiagram.value = res.data || null
+    })
+  } catch (e) {
+  }
+}
+
+async function onOpUrge(row) {
+  if (!row) return
+  await ElMessageBox.confirm(`向${row.assigneeRealName ? '审批人 ' + row.assigneeRealName : '审核员'}发送催办提醒？`, '催办', {type: 'warning'})
+  opUrging.value = true
+  try {
+    await urgeCertOp(row.id, row.companyUscc)
+    ElMessage.success('已发送催办提醒')
+    const res = await listCertOpTrail(row.id)
+    opTrail.value = res.data || []
+  } finally {
+    opUrging.value = false
+  }
+}
+
+function opCanUrge(row) {
+  // 可否催办由服务端逐行回算（待审批且已指派审批人）；审批人登录账号不再随出参下发
+  return !!row && !!row.urgeable && hasPerm('app:urge')
+}
+
 onMounted(async () => {
   loadTemplates()
   companyOptions.value = await listCompaniesCached()
   companyNames.value = await companyNameMap()
   load()
+  await handleDeepLink()
 })
+
+/**
+ * 深链直达（我的待办聚合页跳转）：?applyId=xx 打开 RA 申请单详情，?certOpId=xx 打开证书操作单详情。
+ * 打开后清掉 query，避免刷新时重复弹框。
+ */
+async function handleDeepLink() {
+  const applyId = route.query.applyId
+  const certOpId = route.query.certOpId
+  if (!applyId && !certOpId) return
+  if (applyId) {
+    try {
+      const res = await detailApplication(applyId)
+      onDetail(res.data)
+    } catch (e) {
+      // 单据不存在或无权查看时留在列表
+    }
+  }
+  if (certOpId) {
+    activeTab.value = 'certops'
+    await loadOps()
+    try {
+      const res = await detailCertOp(certOpId)
+      await onOpDetail(res.data)
+    } catch (e) {
+      // 单据不存在或无权查看时留在列表
+    }
+  }
+  router.replace({path: '/applications'})
+}
 </script>
 
 <style scoped>

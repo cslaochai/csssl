@@ -4,12 +4,10 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.csssl.enums.RoleCodeEnum;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
-
-import java.time.LocalDateTime;
+import lombok.EqualsAndHashCode;
 
 /**
  * 管理角色档案（GM/T 0034 §8.1.3 多级管理员 / §10.1 分权制衡）。
@@ -21,8 +19,9 @@ import java.time.LocalDateTime;
  * 授权上限为全量权限目录，由管理员自行组合。</p>
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_sys_role")
-public class SysRole {
+public class SysRole extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -57,16 +56,4 @@ public class SysRole {
      * 1-法定内置预置角色（不可删）0-自定义角色（可增删）
      */
     private Integer builtin;
-
-    /**
-     * 创建时间
-     */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
-
-    /**
-     * 更新时间
-     */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime updatedAt;
 }

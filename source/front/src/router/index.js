@@ -23,7 +23,7 @@ const routes = [
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { title: '概览', perm: 'menu:dashboard', roles: ALL_ROLES, group: 'top', icon: 'DataBoard' }
+        meta: { title: '概览', perm: 'menu:dashboard', roles: ALL_ROLES, group: 'portal', icon: 'DataBoard' }
       },
       {
         path: 'applications',
@@ -126,27 +126,54 @@ const routes = [
         meta: { title: '审计日志', perm: 'menu:audit', roles: ['AUDITOR', 'ADMIN'], group: 'platform', icon: 'Memo' }
       },
       {
-        path: 'approval-flow',
-        name: 'approval-flow',
-        component: () => import('@/views/ApprovalFlow.vue'),
-        // 全员可见的只读说明页：审批按角色而非指派到人，告知各业务「下一个审核人」所属角色
-        meta: {
-          title: '审批流说明',
-          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER'],
-          group: 'platform',
-          icon: 'Aim'
-        }
-      },
-      {
         path: 'messages',
         name: 'messages',
         component: () => import('@/views/MessageCenter.vue'),
-        // 消息中心：全员可见本人消息（本人私有，任何登录用户可读自己的消息）
+        // 消息待办（原消息中心更名）：全员可见本人消息；并聚合「待我审批 / 待我执行」待办
         meta: {
-          title: '消息中心',
+          title: '消息待办',
           roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'CERT_OFFICER', 'AUDIT_ADMIN'],
-          group: 'platform',
+          group: 'portal',
           icon: 'Bell'
+        }
+      },
+      {
+        path: 'approval-center',
+        name: 'approval-center',
+        component: () => import('@/views/ApprovalCenter.vue'),
+        // 审批中心：二级CA重建申请单的分页查询 + 审批弹框（审批时填入本人密钥份额）+ 执行重建
+        meta: {
+          title: '审批中心',
+          perm: 'menu:approval-center',
+          roles: ['ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN'],
+          group: 'portal',
+          icon: 'Stamp'
+        }
+      },
+      {
+        path: 'my-approvals',
+        name: 'my-approvals',
+        component: () => import('@/views/MyApprovals.vue'),
+        // 我的待办：四条审批流统一聚合（待我处理 / 我发起的 / 已办），一屏看完，不用在四个页面间切
+        meta: {
+          title: '我的待办',
+          perm: 'menu:my-approvals',
+          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN',
+            'COMPANY_ADMIN', 'COMPANY_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'CERT_OFFICER', 'AUDIT_ADMIN'],
+          group: 'portal',
+          icon: 'Bell'
+        }
+      },
+      {
+        path: 'workflow-designer',
+        name: 'workflow-designer',
+        component: () => import('@/views/WorkflowDesigner.vue'),
+        // 流程设计器：Warm-Flow 拖拽式编辑器，仅系统管理员和安全管理员可用
+        meta: {
+          title: '流程设计器',
+          roles: ['ADMIN', 'SECURITY_ADMIN'],
+          group: 'platform',
+          icon: 'Connection'
         }
       }
     ]

@@ -15,7 +15,8 @@ public enum CompanyOpTypeEnum {
     SUSPEND("SUSPEND", "暂停公司", true),
     RESUME("RESUME", "恢复公司", true),
     CLOSE("CLOSE", "关闭公司", true),
-    RESET_CREDENTIAL("RESET_CREDENTIAL", "重置接入密钥", true);
+    RESET_CREDENTIAL("RESET_CREDENTIAL", "重置接入密钥", true),
+    REASSIGN_HOLDERS("REASSIGN_HOLDERS", "重新指派保管人", true);
 
     private final String code;
     private final String label;

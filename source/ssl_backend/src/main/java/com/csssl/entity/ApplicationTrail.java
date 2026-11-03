@@ -3,12 +3,10 @@ package com.csssl.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
-
-import java.time.LocalDateTime;
+import lombok.EqualsAndHashCode;
 
 /**
  * 证书申请单审批轨迹（按步留痕：SUBMIT/ASSIGN/APPROVE/REJECT/ISSUE/CANCEL/URGE）。
@@ -16,8 +14,9 @@ import java.time.LocalDateTime;
  * 操作人、前后状态与意见，供申请详情页展示"当前环节 / 下一审批人"时间线。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_application_trail")
-public class ApplicationTrail {
+public class ApplicationTrail extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -35,10 +34,11 @@ public class ApplicationTrail {
     /** 步骤：SUBMIT/ASSIGN/APPROVE/REJECT/ISSUE/CANCEL/URGE */
     private String step;
 
-    /** 操作人账号 */
-    private String operatorUsername;
+    /** 操作人ID（ssl_sys_user.id；对外 API 通道无人可指，为 NULL。展示走 operatorRealName） */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long operatorUserId;
 
-    /** 操作人真实姓名 */
+    /** 操作人真实姓名（写入时快照，不回查用户表） */
     private String operatorRealName;
 
     /** 操作人角色编码 */
@@ -52,7 +52,4 @@ public class ApplicationTrail {
 
     /** 意见/备注 */
     private String comment;
-
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 }

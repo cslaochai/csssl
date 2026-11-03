@@ -25,13 +25,13 @@ import java.util.Set;
  *   <li>OPERATOR       CA操作员：录入证书申请、执行签发（签发与审核分离）</li>
  *   <li>APPROVER       审核员：审核证书申请（不得与录入同一人）</li>
  *   <li>AUDITOR        审计员：仅可查看审计与证书，不可签发/审核，独立于业务操作</li>
- *   <li>SECURITY_ADMIN 安全管理员：证书模板/证书策略（KeyUsage/EKU/策略OID）管理</li>
- *   <li>KEY_ADMIN      密钥管理员：根密钥门限分持/封存/解封（份额保管与恢复）</li>
- *   <li>COMPANY_ADMIN      公司管理员：新建公司直接执行（开公司即建根），发起暂停/恢复/关闭/接入密钥重置变更单，API 客户端登记与轮换</li>
+ *   <li>SECURITY_ADMIN 安全管理员：证书模板/证书策略（KeyUsage/EKU/策略OID）管理；平台侧承接二级CA重建的发起与执行</li>
+ *   <li>KEY_ADMIN      密钥管理员：根密钥门限分持/封存/解封（份额保管与恢复）；在审批中心投票并交出本人份额，不参与发起与执行</li>
+ *   <li>COMPANY_ADMIN      公司管理员：新建公司直接执行（开公司即建根），发起暂停/恢复/关闭/接入密钥重置变更单，API 客户端登记与轮换；本公司二级CA重建的发起与执行</li>
  *   <li>COMPANY_APPROVER   公司审批员：审批公司变更单（不得与发起人同一人），不参与发起</li>
  *   <li>USER_ADMIN     用户与角色管理员：账号与角色档案维护（建号、改角色、启停、授权）</li>
  *   <li>RA_ADMIN       RA业务管理员：RA 操作员账号与审核流程配置（与录入分离）</li>
- *   <li>CERT_OFFICER   证书签发操作员：仅执行证书签发/吊销/挂起/更新/换密钥/下载（不含申请录入）</li>
+ *   <li>CERT_OFFICER   证书签发操作员：对已批准申请执行签发，以及发起吊销/挂起/更新/换密钥操作单与下载（不含申请录入与审核）</li>
  *   <li>AUDIT_ADMIN    审计管理员：管理审计员账号与审计策略配置，独立于业务操作</li>
  * </ul>
  */
@@ -44,28 +44,30 @@ public enum RoleCodeEnum {
             PermissionCatalog.MENU_COMPANIES, PermissionCatalog.MENU_COMPANY_OPS,
             PermissionCatalog.MENU_ROOT_CA, PermissionCatalog.MENU_TEMPLATES,
             PermissionCatalog.MENU_USERS, PermissionCatalog.MENU_ROLES, PermissionCatalog.MENU_AUDIT,
+            PermissionCatalog.MENU_APPROVAL_CENTER, PermissionCatalog.MENU_MY_APPROVALS,
             PermissionCatalog.CERT_LIST, PermissionCatalog.USER_LIST, PermissionCatalog.AUDIT_VIEW,
             PermissionCatalog.CA_SHARE_VIEW,
-            PermissionCatalog.CA_SHARE_ASSIGN, PermissionCatalog.CA_SUBCA_REBUILD_APPLY,
-            PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE,
+            PermissionCatalog.CA_SUBCA_REBUILD_VIEW,
             PermissionCatalog.USER_CREATE, PermissionCatalog.USER_UPDATE,
             PermissionCatalog.APP_LIST_APPROVERS)),
 
-    OPERATOR("OPERATOR", "CA操作员", "证书申请录入、签发、吊销/挂起/更新；签发与审核分离", 20, true, set(
+    OPERATOR("OPERATOR", "CA操作员", "证书申请录入、对已批准申请执行签发、发起吊销/挂起/更新操作单；签发与审核分离", 20, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
             PermissionCatalog.MENU_CRL, PermissionCatalog.MENU_OCSP,             PermissionCatalog.MENU_TSA,
             PermissionCatalog.APP_SUBMIT, PermissionCatalog.APP_ISSUE, PermissionCatalog.APP_CANCEL,
-            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_ISSUE, PermissionCatalog.CERT_REVOKE,
+            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_REVOKE,
             PermissionCatalog.CERT_SUSPEND, PermissionCatalog.CERT_RENEW, PermissionCatalog.CERT_REKEY,
             PermissionCatalog.CERT_DOWNLOAD, PermissionCatalog.CRL_DOWNLOAD,
-            PermissionCatalog.APP_URGE, PermissionCatalog.APP_LIST_APPROVERS)),
+            PermissionCatalog.APP_URGE, PermissionCatalog.APP_LIST_APPROVERS,
+            PermissionCatalog.MENU_MY_APPROVALS)),
 
     APPROVER("APPROVER", "审核员", "审核证书申请与证书操作单（吊销/挂起复核）；不得与发起人同一人", 30, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
             PermissionCatalog.MENU_CRL,
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
             PermissionCatalog.APP_APPROVE, PermissionCatalog.APP_REJECT,
-            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_OP_APPROVE)),
+            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_OP_APPROVE,
+            PermissionCatalog.MENU_MY_APPROVALS)),
 
     AUDITOR("AUDITOR", "审计员", "审计日志查询/验签/归档；只读，不可签发/审核，独立于业务操作", 40, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_CRL, PermissionCatalog.MENU_OCSP,
@@ -73,10 +75,13 @@ public enum RoleCodeEnum {
             PermissionCatalog.AUDIT_VIEW, PermissionCatalog.AUDIT_VERIFY, PermissionCatalog.AUDIT_CHAIN,
             PermissionCatalog.AUDIT_EXPORT)),
 
-    SECURITY_ADMIN("SECURITY_ADMIN", "安全管理员", "证书模板与证书策略（KeyUsage/EKU/策略OID）管理", 50, true, set(
+    SECURITY_ADMIN("SECURITY_ADMIN", "安全管理员", "证书模板与证书策略（KeyUsage/EKU/策略OID）管理；二级CA重建申请的发起与执行（平台侧应急通道）", 50, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_TEMPLATES, PermissionCatalog.MENU_CRL,
-            PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
-            PermissionCatalog.TEMPLATE_CREATE, PermissionCatalog.TEMPLATE_UPDATE, PermissionCatalog.TEMPLATE_DELETE)),
+            PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA, PermissionCatalog.MENU_APPROVAL_CENTER,
+            PermissionCatalog.MENU_MY_APPROVALS,
+            PermissionCatalog.TEMPLATE_CREATE, PermissionCatalog.TEMPLATE_UPDATE, PermissionCatalog.TEMPLATE_DELETE,
+            PermissionCatalog.CA_SUBCA_REBUILD_VIEW, PermissionCatalog.CA_SUBCA_REBUILD_APPLY,
+            PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE)),
 
     KEY_ADMIN("KEY_ADMIN", "密钥管理员", "根密钥门限分持/封存/解封与份额保管", 60, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_CERTS, PermissionCatalog.MENU_ROOT_CA,
@@ -85,21 +90,26 @@ public enum RoleCodeEnum {
             PermissionCatalog.CA_INIT, PermissionCatalog.CA_SEAL, PermissionCatalog.CA_UNSEAL,
             PermissionCatalog.CA_SHARE_VIEW, PermissionCatalog.CA_SHARE_DOWNLOAD, PermissionCatalog.CA_SHARE_MIGRATE,
             PermissionCatalog.CA_SHARE_UNSEAL, PermissionCatalog.CA_ROOT_DOWNLOAD, PermissionCatalog.CA_SUBCA_DOWNLOAD,
-            PermissionCatalog.CA_SHARE_ASSIGN, PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE,
+            PermissionCatalog.CA_SUBCA_REBUILD_VIEW,
+            PermissionCatalog.MENU_COMPANY_OPS,
+            PermissionCatalog.MENU_APPROVAL_CENTER, PermissionCatalog.MENU_MY_APPROVALS,
             PermissionCatalog.CRL_DOWNLOAD)),
 
-    COMPANY_ADMIN("COMPANY_ADMIN", "公司管理员", "新建公司直接执行（开公司即建独立根CA+SUB_CA、发接入凭证）；发起暂停/恢复/关闭/重置接入密钥变更单，API 客户端登记与轮换", 70, true, set(
+    COMPANY_ADMIN("COMPANY_ADMIN", "公司管理员", "新建公司直接执行（开公司即建独立根CA+SUB_CA、发接入凭证）；发起暂停/恢复/关闭/重置接入密钥及重新指派保管人变更单，API 客户端登记与轮换", 70, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_COMPANIES, PermissionCatalog.MENU_COMPANY_OPS,
             PermissionCatalog.MENU_CRL,
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
             PermissionCatalog.COMPANY_CREATE, PermissionCatalog.COMPANY_OP_APPLY,
             PermissionCatalog.APICLIENT_MANAGE,
-            PermissionCatalog.CA_SHARE_VIEW, PermissionCatalog.CA_SUBCA_REBUILD_APPLY,
-            PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE)),
+            PermissionCatalog.CA_SHARE_VIEW, PermissionCatalog.CA_SHARE_ASSIGN, PermissionCatalog.CA_SUBCA_REBUILD_VIEW,
+            PermissionCatalog.CA_SUBCA_REBUILD_APPLY,
+            PermissionCatalog.CA_SUBCA_REBUILD_EXECUTE, PermissionCatalog.MENU_APPROVAL_CENTER,
+            PermissionCatalog.MENU_MY_APPROVALS)),
 
     COMPANY_APPROVER("COMPANY_APPROVER", "公司审批员", "审批公司变更单（暂停/恢复/关闭/接入密钥重置），批准即执行；不得与发起人同一人", 75, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_COMPANIES, PermissionCatalog.MENU_COMPANY_OPS,
-            PermissionCatalog.COMPANY_OP_APPROVE)),
+            PermissionCatalog.COMPANY_OP_APPROVE,
+            PermissionCatalog.MENU_MY_APPROVALS)),
 
     USER_ADMIN("USER_ADMIN", "用户与角色管理员", "管理账号与角色档案（建号、改角色、启停、重置口令、角色授权）", 80, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_USERS, PermissionCatalog.MENU_ROLES,
@@ -112,14 +122,18 @@ public enum RoleCodeEnum {
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
             PermissionCatalog.APP_APPROVE, PermissionCatalog.APP_REJECT, PermissionCatalog.APP_CANCEL,
             PermissionCatalog.USER_LIST, PermissionCatalog.USER_CREATE, PermissionCatalog.USER_UPDATE,
-            PermissionCatalog.APP_URGE, PermissionCatalog.APP_LIST_APPROVERS)),
+            PermissionCatalog.APP_URGE, PermissionCatalog.APP_LIST_APPROVERS,
+            PermissionCatalog.MENU_MY_APPROVALS)),
 
-    CERT_OFFICER("CERT_OFFICER", "证书签发操作员", "仅执行证书签发/吊销/挂起/更新/换密钥/下载（不含申请录入）", 100, true, set(
-            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_CERTS, PermissionCatalog.MENU_CRL,
+    CERT_OFFICER("CERT_OFFICER", "证书签发操作员", "对已批准申请执行签发，以及发起吊销/挂起/更新/换密钥操作单与下载（不含申请录入与审核）", 100, true, set(
+            PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_APPLICATIONS, PermissionCatalog.MENU_CERTS,
+            PermissionCatalog.MENU_CRL,
             PermissionCatalog.MENU_OCSP, PermissionCatalog.MENU_TSA,
-            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_ISSUE, PermissionCatalog.CERT_REVOKE,
+            PermissionCatalog.APP_ISSUE,
+            PermissionCatalog.CERT_LIST, PermissionCatalog.CERT_REVOKE,
             PermissionCatalog.CERT_SUSPEND, PermissionCatalog.CERT_RENEW, PermissionCatalog.CERT_REKEY,
-            PermissionCatalog.CERT_DOWNLOAD, PermissionCatalog.CRL_DOWNLOAD)),
+            PermissionCatalog.CERT_DOWNLOAD, PermissionCatalog.CRL_DOWNLOAD,
+            PermissionCatalog.MENU_MY_APPROVALS)),
 
     AUDIT_ADMIN("AUDIT_ADMIN", "审计管理员", "管理审计员账号与审计策略配置，独立于业务操作", 110, true, set(
             PermissionCatalog.MENU_DASHBOARD, PermissionCatalog.MENU_AUDIT, PermissionCatalog.MENU_USERS,

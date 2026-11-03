@@ -6,6 +6,7 @@ import com.csssl.dto.TemplateCreateDTO;
 import com.csssl.dto.TemplateUpdateDTO;
 import com.csssl.entity.CaCompany;
 import com.csssl.entity.CertTemplate;
+import com.csssl.entity.LoginUser;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.util.CertUtil;
 import lombok.RequiredArgsConstructor;
@@ -130,7 +131,7 @@ public class CertTemplateService {
      * tplCompany=模板归属域：公司操作者已由 effectiveCompany 锁本公司；全局操作者传 null=全局模板、
      * 非空=为该公司建模板（公司必须存在）。
      */
-    public CertTemplate create(TemplateCreateDTO body, String operator, String ip,
+    public CertTemplate create(TemplateCreateDTO body, LoginUser actor, String ip,
                                String tplCompany, String operatorCompany) {
         if (tplCompany != null && !tplCompany.isBlank()) {
             companyService.get(tplCompany);
@@ -162,7 +163,7 @@ public class CertTemplateService {
             throw new IllegalArgumentException("模板编码已存在：" + tpl.getTemplateCode());
         }
         templateMapper.insert(tpl);
-        auditService.record(operator, "TEMPLATE_CREATE", String.valueOf(tpl.getId()),
+        auditService.record(actor, "TEMPLATE_CREATE", String.valueOf(tpl.getId()),
                 "创建证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
                         + "，类型=" + tpl.getCertType() + "，算法=" + tpl.getAlgorithm()
                         + "，有效期=" + tpl.getValidityDays() + "天"
@@ -178,7 +179,7 @@ public class CertTemplateService {
      * 数据域：公司操作者（operatorCompany 非空）仅可改本公司模板，全局模板与其他公司模板不可触碰；
      * 全局操作者可改全局模板与各公司模板。
      */
-    public CertTemplate update(Long id, TemplateUpdateDTO body, String operator, String ip, String operatorCompany) {
+    public CertTemplate update(Long id, TemplateUpdateDTO body, LoginUser actor, String ip, String operatorCompany) {
         CertTemplate tpl = detail(id);
         requireManaged(tpl, operatorCompany);
         // 变更前后快照对比，审计 detail 只记真正变化的关键项
@@ -230,7 +231,7 @@ public class CertTemplateService {
         addChange(changes, "EKU", oldEku, tpl.getExtKeyUsage());
         addChange(changes, "策略OID", oldPolicyOid, tpl.getPolicyOid());
         addChange(changes, "描述", oldDescription, tpl.getDescription());
-        auditService.record(operator, "TEMPLATE_UPDATE", String.valueOf(id),
+        auditService.record(actor, "TEMPLATE_UPDATE", String.valueOf(id),
                 "更新证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
                         + (changes.isEmpty() ? "，无字段变化" : "；变化：" + String.join("；", changes)),
                 ip, rowCompany(tpl));
@@ -241,14 +242,14 @@ public class CertTemplateService {
      * 删除模板（仅安全管理员/系统管理员；内置模板不可删除）。
      * 数据域：公司操作者仅可删本公司模板；全局操作者可删各公司自定义模板（全局模板同样受内置保护）。
      */
-    public void delete(Long id, String operator, String ip, String operatorCompany) {
+    public void delete(Long id, LoginUser actor, String ip, String operatorCompany) {
         CertTemplate tpl = detail(id);
         requireManaged(tpl, operatorCompany);
         if (tpl.getBuiltin() != null && tpl.getBuiltin() == 1) {
             throw new IllegalArgumentException("内置模板（" + tpl.getTemplateCode() + "）不可删除，可停用或改参数");
         }
         templateMapper.deleteById(id);
-        auditService.record(operator, "TEMPLATE_DELETE", String.valueOf(id),
+        auditService.record(actor, "TEMPLATE_DELETE", String.valueOf(id),
                 "删除证书模板：" + tpl.getTemplateCode() + "（" + tpl.getTemplateName() + "）"
                         + "，类型=" + tpl.getCertType() + "，算法=" + tpl.getAlgorithm()
                         + "，有效期=" + tpl.getValidityDays() + "天", ip, rowCompany(tpl));

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
@@ -16,8 +17,9 @@ import java.time.LocalDateTime;
  * 新公司首次发布时按 max(id)+1 补建本公司行（id 列无 AUTO_INCREMENT，代码显式生成）。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_crl_state")
-public class CrlState {
+public class CrlState extends AuditColumns {
 
     /**
      * default 公司存量约定行 id（历史单行时代固定 id=1，保持不动）
@@ -59,10 +61,4 @@ public class CrlState {
      * 增量 CRL 指向的基础全量编号
      */
     private Long deltaBaseNumber;
-
-    /**
-     * 行更新时间（DDL ON UPDATE CURRENT_TIMESTAMP 维护，代码侧只读）
-     */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime updatedAt;
 }

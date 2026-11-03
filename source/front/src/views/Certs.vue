@@ -20,6 +20,7 @@
                        @change="handleSearch">
               <el-option label="服务端" value="SERVER"/>
               <el-option label="客户端" value="CLIENT"/>
+              <el-option label="根CA" value="ROOT"/>
               <el-option label="二级CA" value="SUB_CA"/>
             </el-select>
           </el-form-item>
@@ -46,11 +47,6 @@
             <el-button :icon="Refresh" @click="handleReset">重置</el-button>
           </el-form-item>
         </el-form>
-        <div class="query-actions">
-          <template v-if="canIssue">
-            <el-button v-perm="'cert:issue'" type="primary" @click="openIssue">签发证书</el-button>
-          </template>
-        </div>
       </div>
     </el-card>
 
@@ -80,37 +76,17 @@
           </template>
         </el-table-column>
         <el-table-column label="用途说明" min-width="140" prop="description" show-overflow-tooltip/>
-        <el-table-column align="right" fixed="right" label="操作" width="360">
+        <el-table-column align="right" fixed="right" label="操作" :width="actionColWidth">
           <template #default="{ row }">
             <el-button
-                v-for="a in visibleRowActions(row)"
+                v-for="a in certActions(row)"
                 :key="a.label"
-                :disabled="a.disabled"
                 :type="a.type || 'primary'"
                 link
                 size="small"
                 @click="a.run()"
             >{{ a.label }}
             </el-button>
-            <el-dropdown v-if="moreRowActions(row).length" trigger="click" @command="cmd => cmd.run()">
-              <el-button link size="small" type="primary">
-                更多
-                <el-icon class="el-icon--right">
-                  <ArrowDown/>
-                </el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item
-                      v-for="a in moreRowActions(row)"
-                      :key="a.label"
-                      :command="a"
-                      :disabled="a.disabled"
-                  >{{ a.label }}
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -126,53 +102,6 @@
         />
       </div>
     </el-card>
-
-    <!-- 签发证书 -->
-    <el-dialog v-model="issueVisible" :close-on-click-modal="false" title="签发证书" width="640px">
-      <el-form :model="issueForm" label-width="150px">
-        <el-form-item label="目标公司" required>
-          <el-select v-model="issueForm.companyUscc" placeholder="选择公司" style="width: 100%">
-            <el-option
-                v-for="o in companyOptions"
-                :key="o.uscc"
-                :label="o.companyName ? `${o.companyName}（${o.uscc}）` : o.uscc"
-                :value="o.uscc"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="主体CN" required>
-          <el-input v-model="issueForm.subjectCn" placeholder="仅填主体CN，如 his.yibao.local（主体归属由所选公司附加）"/>
-        </el-form-item>
-        <el-form-item label="证书类型">
-          <el-radio-group v-model="issueForm.certType">
-            <el-radio-button value="SERVER">服务端</el-radio-button>
-            <el-radio-button value="CLIENT">客户端</el-radio-button>
-            <el-radio-button value="SUB_CA">二级CA</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="算法">
-          <el-radio-group v-model="issueForm.algorithm">
-            <el-radio-button value="RSA2048">RSA 2048</el-radio-button>
-            <el-radio-button value="SM2">SM2 国密</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="有效期(天)">
-          <el-input-number v-model="issueForm.validityDays" :max="36500" :min="1"/>
-        </el-form-item>
-        <el-form-item label="主体别名（SAN）">
-          <el-input v-model="issueForm.san" placeholder="逗号分隔：DNS或IP，如 his.cslk.local,192.168.1.10"/>
-        </el-form-item>
-        <el-form-item label="用途说明">
-          <el-input v-model="issueForm.description" :rows="2" placeholder="颁发给哪个子系统/服务" type="textarea"/>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="issueVisible = false">取消</el-button>
-          <el-button :loading="submitting" type="primary" @click="onIssue">签发</el-button>
-        </div>
-      </template>
-    </el-dialog>
 
     <!-- 挂起（发起操作单，待他人审批后执行） -->
     <el-dialog v-model="suspendVisible" :close-on-click-modal="false" title="发起挂起操作单（GM/T 0034 §12.6，可解除）"
@@ -206,7 +135,7 @@
         {{
           renewAction === 'renew'
               ? `为证书 ${renewTarget?.subjectCn} 发起更新申请：批准后原证书吊销（SUPERSEDED），以其公钥重签新证书（私钥仍由持有方自持）。`
-              : `为证书 ${renewTarget?.subjectCn} 发起重签申请：批准后原证书吊销（SUPERSEDED），由 CA 生成新密钥对重签（仅限私钥在 CA 侧的在线签发证书）。`
+              : `为证书 ${renewTarget?.subjectCn} 发起重签申请：批准后原证书吊销（SUPERSEDED），由 CA 生成新密钥对重签（仅限 CA 侧代持私钥的历史证书）。`
         }}
         提交后生成待审批操作单，由持审批权限的其他人员批准后才实际执行。
       </p>
@@ -271,6 +200,61 @@
       </template>
     </el-dialog>
 
+    <!-- 该公司的签发链：根CA 置顶，向下辐射各二级CA（含已过期/被接管的，便于看历史） -->
+    <el-dialog v-model="subCaVisible" :close-on-click-modal="false"
+               :title="`证书签发链（${subCaRoot?.companyName || subCaRoot?.companyUscc || '全局'}）`" width="960px">
+      <div v-loading="subCaLoading" class="cert-tree">
+        <div class="tree-scroll">
+          <div v-if="subCaRoot" class="tree-inner">
+            <div class="cert-node is-root" :class="{'is-dead': subCaRoot.status !== 'VALID'}">
+              <div class="node-head">
+                <span class="node-kind">根CA</span>
+                <el-tag :type="statusTag(subCaRoot.status)" disable-transitions size="small">{{ statusText(subCaRoot.status) }}</el-tag>
+              </div>
+              <div class="node-cn" :title="subCaRoot.subjectCn">{{ subCaRoot.subjectCn }}</div>
+              <div class="node-meta">
+                <div class="meta-row"><span class="meta-label">算法</span><span>{{ subCaRoot.algorithm }}</span></div>
+                <div class="meta-row"><span class="meta-label">序列号</span>
+                  <span class="meta-mono" :title="subCaRoot.serialHex">{{ subCaRoot.serialHex }}</span></div>
+                <div class="meta-row"><span class="meta-label">生效</span><span>{{ subCaRoot.validFrom }}</span></div>
+                <div class="meta-row"><span class="meta-label">到期</span><span>{{ subCaRoot.validTo }}</span></div>
+              </div>
+              <div class="node-acts">
+                <el-button v-for="a in nodeActions(subCaRoot)" :key="a.label" :type="a.type || 'primary'" link
+                           size="small" @click="a.run()">{{ a.label }}
+                </el-button>
+              </div>
+            </div>
+            <div class="tree-link-v"/>
+            <div v-if="subCaRows.length" class="tree-branches">
+              <div v-for="row in subCaRows" :key="row.id" class="tree-branch">
+                <div class="cert-node" :class="{'is-dead': row.status !== 'VALID'}">
+                  <div class="node-head">
+                    <span class="node-kind">二级CA</span>
+                    <el-tag :type="statusTag(row.status)" disable-transitions size="small">{{ statusText(row.status) }}</el-tag>
+                  </div>
+                  <div class="node-cn" :title="row.subjectCn">{{ row.subjectCn }}</div>
+                  <div class="node-meta">
+                    <div class="meta-row"><span class="meta-label">算法</span><span>{{ row.algorithm }}</span></div>
+                    <div class="meta-row"><span class="meta-label">序列号</span>
+                      <span class="meta-mono" :title="row.serialHex">{{ row.serialHex }}</span></div>
+                    <div class="meta-row"><span class="meta-label">生效</span><span>{{ row.validFrom }}</span></div>
+                    <div class="meta-row"><span class="meta-label">到期</span><span>{{ row.validTo }}</span></div>
+                  </div>
+                  <div class="node-acts">
+                    <el-button v-for="a in nodeActions(row)" :key="a.label" :type="a.type || 'primary'" link
+                               size="small" @click="a.run()">{{ a.label }}
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="!subCaLoading" class="empty-tip">暂无匹配的二级CA</div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
     <!-- 证书详情（行点击） -->
     <el-dialog v-model="detailVisible" title="证书详情" width="600px">
       <el-descriptions :column="1" border>
@@ -292,7 +276,7 @@
           }}
         </el-descriptions-item>
         <el-descriptions-item label="签发人">{{
-            detail?.createdByName || detail?.createdBy || '-'
+            detail?.createdByName || '无'
           }}
         </el-descriptions-item>
         <el-descriptions-item label="用途说明">{{ detail?.description || '无' }}</el-descriptions-item>
@@ -302,15 +286,14 @@
 </template>
 
 <script setup>
-import {onMounted, reactive, ref} from 'vue'
+import {computed, onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {ArrowDown, Refresh, Search} from '@element-plus/icons-vue'
+import {Refresh, Search} from '@element-plus/icons-vue'
 import {
   downloadCertPem,
   downloadCertZip,
   downloadKeyPem,
   exportCertP12,
-  issueCert,
   listCompaniesCached,
   pageCerts,
   submitCertOp
@@ -323,26 +306,21 @@ import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 // 按钮权限点与后端接口校验一一对应；旧会话（无权限缓存）回退角色判断，服务端仍强校验
 const role = localStorage.getItem('role') || ''
 const permLoaded = permReady()
-const canIssue = permLoaded ? hasPerm('cert:issue') : role === 'OPERATOR'
 const canDownloadCert = permLoaded ? hasPerm('cert:download') : ['OPERATOR', 'CERT_OFFICER'].includes(role)
 const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : role === 'KEY_ADMIN'
 
-// 公司域由页面显式选择：列表可留空=跨公司只读，签发/操作单必须指定目标公司
+// 公司域由页面显式选择：列表可留空=跨公司只读，操作单必须指定目标公司
+// 本页是台账不是发证入口：直发已删除，发证只剩 RA 证书申请与二级CA重建申请
 const companyOptions = ref([])
-
-function defaultCompany() {
-  return companyOptions.value.find(o => o.status === 'ACTIVE')?.uscc || companyOptions.value[0]?.uscc || ''
-}
 
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, companyUscc: '', certType: '', status: '', keyword: ''})
+const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, companyUscc: '', certType: '', status: 'VALID', keyword: ''})
 
 // 两卡式列表页：表格只设最大高度，超高内部滚动
 const {queryCardRef, footerRef, tableMaxHeight} = useTableMaxHeight()
 
-const issueVisible = ref(false)
 const revokeVisible = ref(false)
 const revokeTarget = ref(null)
 const revokeReason = ref('KEY_COMPROMISE')
@@ -359,18 +337,10 @@ const p12Password = ref('')
 const submitting = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
-
-const defaultDays = 365
-
-const issueForm = reactive({
-  companyUscc: '',
-  subjectCn: '',
-  certType: 'SERVER',
-  algorithm: 'RSA2048',
-  validityDays: defaultDays,
-  san: '',
-  description: ''
-})
+const subCaVisible = ref(false)
+const subCaRoot = ref(null)
+const subCaRows = ref([])
+const subCaLoading = ref(false)
 
 function typeText(t) {
   return {SERVER: '服务端', CLIENT: '客户端', SUB_CA: '二级CA', ROOT: '根CA'}[t] || t
@@ -393,52 +363,81 @@ function onRowDetail(row) {
   detailVisible.value = true
 }
 
-// 操作列口径：前 3 个平铺，其余收进「更多」下拉（列表页统一模式）
-const ACTION_VISIBLE = 3
+// 该公司的二级CA：主列表不铺开，点根CA行的「二级CA」按公司取（含已过期/被接管的，便于看历史）
+async function openSubCaList(root) {
+  subCaRoot.value = root
+  subCaVisible.value = true
+  subCaLoading.value = true
+  try {
+    const res = await pageCerts({
+      pageNo: 1,
+      pageSize: 50,
+      certType: 'SUB_CA',
+      companyUscc: root.companyUscc || undefined
+    })
+    const list = res.data.records || []
+    // 存量 default 域根证书未挂公司编码时，按签发者兜底，避免跨公司串数据
+    subCaRows.value = root.companyUscc ? list : list.filter(x => x.issuerCn === root.subjectCn)
+  } catch (e) {
+    subCaRows.value = []
+  } finally {
+    subCaLoading.value = false
+  }
+}
+
+// 操作列口径：只渲染当前这一行真能做的动作（不合规的直接不出现，不置灰）；全部平铺，不再折叠成「更多」
+const LEAF_TYPES = ['SERVER', 'CLIENT']
 
 function certActions(row) {
+  const isLeaf = LEAF_TYPES.includes(row.certType)
+  const usable = row.status === 'VALID'
   const acts = [{label: '详情', run: () => onRowDetail(row)}]
+  // 证书本体任何状态都可下载（历史验签、审计留档都要用）
   if (canDownloadCert) acts.push({label: '下载证书', run: () => onDownloadCert(row)})
-  // 导出 ZIP：线下场景给 HIS 等外部系统导入（不加密，内含证书链 PEM）
-  if (canDownloadCert) acts.push({label: '导出ZIP', run: () => onDownloadZip(row)})
-  // 私钥类操作只对 CA 侧落了私钥的证书开放（走 RA 申请签发的证书私钥由申请人自持，CA 无钥可下载）
-  if (canDownloadKey && row.keyHeld) acts.push({label: '下载私钥', run: () => onDownloadKey(row)})
-  if (canDownloadKey && row.keyHeld && ['SERVER', 'CLIENT'].includes(row.certType)) {
+  // 导出 ZIP / P12 是把证书交付业务系统「接着用」，只对仍在有效期内的终端证书有意义
+  if (canDownloadCert && isLeaf && usable) acts.push({label: '导出ZIP', run: () => onDownloadZip(row)})
+  // 私钥类操作只对 CA 侧落了私钥的证书开放（走 RA 申请签发的证书私钥由申请人自持，CA 无钥可下载）；
+  // 已吊销 = 密钥已宣告作废，不再外发
+  if (canDownloadKey && row.keyHeld && row.status !== 'REVOKED') acts.push({label: '下载私钥', run: () => onDownloadKey(row)})
+  if (canDownloadKey && row.keyHeld && isLeaf && usable) {
     acts.push({label: '导出P12', run: () => openExportP12(row)})
   }
-  if (hasPerm('cert:suspend')) {
-    if (row.status === 'VALID') {
-      acts.push({label: '挂起', type: 'warning', disabled: row.certType === 'ROOT', run: () => openSuspend(row)})
-    }
-    if (row.status === 'FROZEN') {
-      acts.push({label: '解除挂起', type: 'success', run: () => onUnsuspend(row)})
-    }
+  // 生命周期操作只针对终端证书：根/二级CA 走「根CA管理」的封存与重建，不在此处挂/吊销/续；
+  // 二级CA 不混排在主列表，由根CA 行的「二级CA」入口按公司查看
+  if (row.certType === 'ROOT') acts.push({label: '二级CA', run: () => openSubCaList(row)})
+  if (!isLeaf) return acts
+  if (hasPerm('cert:suspend') && usable) {
+    acts.push({label: '挂起', type: 'warning', run: () => openSuspend(row)})
+  }
+  if (hasPerm('cert:suspend') && row.status === 'FROZEN') {
+    acts.push({label: '解除挂起', type: 'success', run: () => onUnsuspend(row)})
   }
   if (hasPerm('cert:renew') && ['VALID', 'FROZEN'].includes(row.status)) {
-    acts.push({label: '更新', disabled: row.certType === 'ROOT', run: () => openRenew(row, 'renew')})
+    acts.push({label: '更新', run: () => openRenew(row, 'renew')})
   }
-  if (hasPerm('cert:rekey') && ['VALID', 'FROZEN'].includes(row.status) && row.keyHeld
-      && !['ROOT', 'SUB_CA'].includes(row.certType)) {
+  if (hasPerm('cert:rekey') && ['VALID', 'FROZEN'].includes(row.status) && row.keyHeld) {
     acts.push({label: '重签', run: () => openRenew(row, 'rekey')})
   }
-  if (hasPerm('cert:revoke')) {
-    acts.push({
-      label: '吊销',
-      type: 'danger',
-      disabled: row.status !== 'VALID' || row.certType === 'ROOT',
-      run: () => onRevoke(row)
-    })
+  if (hasPerm('cert:revoke') && usable) {
+    acts.push({label: '吊销', type: 'danger', run: () => onRevoke(row)})
   }
   return acts
 }
 
-function visibleRowActions(row) {
-  return certActions(row).slice(0, ACTION_VISIBLE)
+// 签发链树上的动作：与列表同一口径，但「二级CA」是当前视图自身，树上不再重复
+function nodeActions(row) {
+  return certActions(row).filter(a => a.label !== '二级CA')
 }
 
-function moreRowActions(row) {
-  return certActions(row).slice(ACTION_VISIBLE)
-}
+// 平铺后列宽随行数变化：按主列表最宽的一行估算（汉字 14px / 半角 8px，含按钮间距与单元格内边距）
+const actionColWidth = computed(() => {
+  const widthOf = (row) => certActions(row).reduce((sum, a) => {
+    const px = [...a.label].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 14 : 8), 0)
+    return sum + px + 12
+  }, 0)
+  const widest = rows.value.reduce((max, row) => Math.max(max, widthOf(row)), 0)
+  return widest ? widest + 24 : 120
+})
 
 async function load() {
   loading.value = true
@@ -468,7 +467,7 @@ function handleSearch() {
 function handleReset() {
   query.companyUscc = ''
   query.certType = ''
-  query.status = ''
+  query.status = 'VALID'
   query.keyword = ''
   handleSearch()
 }
@@ -482,40 +481,6 @@ function handleSizeChange(val) {
 function handleCurrentChange(val) {
   query.pageNo = val
   load()
-}
-
-function openIssue() {
-  Object.assign(issueForm, {
-    companyUscc: query.companyUscc || defaultCompany(),
-    subjectCn: '',
-    certType: 'SERVER',
-    algorithm: 'RSA2048',
-    validityDays: defaultDays,
-    san: '',
-    description: ''
-  })
-  issueVisible.value = true
-}
-
-async function onIssue() {
-  if (!issueForm.companyUscc) {
-    ElMessage.warning('请选择目标公司')
-    return
-  }
-  if (!issueForm.subjectCn.trim()) {
-    ElMessage.warning('请填写主体CN')
-    return
-  }
-  submitting.value = true
-  try {
-    const {companyUscc, ...body} = issueForm
-    await issueCert({...body, validityDays: issueForm.validityDays || defaultDays}, companyUscc)
-    ElMessage.success('签发成功，私钥已落盘（管理端可下载）')
-    issueVisible.value = false
-    load()
-  } finally {
-    submitting.value = false
-  }
 }
 
 function onRevoke(row) {
@@ -652,5 +617,145 @@ onMounted(async () => {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;
   word-break: break-all;
+}
+
+/* 签发链树：根CA 居中置顶，连线用等宽分支的伪元素拼出「竖-横-竖」，二级CA 多于可视宽度时横向滚动 */
+.cert-tree {
+  min-height: 300px;
+}
+
+.tree-scroll {
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.tree-inner {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 100%;
+}
+
+.tree-link-v {
+  width: 1px;
+  height: 26px;
+  background: #c9daea;
+}
+
+.tree-branches {
+  display: flex;
+  align-items: flex-start;
+}
+
+.tree-branch {
+  position: relative;
+  width: 268px;
+  padding: 26px 8px 0;
+  box-sizing: border-box;
+}
+
+.tree-branch::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 26px;
+  background: #c9daea;
+}
+
+.tree-branch:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 100%;
+  height: 1px;
+  background: #c9daea;
+}
+
+.cert-node {
+  width: 252px;
+  padding: 10px 12px 8px;
+  background: #fff;
+  border: 1px solid var(--his-card-border);
+  border-radius: 8px;
+  box-shadow: var(--his-shadow-sm);
+}
+
+.cert-node.is-root {
+  width: 300px;
+  border-top: 2px solid var(--his-primary);
+}
+
+.cert-node.is-dead {
+  background: #f7f9fb;
+  box-shadow: none;
+}
+
+.cert-node.is-dead .node-cn {
+  color: #8a97a5;
+}
+
+.node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.node-kind {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--his-title);
+}
+
+.node-cn {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2d3d;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.node-meta {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--his-card-border);
+  font-size: 12px;
+  color: #5a6b7d;
+}
+
+.meta-row {
+  display: flex;
+  gap: 6px;
+  line-height: 1.9;
+}
+
+.meta-label {
+  flex: none;
+  width: 40px;
+  color: #8a97a5;
+}
+
+.meta-mono {
+  font-family: Consolas, Menlo, monospace;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-acts {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--his-card-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
 }
 </style>

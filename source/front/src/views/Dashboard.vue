@@ -80,8 +80,8 @@
             <el-icon>
               <DocumentAdd/>
             </el-icon>
-            <span>签发证书</span>
-            <small>查看证书台账与签发记录</small>
+            <span>证书台账</span>
+            <small>查看证书与签发记录</small>
           </button>
           <button class="quick-item" type="button" @click="$router.push('/crl')">
             <el-icon>

@@ -81,10 +81,10 @@
             <div v-if="row.contactPhone" class="cell-sub">{{ maskPhone(row.contactPhone) }}</div>
           </template>
         </el-table-column>
-        <el-table-column align="right" fixed="right" label="操作" width="100">
+        <el-table-column align="right" fixed="right" label="操作" width="300">
           <template #default="{ row }">
             <el-button
-                v-for="a in visibleRowActions(row)"
+                v-for="a in companyActions(row)"
                 :key="a.label"
                 :disabled="a.disabled"
                 :type="a.type || 'primary'"
@@ -93,25 +93,6 @@
                 @click="a.run()"
             >{{ a.label }}
             </el-button>
-            <el-dropdown v-if="moreRowActions(row).length" trigger="click" @command="cmd => cmd.run()">
-              <el-button link size="small" type="primary">
-                更多
-                <el-icon class="el-icon--right">
-                  <ArrowDown/>
-                </el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item
-                      v-for="a in moreRowActions(row)"
-                      :key="a.label"
-                      :command="a"
-                      :disabled="a.disabled"
-                  >{{ a.label }}
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -254,15 +235,11 @@
         </el-descriptions-item>
         <el-descriptions-item label="说明">{{ detail?.description || '-' }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="密钥保管人">
+          <span v-if="holdersList.length">{{ holderNames }}</span>
+          <span v-else>尚未指定</span>
+        </el-descriptions-item>
       </el-descriptions>
-
-      <el-divider content-position="left">密钥保管人（5 名，一人一份）</el-divider>
-      <el-table v-if="holdersList.length" :data="holdersList" border size="small">
-        <el-table-column label="份额编号" prop="shareIndex" width="100"/>
-        <el-table-column label="姓名" min-width="120" prop="holderRealName"/>
-        <el-table-column label="账号" min-width="140" prop="holderUsername"/>
-      </el-table>
-      <el-empty v-else :image-size="48" description="尚未指定密钥保管人"/>
 
       <template v-if="myShareData">
         <el-divider content-position="left">我的密钥份额（仅本人可见）</el-divider>
@@ -274,30 +251,39 @@
           <el-button size="small" @click="onDownloadMyShare">下载我的份额(JSON)</el-button>
         </div>
       </template>
-      <div v-if="hasPerm('ca:share:assign')" style="margin-top: 10px">
-        <el-button size="small" type="primary" @click="openReassign">重新指定保管人</el-button>
-      </div>
     </el-dialog>
 
-    <!-- 重新指定密钥保管人（仅 ca:share:assign） -->
-    <el-dialog v-model="reassignVisible" :close-on-click-modal="false" title="重新指定密钥保管人" width="680px">
-      <el-alert :closable="false" class="dialog-tip" show-icon title="将重新绑定 5 名根私钥份额保管人（一人一份）；旧绑定会被覆盖。重建二级CA 等动用根私钥的操作将以新保管人名单审批。保管人须为密钥管理员(KEY_ADMIN)角色。"
+    <!-- 重新指派密钥保管人（发起变更单：原 5 名保管人投票 >3 同意后执行，不直接绑定） -->
+    <el-dialog v-model="reassignVisible" :close-on-click-modal="false" title="重新指派密钥保管人" width="680px">
+      <el-alert :closable="false" class="dialog-tip" show-icon
+                title="提交后由该公司原 5 名密钥保管人在「公司变更审批」页逐人投票，同意数超过 3（≥4）自动执行重绑；发起人本人不可作为新保管人。"
                 type="warning"/>
-      <el-form class="op-form" label-width="120px" style="margin-top: 12px">
-        <el-form-item label="密钥保管人(5人)" required>
+      <el-descriptions :column="1" border class="op-desc">
+        <el-descriptions-item label="目标公司">{{ reassignTarget?.companyName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="统一社会信用代码"><span class="cell-mono">{{ reassignTarget?.uscc || '-' }}</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="当前状态">{{ reassignTarget ? statusText(reassignTarget.status) : '-' }}</el-descriptions-item>
+      </el-descriptions>
+      <el-form class="op-form" label-width="120px">
+        <el-form-item label="新保管人(5人)" required>
           <el-select v-model="reassignHolders" :multiple-limit="5" clearable collapse-tags collapse-tags-tooltip filterable
-                     multiple placeholder="指定 5 名根私钥份额保管人" style="width: 100%">
+                     multiple placeholder="指定 5 名新根私钥份额保管人（须为密钥管理员）" style="width: 100%">
             <el-option v-for="u in simpleUsers" :key="u.username"
                        :disabled="u.status !== 1"
                        :label="`${u.realName || u.username}（${u.username}${u.companyUscc ? '' : ' · 平台级'}）`" :value="u.username"/>
           </el-select>
         </el-form-item>
+        <el-form-item label="变更事由" required>
+          <el-input v-model="reassignReason" :rows="3" maxlength="255" placeholder="业务依据（原保管人投票时核对），必填" show-word-limit
+                    type="textarea"/>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button :disabled="reassigning" @click="reassignVisible = false">取消</el-button>
-          <el-button :disabled="reassignHolders.length !== 5" :loading="reassigning" type="primary" @click="onReassign">
-            保存绑定
+          <el-button :disabled="reassignHolders.length !== 5 || !reassignReason.trim()" :loading="reassigning" type="primary"
+                     @click="onSubmitReassign">
+            提交变更单
           </el-button>
         </div>
       </template>
@@ -335,9 +321,8 @@
 <script setup>
 import {computed, onMounted, reactive, ref} from 'vue'
 import {ElMessage} from 'element-plus'
-import {ArrowDown, Plus, Refresh, Search} from '@element-plus/icons-vue'
+import {Plus, Refresh, Search} from '@element-plus/icons-vue'
 import {
-  assignShares,
   createCompany,
   getShareOverview,
   listCompaniesCached,
@@ -355,7 +340,8 @@ const OP_TYPE_LABELS = {
   SUSPEND: '暂停公司',
   RESUME: '恢复公司',
   CLOSE: '关闭公司',
-  RESET_CREDENTIAL: '重置接入密钥'
+  RESET_CREDENTIAL: '重置接入密钥',
+  REASSIGN_HOLDERS: '重新指派保管人'
 }
 
 // ===== 公司列表 =====
@@ -376,10 +362,14 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const holdersList = ref([])
 const myShareData = ref(null)
+// 详情只展示保管人姓名，账号不下发也不展示（可登录凭据的一半）
+const holderNames = computed(() => holdersList.value.map(h => h.holderRealName).filter(Boolean).join('，'))
 const credVisible = ref(false)
 const cred = ref(null)
 const formRef = ref()
 const simpleUsers = ref([])
+// 保管人候选下拉只服务「新建公司」与「重新指派保管人」两个入口，无这两个权限点就不发请求
+const canPickHolders = computed(() => hasPerm('company:create') || hasPerm('ca:share:assign'))
 const form = reactive({
   uscc: '',
   companyName: '',
@@ -494,40 +484,55 @@ function onDownloadMyShare() {
   ElMessage.success('我的份额已导出，请离线保管')
 }
 
-// 重新指定密钥保管人（仅 ca:share:assign；覆盖旧绑定，一人一份）
+// 重新指派保管人（发起变更单：原 5 名保管人投票 >3 同意后执行；不再直接 assignShares）
 const reassignVisible = ref(false)
+const reassignTarget = ref(null)
 const reassignHolders = ref([])
+const reassignReason = ref('')
 const reassigning = ref(false)
 
-function openReassign() {
-  reassignHolders.value = (holdersList.value || []).map(h => h.holderUsername)
+async function openReassignFlow(row) {
+  reassignTarget.value = row
+  reassignHolders.value = []
+  reassignReason.value = ''
   // 候选收敛为「平台级 + 该公司本域」的密钥管理员（服务端按 companyUscc 过滤）
-  loadSimpleUsers(detail.value?.uscc)
+  await loadSimpleUsers(row.uscc)
   reassignVisible.value = true
 }
 
-async function onReassign() {
+async function onSubmitReassign() {
+  const reason = reassignReason.value.trim()
   if (reassignHolders.value.length !== 5) {
-    ElMessage.warning('必须指定恰好 5 名保管人')
+    ElMessage.warning('必须指定恰好 5 名新保管人')
+    return
+  }
+  if (!reason) {
+    ElMessage.warning('请填写变更事由')
     return
   }
   reassigning.value = true
   try {
-    await assignShares({companyUscc: detail.value.uscc, holderUsernames: reassignHolders.value})
-    ElMessage.success('已重新指定 5 名密钥保管人')
+    await submitCompanyOp({
+      opType: 'REASSIGN_HOLDERS',
+      uscc: reassignTarget.value.uscc,
+      reason,
+      newHolders: reassignHolders.value
+    })
+    ElMessage.success('重新指派保管人变更单已提交，待原 5 名保管人在「公司变更审批」页投票（>3 同意后执行）')
     reassignVisible.value = false
-    await loadDetailShares(detail.value.uscc)
+    await afterSubmit()
   } finally {
     reassigning.value = false
   }
 }
 
-// 操作列口径：前 3 个平铺，其余收进「更多」下拉
-const ACTION_VISIBLE = 3
-
-// 公司列表操作：全部是「提交变更单」，不直接执行
+// 公司列表操作：全部是「提交变更单」，不直接执行；按钮全部平铺，不再收进「更多」下拉
 function companyActions(row) {
   const acts = [{label: '详情', run: () => onRowDetail(row)}]
+  // 重新指派保管人：仅公司管理员（ca:share:assign）；提交后由原保管人投票决定，不直接绑定
+  if (row.status === 'ACTIVE' && hasPerm('ca:share:assign')) {
+    acts.push({label: '重新指派保管人', type: 'primary', run: () => openReassignFlow(row)})
+  }
   if (!hasPerm('company:op:apply')) return acts
   if (row.status === 'ACTIVE') {
     acts.push({
@@ -548,14 +553,6 @@ function companyActions(row) {
     acts.push({label: '申请关闭', type: 'danger', run: () => openOp('CLOSE', row)})
   }
   return acts
-}
-
-function visibleRowActions(row) {
-  return companyActions(row).slice(0, ACTION_VISIBLE)
-}
-
-function moreRowActions(row) {
-  return companyActions(row).slice(ACTION_VISIBLE)
 }
 
 async function onCopy(text) {
@@ -690,8 +687,9 @@ async function afterSubmit() {
 
 onMounted(async () => {
   await load()
-  // 保管人下拉：仅开公司/指派保管人权限可见；失败不阻断列表页
-  await loadSimpleUsers()
+  if (canPickHolders.value) {
+    await loadSimpleUsers()
+  }
 })
 
 // 拉取保管人候选（仅密钥管理员 KEY_ADMIN）。

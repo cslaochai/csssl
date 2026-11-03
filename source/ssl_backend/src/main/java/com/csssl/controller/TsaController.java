@@ -24,7 +24,7 @@ public class TsaController {
     @PostMapping("/stamp")
     public Result<StampVO> stamp(@RequestBody TsaStampDTO req, HttpServletRequest request) {
         TsaService.Stamp stamp = tsaService.stamp(req.getDigestHex());
-        tsaService.audit(clientIp(request), stamp.serial(), req.getDigestHex().substring(0, 8), clientIp(request));
+        tsaService.audit(null, stamp.serial(), req.getDigestHex().substring(0, 8), clientIp(request));
         StampVO vo = new StampVO();
         vo.setSerial(stamp.serial());
         vo.setTsaTime(stamp.tsaTime());

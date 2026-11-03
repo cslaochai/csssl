@@ -69,9 +69,8 @@ public class CrlController {
     @GetMapping("/download")
     public String download(@RequestParam(required = false) String companyUscc, HttpServletRequest request) {
         String company = resolveCompany(companyUscc);
-        String username = UserUtils.requireLoginUser().getUsername();
         String crlPem = crlService.publishIfNeeded(company).pem();
-        auditService.record(username, "CRL_DOWNLOAD", null,
+        auditService.record(UserUtils.requireLoginUser(), "CRL_DOWNLOAD", null,
                 "下载CRL吊销列表" + (CaCompany.LEGACY_NAMESPACE.equals(company) ? "" : "（公司 " + company + "）"), clientIp(request));
         return crlPem;
     }

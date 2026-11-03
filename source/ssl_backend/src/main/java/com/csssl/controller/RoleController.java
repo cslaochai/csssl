@@ -129,7 +129,7 @@ public class RoleController {
         role.setCreatedAt(LocalDateTime.now());
         role.setUpdatedAt(LocalDateTime.now());
         roleMapper.insert(role);
-        auditService.record(UserUtils.requireLoginUser().getUsername(), "ROLE_CREATE", code,
+        auditService.record(UserUtils.requireLoginUser(), "ROLE_CREATE", code,
                 "创建自定义角色：" + code, clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
         RoleDetailVO vo = new RoleDetailVO();
         vo.setRoleCode(role.getRoleCode());
@@ -158,7 +158,7 @@ public class RoleController {
         rolePermMapper.delete(new LambdaQueryWrapper<RolePerm>().eq(RolePerm::getRoleCode, role.getRoleCode()));
         roleMapper.deleteById(role.getId());
         permissionService.invalidate(role.getRoleCode());
-        auditService.record(UserUtils.requireLoginUser().getUsername(), "ROLE_DELETE", role.getRoleCode(),
+        auditService.record(UserUtils.requireLoginUser(), "ROLE_DELETE", role.getRoleCode(),
                 "删除自定义角色：" + role.getRoleCode(), clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
         return Result.success("角色已删除", null);
     }
@@ -269,7 +269,7 @@ public class RoleController {
         roleMapper.updateById(role);
         permissionService.invalidate(role.getRoleCode());
         if (!changes.isEmpty()) {
-            auditService.record(UserUtils.requireLoginUser().getUsername(), "ROLE_UPDATE", role.getRoleCode(),
+            auditService.record(UserUtils.requireLoginUser(), "ROLE_UPDATE", role.getRoleCode(),
                     "更新角色 " + role.getRoleCode() + "：" + String.join("；", changes),
                     clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
         }
@@ -282,7 +282,7 @@ public class RoleController {
 
     /**
      * 保存角色权限（菜单+按钮，整表替换）：逐项校验是否存在、是否在法定边界内，变更落审计。
-     * body {"perms":["menu:certs","cert:issue", ...]}
+     * body {"perms":["menu:certs","cert:revoke", ...]}
      */
     @PreAuthorize("hasAuthority('role:perm')")
     @PostMapping("/{roleCode}/perms")
@@ -292,7 +292,7 @@ public class RoleController {
         requireGlobalActor();
         SysRole role = requireRole(roleCode);
         permissionService.save(role.getRoleCode(), saveDTO.getPerms(),
-                UserUtils.requireLoginUser().getUsername(), clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
+                UserUtils.requireLoginUser(), clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
         RoleSavePermsVO vo = new RoleSavePermsVO();
         vo.setRoleCode(role.getRoleCode());
         vo.setPerms(permissionService.effectiveList(role.getRoleCode()));
@@ -301,11 +301,8 @@ public class RoleController {
 
     /** 角色配置属全局管理动作：公司管理员（company_uscc 非空）一律拒绝，防止单公司改动影响全院分权口径 */
     private void requireGlobalActor() {
-        LoginUser loginUser = UserUtils.requireLoginUser();
-        String company = loginUser.getCompanyUscc();
-        if (company != null && !company.isBlank()) {
-            throw new SecurityException("权限不足：角色配置属全局管理动作，仅全局系统管理员可操作");
-        }
+        // 单租户化后账号不再携带公司域，所有持权管理员均视为全局管理员
+        UserUtils.requireLoginUser();
     }
 
     /** 角色必须存在（预置或自定义角色，未知编码按参数错误处理） */

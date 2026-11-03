@@ -7,6 +7,7 @@ import com.csssl.dto.ApplicationAuditDTO;
 import com.csssl.dto.ApplicationPageQueryDTO;
 import com.csssl.dto.ApplicationSubmitDTO;
 import com.csssl.entity.ApplicationTrail;
+import com.csssl.entity.CaCompany;
 import com.csssl.vo.CertVO;
 import com.csssl.entity.CertApplication;
 import com.csssl.entity.LoginUser;
@@ -59,14 +60,14 @@ public class CertApplicationController {
                                               HttpServletRequest request) {
         LoginUser viewer = UserUtils.requireLoginUser();
         return Result.success("查询成功", applicationService.page(query.getPageNo(), query.getPageSize(), query.getStatus(),
-                query.getKeyword(), CompanyScope.readCompanyScope(viewer.getCompanyUscc(), query.getCompanyUscc()), viewer));
+                query.getKeyword(), CompanyScope.readCompanyScope(query.getCompanyUscc()), viewer));
     }
 
     /** 申请单详情（公司用户访问他公司单按不存在处理，不泄露存在性） */
     @GetMapping("/{id}")
     public Result<CertApplication> detail(@PathVariable Long id, HttpServletRequest request) {
         return Result.success("查询成功",
-                applicationService.detailVisible(id, UserUtils.requireLoginUser().getCompanyUscc()));
+                applicationService.detailVisible(id, UserUtils.requireLoginUser()));
     }
 
     /** 提交证书申请（录入员代录；需 操作员/管理员；受理域=effectiveCompany，公司单校验主体 O 受控） */
@@ -76,9 +77,9 @@ public class CertApplicationController {
                                           @RequestParam(required = false) String companyUscc,
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String company = CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc == null || companyUscc.isBlank() ? body.getCompanyUscc() : companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc == null || companyUscc.isBlank() ? body.getCompanyUscc() : companyUscc);
         return Result.success("申请提交成功", applicationService.submit(body,
-                loginUser.getUsername(), loginUser.getRealName(), clientIp(request), company));
+                loginUser, clientIp(request), company));
     }
 
     /** 审核批准（需 审核员/管理员；须为本单被指派人且不得与提交人同一人；申请单必须落在操作者域） */
@@ -90,8 +91,8 @@ public class CertApplicationController {
         LoginUser loginUser = UserUtils.requireLoginUser();
         String comment = body == null ? null : body.getComment();
         CertApplication app = applicationService.approve(id, comment,
-                loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
+                loginUser, clientIp(request),
+                CompanyScope.requireExplicitCompany(companyUscc));
         hisPushService.pushApplication(app);
         return Result.success("已批准", app);
     }
@@ -104,8 +105,8 @@ public class CertApplicationController {
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         CertApplication app = applicationService.reject(id, body.getComment(),
-                loginUser.getUsername(), loginUser.getRealName(), clientIp(request),
-                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
+                loginUser, clientIp(request),
+                CompanyScope.requireExplicitCompany(companyUscc));
         hisPushService.pushApplication(app);
         return Result.success("已驳回", app);
     }
@@ -117,8 +118,8 @@ public class CertApplicationController {
                                 HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         CertVO vo = applicationService.issue(id,
-                loginUser.getUsername(), clientIp(request),
-                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
+                loginUser, clientIp(request),
+                CompanyScope.requireExplicitCompany(companyUscc));
         // 签发已提交：按最新申请单状态推送外部系统（ISSUED 报文带证书 PEM，供其自动回填）
         hisPushService.pushApplication(applicationService.detail(id));
         return Result.success("签发成功", vo);
@@ -131,8 +132,8 @@ public class CertApplicationController {
                                           HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         CertApplication app = applicationService.cancel(id,
-                loginUser.getUsername(), loginUser.getRoleCode(), clientIp(request),
-                CompanyScope.requireExplicitCompany(loginUser.getCompanyUscc(), companyUscc));
+                loginUser, clientIp(request),
+                CompanyScope.requireExplicitCompany(companyUscc));
         hisPushService.pushApplication(app);
         return Result.success("已撤销", app);
     }

@@ -47,7 +47,7 @@ public class ApiClientAdminController {
         LoginUser user = requireGlobalAdmin();
         return Result.success("登记成功，请立即保存 secret（仅展示一次）",
                 clientService.create(body.getCompanyUscc(), body.getClientName(), body.getIpAllowlist(),
-                        body.getClientCertSha256(), user.getUsername(), clientIp(request)));
+                        body.getClientCertSha256(), user, clientIp(request)));
     }
 
     /**
@@ -57,7 +57,7 @@ public class ApiClientAdminController {
     public Result<ApiClientSecretVO> rotate(@PathVariable Long id, HttpServletRequest request) {
         LoginUser user = requireGlobalAdmin();
         return Result.success("已轮换，请立即保存新 secret（仅展示一次）",
-                clientService.rotate(id, user.getUsername(), clientIp(request)));
+                clientService.rotate(id, user, clientIp(request)));
     }
 
     /**
@@ -68,15 +68,12 @@ public class ApiClientAdminController {
                                       HttpServletRequest request) {
         LoginUser user = requireGlobalAdmin();
         return Result.success(enabled ? "已启用" : "已停用",
-                clientService.setStatus(id, enabled, user.getUsername(), clientIp(request)));
+                clientService.setStatus(id, enabled, user, clientIp(request)));
     }
 
     private LoginUser requireGlobalAdmin() {
-        LoginUser user = UserUtils.requireLoginUser();
-        if (user.getCompanyUscc() != null) {
-            throw new SecurityException("权限不足：API 客户端管理仅限全局系统管理员");
-        }
-        return user;
+        // 单租户化后账号不再携带公司域，持权管理员均视为全局管理员
+        return UserUtils.requireLoginUser();
     }
 
     private String clientIp(HttpServletRequest request) {

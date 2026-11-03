@@ -8,16 +8,20 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
 /**
  * 证书申请单（RA 用户注册流程，GM/T 0034 §5.2.2）：
  * 提交（录入员，必须指派审批人）→ 审核批准/驳回（被指派的审核员，不得与录入员同一人）→ 签发（录入员）。
+ *
+ * <p>人员一律以 {@code ssl_sys_user.id} + 真实姓名快照落库：登录账号是凭证，不进业务表。</p>
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_cert_application")
-public class CertApplication {
+public class CertApplication extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -115,12 +119,14 @@ public class CertApplication {
     private String status;
 
     /**
-     * 提交人（录入员，与审核人不得同一人）；存登录账号，用于身份校验
+     * 提交人ID（ssl_sys_user.id，与审核人不得同一人）：用于身份校验与数据域收口；
+     * 对外 API 通道无人可指，为 NULL（客户端名称落在 appliedByName）
      */
-    private String appliedBy;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long appliedByUserId;
 
     /**
-     * 提交人真实姓名（展示用；历史数据可能为 NULL）
+     * 提交人真实姓名（写入时快照，不回查用户表；展示用）
      */
     private String appliedByName;
 
@@ -131,12 +137,13 @@ public class CertApplication {
     private LocalDateTime appliedAt;
 
     /**
-     * 审核人；存登录账号，用于身份校验
+     * 审核人ID（ssl_sys_user.id）：用于身份校验
      */
-    private String reviewedBy;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long reviewedByUserId;
 
     /**
-     * 审核人真实姓名（展示用；历史数据可能为 NULL）
+     * 审核人真实姓名（写入时快照，不回查用户表；展示用）
      */
     private String reviewedByName;
 
@@ -152,12 +159,14 @@ public class CertApplication {
     private String reviewComment;
 
     /**
-     * 提交时指定的具体审批人账号（审批准入闸门：只有该账号可批准/驳回，同时用于列表可见范围与催办收件人）
+     * 提交时指定的具体审批人ID（ssl_sys_user.id；审批准入闸门：只有该用户可批准/驳回，
+     * 同时用于列表可见范围与催办收件人）
      */
-    private String assigneeUsername;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long assigneeUserId;
 
     /**
-     * 指定审批人真实姓名（展示用；登录账号见 assigneeUsername）
+     * 指定审批人真实姓名（写入时快照，不回查用户表；展示用）
      */
     private String assigneeRealName;
 
@@ -168,14 +177,14 @@ public class CertApplication {
     private Boolean reviewable;
 
     /**
+     * 本单可否催办（待审且已指派到具体审批人；列表查询时现算，不落库）
+     */
+    @TableField(exist = false)
+    private Boolean urgeable;
+
+    /**
      * 签发证书ID
      */
     @JsonSerialize(using = ToStringSerializer.class)
     private Long issuedCertId;
-
-    /**
-     * 创建时间
-     */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 }

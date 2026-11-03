@@ -43,13 +43,10 @@ public class CompanyController {
     @PostMapping
     public Result<CompanyCreateVO> create(@Valid @RequestBody CompanyCreateDTO body, HttpServletRequest request) {
         LoginUser user = UserUtils.requireLoginUser();
-        if (user.getCompanyUscc() != null) {
-            throw new SecurityException("权限不足：新建公司仅限全局账号");
-        }
         return Result.success("公司已创建，请立即保存接入凭证（密钥仅展示一次）",
                 companyProvisionService.create(body.getUscc(), body.getCompanyName(), body.getSubjectO(),
                         body.getAlgorithm(), body.getContact(), body.getContactPhone(), body.getDescription(),
-                        body.getShareHolders(), user.getUsername(), clientIp(request)));
+                        body.getShareHolders(), user, clientIp(request)));
     }
 
     /** 公司列表（附各公司根状态：有无根/SUB_CA 有效期/密钥形态 ONLINE/SEALED/SHARES） */

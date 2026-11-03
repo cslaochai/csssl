@@ -11,7 +11,7 @@ import java.util.List;
 public class RolePermsSaveDTO {
 
     /**
-     * 权限点列表（如 ["menu:certs","cert:issue"]）
+     * 权限点列表（如 ["menu:certs","cert:revoke"]）
      */
     private List<String> perms;
 }

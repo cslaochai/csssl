@@ -31,7 +31,7 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 }
 app.use(ElementPlus, { locale: zhCn })
 app.use(router)
-// 按钮级权限指令：v-perm="'cert:issue'" 或 v-perm="['app:approve','app:reject']"（任一命中即显示）
+// 按钮级权限指令：v-perm="'cert:revoke'" 或 v-perm="['app:approve','app:reject']"（任一命中即显示）
 app.directive('perm', {
   mounted(el, binding) {
     if (!hasPerm(binding.value)) {

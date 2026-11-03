@@ -3,22 +3,24 @@ package com.csssl.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
-
-import java.time.LocalDateTime;
+import lombok.EqualsAndHashCode;
 
 /**
  * 根私钥门限份额保管人绑定：建公司/建根时指定 5 名保管人，根私钥 Shamir(3,5) 拆 5 份，一人一份、落表绑定。
  *
- * <p>安全约定：仅保管人本人可读取自身份额（{@code holder_username} 与登录账号一致）；份额 JSON 即
+ * <p>安全约定：仅保管人本人可读取自身份额（{@code holder_user_id} 与登录人 ID 一致）；份额 JSON 即
  * {@link com.csssl.util.ShamirUtil.Share} 序列化，任意 3 份可恢复根私钥。跨公司不可互用（份额按公司目录拆分）。</p>
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_company_key_share")
-public class CompanyKeyShare {
+public class CompanyKeyShare extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
     /**
@@ -32,12 +34,13 @@ public class CompanyKeyShare {
     private int shareIndex;
 
     /**
-     * 份额保管人账号（建根时指定，一人一份）
+     * 份额保管人ID（ssl_sys_user.id，建根时指定，一人一份）
      */
-    private String holderUsername;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long holderUserId;
 
     /**
-     * 保管人真实姓名（展示）
+     * 保管人真实姓名（写入时快照，不回查用户表；展示用）
      */
     private String holderRealName;
 
@@ -45,7 +48,4 @@ public class CompanyKeyShare {
      * 该保管人持有的份额 JSON（index/total/threshold/yHex）
      */
     private String shareJson;
-
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 }

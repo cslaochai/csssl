@@ -1,9 +1,20 @@
 -- =============================================================================
 -- CA根认证中心（csssl）数据库脚本，库：ssl_ca
 -- 与 csmig（mig_gateway）/ cslk HIS 风格一致：utf8mb4、InnoDB、中文注释
+--
+-- 身份口径（不可回退）：登录账号只存在于 ssl_sys_user.username；所有业务表的操作人
+-- 一律存 ssl_sys_user.id + 真实姓名快照，姓名在写入时从登录态落库，读出来直接展示，
+-- 不在运行时回查用户表拼名字。系统自动写入的行 user_id 留空、姓名写「系统」。
+--
+-- 两种落地路径：
+--   1) 清库重建（历史数据清零）：reset.sql → 本文件 → init-key-admins.sql
+--   2) 存量库保数据升级：先跑 migrate-actor-user-id.sql（加列→按账号回填 user_id→
+--      删账号列），再导入本文件补齐其余变更。只跑本文件不会给已存在的表加审计列。
 -- =============================================================================
 
 -- 管理用户：登录鉴权（对齐 cslk sys_user / csmig mig_sys_user 核心字段；初始 admin 账号由 DataInitializer 创建）
+-- ⚠️ 本表是全库唯一存放登录账号（username）的地方：业务表一律只存 user_id + 真实姓名快照，
+--    账号不得出现在任何业务表、审计记录或接口出参里（账号即凭证，泄漏等于给出登录入口）
 CREATE TABLE IF NOT EXISTS ssl_sys_user (
     id               BIGINT       NOT NULL AUTO_INCREMENT,
     username         VARCHAR(64)  NOT NULL COMMENT '登录账号',
@@ -13,7 +24,12 @@ CREATE TABLE IF NOT EXISTS ssl_sys_user (
     status           TINYINT      NOT NULL DEFAULT 1 COMMENT '1-启用 0-禁用',
     last_login_time  DATETIME     NULL COMMENT '最近登录时间',
     last_login_ip    VARCHAR(64)  NULL COMMENT '最近登录IP',
-    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT      NULL COMMENT '创建人ID（ssl_sys_user.id；系统自建为 NULL）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名（系统自建写「系统」）',
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT      NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at       DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA认证中心管理用户';
@@ -34,8 +50,12 @@ CREATE TABLE IF NOT EXISTS ssl_ca_cert (
     revoked_at     DATETIME     NULL COMMENT '吊销时间',
     cert_pem       MEDIUMTEXT   NOT NULL COMMENT '证书PEM（公钥证书，可入库）',
     description    VARCHAR(500) NULL COMMENT '用途说明（颁发给哪个子系统/服务）',
-    created_by     VARCHAR(64)  NOT NULL DEFAULT 'SYSTEM' COMMENT '创建人（管理账号）',
-    created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT   NULL COMMENT '创建人ID（ssl_sys_user.id；建根/自动轮换等系统自动签发为 NULL）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名（系统自动签发写「系统」）',
+    created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT   NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at     DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_serial (serial_hex),
     KEY idx_type_status (cert_type, status),
@@ -44,17 +64,21 @@ CREATE TABLE IF NOT EXISTS ssl_ca_cert (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA证书总账（根CA+签发证书）';
 
 -- 操作审计日志：登录/签发/吊销/导出等管理操作留痕，等保审计用
+-- 本表自身即审计记录（谁/何时/做了什么），只追加不修改，故不再另设通用「创建人/修改人」审计列。
+-- ⚠️ 操作人只存 user_id + 姓名快照，绝不存登录账号。
 CREATE TABLE IF NOT EXISTS ssl_audit_log (
     id         BIGINT       NOT NULL AUTO_INCREMENT,
-    username   VARCHAR(64)  NOT NULL COMMENT '操作人',
+    user_id    BIGINT       NULL COMMENT '操作人ID（ssl_sys_user.id；系统/对外API通道为 NULL）',
+    real_name  VARCHAR(64)  NULL COMMENT '操作人真实姓名（展示口径，写入时快照，不回查用户表）',
     action     VARCHAR(32)  NOT NULL COMMENT '操作：LOGIN/LOGOUT/CA_INIT/CERT_ISSUE/CERT_CSR_ISSUE/CERT_REVOKE/CERT_DOWNLOAD/CRL_DOWNLOAD',
     target     VARCHAR(128) NULL COMMENT '操作对象（证书ID/序列号等）',
     detail     VARCHAR(500) NULL COMMENT '操作详情',
     ip         VARCHAR(64)  NULL COMMENT '操作来源IP',
+    sign_ver   TINYINT      NOT NULL DEFAULT 2 COMMENT '防篡改签名口径版本：1-旧（canonical 含登录账号，账号列已删除故不可再逐行验签）2-新（canonical 含 user_id）',
     created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '操作时间（微秒精度，审计签名 canonical 含 .SSSSSS，须与列精度严格一致防舍入偏差）',
     PRIMARY KEY (id),
     KEY idx_action_time (action, created_at),
-    KEY idx_username_time (username, created_at)
+    KEY idx_user_time (user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CA管理操作审计日志';
 
 -- ===== GM/T 0034 P0 合规扩展 =====
@@ -72,7 +96,12 @@ CREATE TABLE IF NOT EXISTS ssl_cert_template (
     policy_oid     VARCHAR(64)  NULL COMMENT '证书策略OID（GM/T 0015 证书格式扩展）',
     builtin        TINYINT      NOT NULL DEFAULT 0 COMMENT '1-内置模板(不可删除) 0-自定义',
     description    VARCHAR(500) NULL COMMENT '模板说明',
-    created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT   NULL COMMENT '创建人ID（ssl_sys_user.id；内置模板播种为 NULL）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名（系统播种写「系统」）',
+    created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT   NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at     DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_template_code (template_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='证书模板（GM/T 0034 §5.3.4）';
@@ -89,16 +118,26 @@ CREATE TABLE IF NOT EXISTS ssl_cert_application (
     public_key_pem  MEDIUMTEXT   NULL COMMENT '申请方公钥PEM（自持私钥场景，可为空则由CA在线生成）',
     description     VARCHAR(500) NULL COMMENT '用途说明',
     status          VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING-待审核 APPROVED-已批准 REJECTED-已驳回 ISSUED-已签发 CANCELLED-已撤销',
-    applied_by      VARCHAR(64)  NOT NULL COMMENT '提交人（录入员，与审核人不得同一人）',
+    applied_by_user_id BIGINT    NULL COMMENT '提交人ID（ssl_sys_user.id；对外 API 通道无人可指，为 NULL）',
+    applied_by_name  VARCHAR(64) NULL COMMENT '提交人真实姓名（写入时快照；API 通道存客户端名称）',
     applied_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '提交时间',
-    reviewed_by     VARCHAR(64)  NULL COMMENT '审核人',
+    reviewed_by_user_id BIGINT   NULL COMMENT '审核人ID（ssl_sys_user.id，不得与提交人同一人）',
+    reviewed_by_name VARCHAR(64) NULL COMMENT '审核人真实姓名（写入时快照）',
     reviewed_at     DATETIME     NULL COMMENT '审核时间',
+    assignee_user_id BIGINT      NULL COMMENT '归属处理人ID（ssl_sys_user.id：提交时指定或按积压最少自动分派；单据只能由本人审核）',
+    assignee_real_name VARCHAR(64) NULL COMMENT '归属处理人真实姓名（写入时快照，不回查用户表）',
     review_comment  VARCHAR(500) NULL COMMENT '审核意见',
     issued_cert_id  BIGINT       NULL COMMENT '签发证书ID',
-    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT    NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name  VARCHAR(64) NULL COMMENT '创建人真实姓名',
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT    NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name  VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at      DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_apply_no (apply_no),
     KEY idx_status (status),
+    KEY idx_app_assignee (assignee_user_id, status),
     KEY idx_applicant (applicant_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='证书申请单（RA 提交-审核-签发）';
 
@@ -173,7 +212,12 @@ CREATE TABLE IF NOT EXISTS ssl_crl_state (
     this_update       DATETIME(6) NULL COMMENT '上次发布时间',
     next_update       DATETIME(6) NULL COMMENT '下次强制更新时间',
     delta_base_number BIGINT      NULL COMMENT '增量CRL指向的基础全量编号',
-    updated_at        DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    created_by_user_id BIGINT     NULL COMMENT '创建人ID（ssl_sys_user.id；首建行由系统自动创建为 NULL）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名（系统自动创建写「系统」）',
+    created_at       DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
+    updated_by_user_id BIGINT     NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at        DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '修改时间',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CRL发布状态（多实例一致性，取代crl-state.json）';
 
@@ -195,7 +239,12 @@ CREATE TABLE IF NOT EXISTS ssl_ca_company (
     contact       VARCHAR(64)  NULL COMMENT '联系人姓名',
     contact_phone VARCHAR(32)  NULL COMMENT '联系人手机号（前端展示做掩码）',
     description   VARCHAR(500) NULL COMMENT '备注',
-    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT  NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at  DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_uscc (uscc),
     UNIQUE KEY uk_subject_o (subject_o)
@@ -252,19 +301,6 @@ SET @s11 = IF(@c11k > 0,
     IF(@c11u = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN company_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''受理公司（统一社会信用代码，签发落到该公司根域）''', 'SELECT 1'));
 PREPARE s11 FROM @s11; EXECUTE s11; DEALLOCATE PREPARE s11;
 
--- 幂等加列：申请单提交人/审核人展示用真实姓名。登录账号仍保留在 applied_by/reviewed_by
--- （用于「审核人不得与提交人同一人」「仅提交人本人可撤销」身份校验）；真实姓名在动作发生时落库，
--- 符合 GM/T 0034 审计可追溯要求。历史数据该列为 NULL 时，前端回退显示登录账号。
-SET @c_name1 = (SELECT COUNT(*) FROM information_schema.columns
-               WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'applied_by_name');
-SET @s_name1 = IF(@c_name1 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN applied_by_name VARCHAR(64) NULL COMMENT ''提交人真实姓名（登录账号见 applied_by）'' AFTER applied_at', 'SELECT 1');
-PREPARE s_name1 FROM @s_name1; EXECUTE s_name1; DEALLOCATE PREPARE s_name1;
-
-SET @c_name2 = (SELECT COUNT(*) FROM information_schema.columns
-               WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'reviewed_by_name');
-SET @s_name2 = IF(@c_name2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN reviewed_by_name VARCHAR(64) NULL COMMENT ''审核人真实姓名（登录账号见 reviewed_by）'' AFTER reviewed_at', 'SELECT 1');
-PREPARE s_name2 FROM @s_name2; EXECUTE s_name2; DEALLOCATE PREPARE s_name2;
-
 SET @c12k = (SELECT COUNT(*) FROM information_schema.columns
              WHERE table_schema = DATABASE() AND table_name = 'ssl_audit_log' AND column_name = 'company_key');
 SET @c12u = (SELECT COUNT(*) FROM information_schema.columns
@@ -282,15 +318,6 @@ SET @s13 = IF(@c13k > 0,
     'ALTER TABLE ssl_cert_template CHANGE COLUMN company_key company_uscc VARCHAR(32) NULL COMMENT ''归属公司（统一社会信用代码）；NULL=全局模板（所有公司可用）''',
     IF(@c13u = 0, 'ALTER TABLE ssl_cert_template ADD COLUMN company_uscc VARCHAR(32) NULL COMMENT ''归属公司（统一社会信用代码）；NULL=全局模板（所有公司可用）''', 'SELECT 1'));
 PREPARE s13 FROM @s13; EXECUTE s13; DEALLOCATE PREPARE s13;
-
-SET @c14k = (SELECT COUNT(*) FROM information_schema.columns
-             WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'company_key');
-SET @c14u = (SELECT COUNT(*) FROM information_schema.columns
-             WHERE table_schema = DATABASE() AND table_name = 'ssl_sys_user' AND column_name = 'company_uscc');
-SET @s14 = IF(@c14k > 0,
-    'ALTER TABLE ssl_sys_user CHANGE COLUMN company_key company_uscc VARCHAR(32) NULL COMMENT ''归属公司（统一社会信用代码）；NULL=全局管理员（跨公司）''',
-    IF(@c14u = 0, 'ALTER TABLE ssl_sys_user ADD COLUMN company_uscc VARCHAR(32) NULL COMMENT ''归属公司（统一社会信用代码）；NULL=全局管理员（跨公司）''', 'SELECT 1'));
-PREPARE s14 FROM @s14; EXECUTE s14; DEALLOCATE PREPARE s14;
 
 SET @c15k = (SELECT COUNT(*) FROM information_schema.columns
              WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'company_key');
@@ -355,8 +382,12 @@ CREATE TABLE IF NOT EXISTS ssl_sys_role (
     sort_order  INT          NOT NULL DEFAULT 0 COMMENT '排序号（升序）',
     status      TINYINT      NOT NULL DEFAULT 1 COMMENT '1-启用 0-停用（停用后该角色账号不可登录）',
     builtin     TINYINT      NOT NULL DEFAULT 1 COMMENT '1-法定内置预置角色（不可删）0-自定义角色（可增删）',
-    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT   NULL COMMENT '创建人ID（ssl_sys_user.id；预置角色播种为 NULL）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名（系统播种写「系统」）',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_role_code (role_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理角色档案（预置角色不可删，自定义角色可增删）';
@@ -364,8 +395,13 @@ CREATE TABLE IF NOT EXISTS ssl_sys_role (
 CREATE TABLE IF NOT EXISTS ssl_role_perm (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
     role_code   VARCHAR(32)  NOT NULL COMMENT '角色编码',
-    perm_code   VARCHAR(64)  NOT NULL COMMENT '权限点：menu:xxx 页面菜单 / cert:issue 等操作权限',
-    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    perm_code   VARCHAR(64)  NOT NULL COMMENT '权限点：menu:xxx 页面菜单 / cert:revoke 等操作权限',
+    created_by_user_id BIGINT   NULL COMMENT '授权人ID（ssl_sys_user.id；DDL 播种为 NULL）',
+    created_by_name    VARCHAR(64) NULL COMMENT '授权人真实姓名（系统播种写「系统」）',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at  DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_role_perm (role_code, perm_code),
     KEY idx_perm_code (perm_code)
@@ -378,8 +414,12 @@ CREATE TABLE IF NOT EXISTS ssl_key_vault (
     name        VARCHAR(64)  NOT NULL COMMENT '密钥名（key/pub）',
     cipher_hex  TEXT         NOT NULL COMMENT 'SM4 加密后的私钥 PEM（hex 密文）；主密钥（KEK）不入库，走 SSL_MASTER_KEY 或 master.key 文件',
     sealed      TINYINT      NOT NULL DEFAULT 0 COMMENT '1-已封存离线（对应原 .sealed 文件态） 0-在线',
-    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT   NULL COMMENT '入库人ID（ssl_sys_user.id；建根/自动轮换为 NULL）',
+    created_by_name    VARCHAR(64) NULL COMMENT '入库人真实姓名（系统自动写「系统」）',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_vault_entry (company_uscc, rel_dir, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='密钥保险库（私钥 SM4 密文落库，替代原 key.pem.enc 文件形态）';
@@ -397,19 +437,27 @@ CREATE TABLE IF NOT EXISTS ssl_cert_op_ticket (
     reason            VARCHAR(255) NULL COMMENT '操作原因（RFC 5280 吊销/挂起原因码；解除挂起无需）',
     validity_days     INT          NULL COMMENT '新有效期天数（RENEW/REKEY 操作单专用，批准后按此天数重签）',
     status           VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING-待审批 EXECUTED-已执行 REJECTED-已驳回 CANCELLED-已撤销',
-    requested_by     VARCHAR(64)  NOT NULL COMMENT '发起人账号',
-    requested_by_name VARCHAR(64) NULL COMMENT '发起人真实姓名（登录账号见 requested_by）',
+    requested_by_user_id BIGINT   NOT NULL COMMENT '发起人ID（ssl_sys_user.id）',
+    requested_by_name VARCHAR(64) NULL COMMENT '发起人真实姓名（写入时快照，不回查用户表）',
     requested_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发起时间',
-    reviewed_by      VARCHAR(64)  NULL COMMENT '审批人账号（不得与发起人同一人）',
-    reviewed_by_name VARCHAR(64)  NULL COMMENT '审批人真实姓名',
+    reviewed_by_user_id BIGINT    NULL COMMENT '审批人ID（ssl_sys_user.id，不得与发起人同一人）',
+    reviewed_by_name VARCHAR(64)  NULL COMMENT '审批人真实姓名（写入时快照）',
     reviewed_at      DATETIME     NULL COMMENT '审批时间',
+    assignee_user_id BIGINT       NULL COMMENT '归属处理人ID（ssl_sys_user.id：提交时指定或按积压最少自动分派）',
+    assignee_real_name VARCHAR(64) NULL COMMENT '归属处理人真实姓名（写入时快照）',
     review_comment   VARCHAR(500) NULL COMMENT '审批意见（驳回必填）',
     executed_at      DATETIME     NULL COMMENT '实际执行进 CRL/OCSP 的时间（批准即执行，同事务）',
-    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT     NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名',
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT     NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at       DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_op_no (op_no),
     KEY idx_cert (cert_id),
-    KEY idx_status (status)
+    KEY idx_status (status),
+    KEY idx_co_assignee (assignee_user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='证书操作审批单（吊销/挂起/更新/重签双人复核）';
 
 -- 幂等补列（存量库升级：validity_days 为 RENEW/REKEY 操作单专用）
@@ -440,8 +488,12 @@ CREATE TABLE IF NOT EXISTS ssl_api_client (
     secret_version     INT          NOT NULL DEFAULT 1 COMMENT 'secret 版本（轮换+1，旧 secret 立即失效）',
     status             TINYINT      NOT NULL DEFAULT 1 COMMENT '1-启用 0-停用',
     last_used_at       DATETIME     NULL COMMENT '最近一次认证通过时间',
-    created_by         VARCHAR(64)  NULL COMMENT '登记人',
-    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT       NULL COMMENT '登记人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64)  NULL COMMENT '登记人真实姓名（写入时快照）',
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT       NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64)  NULL COMMENT '修改人真实姓名',
+    updated_at         DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     rotated_at         DATETIME     NULL COMMENT 'secret 最近轮换时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_app_id (app_id),
@@ -504,23 +556,59 @@ CREATE TABLE IF NOT EXISTS ssl_company_op_ticket (
     description           VARCHAR(500) NULL COMMENT '说明（历史 CREATE 参数快照）',
     reason                VARCHAR(255) NOT NULL COMMENT '变更事由（审批依据，必填）',
     status                VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING-待审批 EXECUTED-已执行 REJECTED-已驳回 CANCELLED-已撤销',
-    requested_by          VARCHAR(64)  NOT NULL COMMENT '发起人账号',
-    requested_by_name     VARCHAR(64)  NULL COMMENT '发起人真实姓名',
+    requested_by_user_id  BIGINT       NOT NULL COMMENT '发起人ID（ssl_sys_user.id）',
+    requested_by_name     VARCHAR(64)  NULL COMMENT '发起人真实姓名（写入时快照，不回查用户表）',
     requested_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发起时间',
-    reviewed_by           VARCHAR(64)  NULL COMMENT '审批人账号（不得与发起人同一人）',
-    reviewed_by_name      VARCHAR(64)  NULL COMMENT '审批人真实姓名',
+    reviewed_by_user_id   BIGINT       NULL COMMENT '审批人ID（ssl_sys_user.id，不得与发起人同一人）',
+    reviewed_by_name      VARCHAR(64)  NULL COMMENT '审批人真实姓名（写入时快照）',
     reviewed_at           DATETIME     NULL COMMENT '审批时间',
+    assignee_user_id      BIGINT       NULL COMMENT '归属处理人ID（ssl_sys_user.id：提交时指定或按积压最少自动分派）',
+    assignee_real_name    VARCHAR(64)  NULL COMMENT '归属处理人真实姓名（写入时快照）',
     review_comment        VARCHAR(500) NULL COMMENT '审批意见（驳回必填）',
     executed_at           DATETIME     NULL COMMENT '执行时间（批准即执行，同事务）',
     result_app_id         VARCHAR(64)  NULL COMMENT '执行结果：接入 App ID（RESET_CREDENTIAL 及历史 CREATE 单；密钥明文不落库）',
     result_secret_version INT          NULL COMMENT '执行结果：接入密钥版本',
     receipt_taken_at      DATETIME     NULL COMMENT '接入凭证回执领取时间（一次性，领取后不可再查看）',
-    created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    new_holder_user_ids   VARCHAR(500) NULL COMMENT '新密钥保管人ID名单（REASSIGN_HOLDERS 专用，逗号分隔 ssl_sys_user.id，执行时重新绑定）',
+    new_holder_names      VARCHAR(500) NULL COMMENT '新密钥保管人姓名名单（与 new_holder_user_ids 同序，展示用快照）',
+    voter_user_ids        VARCHAR(500) NULL COMMENT '原密钥保管人ID快照（REASSIGN_HOLDERS 专用，逗号分隔，提交时锁定为投票人）',
+    voter_names           VARCHAR(500) NULL COMMENT '原密钥保管人姓名名单（与 voter_user_ids 同序，展示用快照）',
+    agree_count           INT          NOT NULL DEFAULT 0 COMMENT '当前同意数（REASSIGN_HOLDERS 专用）',
+    reject_count          INT          NOT NULL DEFAULT 0 COMMENT '当前驳回数（REASSIGN_HOLDERS 专用）',
+    vote_required         INT          NOT NULL DEFAULT 4 COMMENT '执行所需同意数（REASSIGN_HOLDERS 专用：5 名原保管人中须超过 3 人同意）',
+    created_by_user_id    BIGINT       NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name       VARCHAR(64)  NULL COMMENT '创建人真实姓名',
+    created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id    BIGINT       NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name       VARCHAR(64)  NULL COMMENT '修改人真实姓名',
+    updated_at            DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_company_op_no (op_no),
     KEY idx_company_op_status (status),
-    KEY idx_company_op_company (company_uscc, op_type)
+    KEY idx_company_op_company (company_uscc, op_type),
+    KEY idx_to_assignee (assignee_user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公司变更审批单（暂停/恢复/关闭/接入密钥重置双人复核；历史 CREATE 单可查）';
+
+-- 公司变更单保管人投票（重新指派保管人专用：发起=公司管理员，投票=原 5 名密钥保管人每人一票；
+-- 同意 >3（≥4）自动执行重新绑定，驳回 ≥2 即否决；不经过公司审批员）
+CREATE TABLE IF NOT EXISTS ssl_company_op_vote (
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    ticket_id       BIGINT       NOT NULL COMMENT '关联变更单 id',
+    voter_user_id   BIGINT       NOT NULL COMMENT '投票人ID（ssl_sys_user.id，须在变更单 voter_user_ids 快照内）',
+    voter_real_name VARCHAR(64)  NULL COMMENT '投票人真实姓名（写入时快照，不回查用户表）',
+    decision        VARCHAR(16)  NOT NULL COMMENT 'AGREE-同意 REJECT-驳回',
+    comment         VARCHAR(500) NULL COMMENT '投票意见（驳回必填）',
+    voted_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '投票时间',
+    created_by_user_id BIGINT    NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名',
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT    NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at      DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_op_vote_ticket_voter (ticket_id, voter_user_id),
+    KEY idx_op_vote_ticket (ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公司变更单保管人投票（重新指派保管人原保管人投票）';
 
 -- 幂等播种：新建公司（company:create，直接执行）、公司变更单菜单与权限
 -- （menu:company-ops + 发起 company:op:apply / 审批 company:op:approve）与 API 客户端管理权；
@@ -533,16 +621,28 @@ INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
     ('COMPANY_APPROVER', 'company:op:approve'),
     ('COMPANY_ADMIN', 'menu:company-ops'),
     ('COMPANY_APPROVER', 'menu:company-ops'),
-    ('ADMIN', 'menu:company-ops');
+    ('ADMIN', 'menu:company-ops'),
+    -- 重新指派保管人权收口至公司管理员（ADMIN/KEY_ADMIN 存量越界授权由 DataInitializer 按上限修剪）；
+    -- 密钥管理员新增「公司变更审批」菜单：作为原保管人对重新指派单的投票入口
+    ('COMPANY_ADMIN', 'ca:share:assign'),
+    ('KEY_ADMIN', 'menu:company-ops');
 
 -- 幂等播种：ADMIN 全菜单只读巡检权限（存量库升级补授；新库由 DataInitializer 按法定上限播种）。
 -- 系统管理员保留账号建号（user:create/user:update），其余业务/公司/角色授权一律只读或不可见
 INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
+    ('ADMIN', 'menu:companies'),
     ('ADMIN', 'menu:root-ca'),
     ('ADMIN', 'menu:templates'),
     ('ADMIN', 'menu:audit'),
     ('ADMIN', 'audit:view'),
     ('ADMIN', 'ca:share:view');
+
+-- 幂等播种：审批中心菜单（二级CA重建申请单的分页查询/审批/执行）；ADMIN/KEY_ADMIN 只读或只投票，公司+安全管理员可发起执行
+INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
+    ('ADMIN', 'menu:approval-center'),
+    ('KEY_ADMIN', 'menu:approval-center'),
+    ('COMPANY_ADMIN', 'menu:approval-center'),
+    ('SECURITY_ADMIN', 'menu:approval-center');
 
 -- ===== 申请单审批轨迹（按步记录：提交/指配/审核/签发/撤销/催办） =====
 CREATE TABLE IF NOT EXISTS ssl_application_trail (
@@ -551,25 +651,32 @@ CREATE TABLE IF NOT EXISTS ssl_application_trail (
     application_id    BIGINT       NOT NULL COMMENT '申请单id',
     apply_no          VARCHAR(32)  NULL COMMENT '申请单号（快照，便于检索）',
     step              VARCHAR(32)  NOT NULL COMMENT '步骤：SUBMIT/ASSIGN/APPROVE/REJECT/ISSUE/CANCEL/URGE',
-    operator_username VARCHAR(64)  NOT NULL COMMENT '操作人账号',
-    operator_real_name VARCHAR(64) NULL COMMENT '操作人真实姓名',
+    operator_user_id  BIGINT       NULL COMMENT '操作人ID（ssl_sys_user.id；对外 API 通道为 NULL）',
+    operator_real_name VARCHAR(64) NULL COMMENT '操作人真实姓名（写入时快照，不回查用户表）',
     operator_role    VARCHAR(32)  NULL COMMENT '操作人角色编码',
     from_status      VARCHAR(16)  NULL COMMENT '动作前状态',
     to_status        VARCHAR(16)  NULL COMMENT '动作后状态',
     comment          VARCHAR(500) NULL COMMENT '意见/备注',
-    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT     NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64) NULL COMMENT '创建人真实姓名',
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT     NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64) NULL COMMENT '修改人真实姓名',
+    updated_at       DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     KEY idx_trail_app (application_id),
     KEY idx_trail_company (company_uscc, application_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='证书申请单审批轨迹（按步留痕）';
 
 -- ===== 站内信 / 消息中心 =====
+-- 收发件人一律存 ssl_sys_user.id + 姓名快照；系统自动通知 sender_user_id 留空、姓名写「系统」
 CREATE TABLE IF NOT EXISTS ssl_message (
     id                 BIGINT       NOT NULL AUTO_INCREMENT,
     company_uscc        VARCHAR(32)  NOT NULL DEFAULT 'default' COMMENT '所属公司（统一社会信用代码）',
-    recipient_username VARCHAR(64)  NOT NULL COMMENT '接收人账号',
-    recipient_real_name VARCHAR(64) NULL COMMENT '接收人真实姓名',
-    sender_username    VARCHAR(64)  NULL COMMENT '发送人账号（系统催办留 SYSTEM）',
+    recipient_user_id  BIGINT       NOT NULL COMMENT '接收人ID（ssl_sys_user.id）',
+    recipient_real_name VARCHAR(64) NULL COMMENT '接收人真实姓名（写入时快照，不回查用户表）',
+    sender_user_id     BIGINT       NULL COMMENT '发送人ID（ssl_sys_user.id；系统自动通知为 NULL）',
+    sender_real_name   VARCHAR(64)  NULL COMMENT '发送人真实姓名（系统自动通知写「系统」）',
     type               VARCHAR(32)  NOT NULL COMMENT '消息类型：APP_URGE-催办 APP_SUBMITTED-新待审 APP_APPROVED-审批结果 APP_REJECTED-驳回通知 APP_ISSUED-已签发',
     title              VARCHAR(200) NOT NULL COMMENT '消息标题',
     content            VARCHAR(1000) NULL COMMENT '消息正文',
@@ -577,28 +684,16 @@ CREATE TABLE IF NOT EXISTS ssl_message (
     biz_id             VARCHAR(64)  NULL COMMENT '关联业务ID（申请单id）',
     read_flag          TINYINT      NOT NULL DEFAULT 0 COMMENT '0-未读 1-已读',
     read_at            DATETIME     NULL COMMENT '阅读时间',
-    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT       NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64)  NULL COMMENT '创建人真实姓名',
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT       NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64)  NULL COMMENT '修改人真实姓名',
+    updated_at         DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
-    KEY idx_msg_recipient (recipient_username, read_flag),
-    KEY idx_msg_company (company_uscc, recipient_username)
+    KEY idx_msg_recipient (recipient_user_id, read_flag),
+    KEY idx_msg_company (company_uscc, recipient_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='站内信/消息中心';
-
--- 幂等加列：提交时指定的具体审批人（账号 + 展示姓名）
-SET @c_asg1 = (SELECT COUNT(*) FROM information_schema.COLUMNS
-               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'assignee_username');
-SET @s_asg1 = IF(@c_asg1 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN assignee_username VARCHAR(64) NULL COMMENT ''提交时指定的审批人账号'' AFTER reviewed_at', 'SELECT 1');
-PREPARE s_asg1 FROM @s_asg1; EXECUTE s_asg1; DEALLOCATE PREPARE s_asg1;
-
-SET @c_asg2 = (SELECT COUNT(*) FROM information_schema.COLUMNS
-               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'assignee_real_name');
-SET @s_asg2 = IF(@c_asg2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN assignee_real_name VARCHAR(64) NULL COMMENT ''指定审批人真实姓名'' AFTER assignee_username', 'SELECT 1');
-PREPARE s_asg2 FROM @s_asg2; EXECUTE s_asg2; DEALLOCATE PREPARE s_asg2;
-
--- 幂等加索引：审核列表按「指派给我 + 待审」收口后的主查询路径（审批人接管未认领单时也走这条）
-SET @c_asg3 = (SELECT COUNT(*) FROM information_schema.STATISTICS
-               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND INDEX_NAME = 'idx_app_assignee');
-SET @s_asg3 = IF(@c_asg3 = 0, 'ALTER TABLE ssl_cert_application ADD KEY idx_app_assignee (assignee_username, status)', 'SELECT 1');
-PREPARE s_asg3 FROM @s_asg3; EXECUTE s_asg3; DEALLOCATE PREPARE s_asg3;
 
 -- 幂等播种：催办权（app:urge）给操作员/RA管理员；审批人名单查看权（app:listApprovers）给提交侧角色。
 -- 注意：已存在角色 DataInitializer 只裁剪不补授，新权限必须在此 DDL 显式播种（同 cert:op:approve 范式）。
@@ -611,20 +706,25 @@ INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
     ('ADMIN', 'app:listApprovers');
 
 -- ===== 根私钥门限份额保管人绑定（建公司/建根时指定 5 名保管人，一人一份，落表绑定） =====
--- 密钥分持模型：根CA私钥 Shamir(3,5) 拆 5 份，建根（开公司）时指定 5 名保管人，份额与账号一一绑定；
+-- 密钥分持模型：根CA私钥 Shamir(3,5) 拆 5 份，建根（开公司）时指定 5 名保管人，份额与保管人一一绑定；
 -- 仅保管人本人可查看自身份额；动用根私钥（重建二级CA 等）须 5 人中任意 3 人审批同意。
 CREATE TABLE IF NOT EXISTS ssl_company_key_share (
     id                 BIGINT       NOT NULL AUTO_INCREMENT,
     company_uscc        VARCHAR(18)  NOT NULL COMMENT '公司标识（统一社会信用代码）',
     share_index        INT          NOT NULL COMMENT '份额编号（1~5，与 Shamir 拆分顺序一致）',
-    holder_username    VARCHAR(64)  NOT NULL COMMENT '份额保管人账号（建根时指定，一人一份）',
-    holder_real_name   VARCHAR(64)  NULL COMMENT '保管人真实姓名（展示）',
+    holder_user_id     BIGINT       NOT NULL COMMENT '份额保管人ID（ssl_sys_user.id，建根时指定，一人一份）',
+    holder_real_name   VARCHAR(64)  NULL COMMENT '保管人真实姓名（写入时快照，不回查用户表）',
     share_json         TEXT         NOT NULL COMMENT '该保管人持有的份额 JSON（Shamir.Share：index/total/threshold/yHex）',
+    created_by_user_id BIGINT       NULL COMMENT '绑定人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64)  NULL COMMENT '绑定人真实姓名',
     created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '绑定时间',
+    updated_by_user_id BIGINT       NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64)  NULL COMMENT '修改人真实姓名',
+    updated_at         DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_share_company_idx (company_uscc, share_index),
-    UNIQUE KEY uk_share_company_holder (company_uscc, holder_username),
-    KEY idx_share_holder (holder_username),
+    UNIQUE KEY uk_share_company_holder (company_uscc, holder_user_id),
+    KEY idx_share_holder (holder_user_id),
     KEY idx_share_company (company_uscc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='根私钥门限份额保管人绑定（5 份份额 × 5 名指定保管人）';
 
@@ -635,15 +735,20 @@ CREATE TABLE IF NOT EXISTS ssl_ca_subca_ticket (
     company_uscc        VARCHAR(18)  NOT NULL COMMENT '目标公司（统一社会信用代码）',
     company_name        VARCHAR(64)  NULL COMMENT '公司名称（快照展示）',
     reason             VARCHAR(255) NOT NULL COMMENT '重建事由（审批依据，必填）',
-    requested_by       VARCHAR(64)  NOT NULL COMMENT '发起人账号',
-    requested_by_name  VARCHAR(64)  NULL COMMENT '发起人真实姓名',
+    requested_by_user_id BIGINT     NOT NULL COMMENT '发起人ID（ssl_sys_user.id）',
+    requested_by_name  VARCHAR(64)  NULL COMMENT '发起人真实姓名（写入时快照，不回查用户表）',
     requested_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发起时间',
     threshold          INT          NOT NULL DEFAULT 3 COMMENT '审批放行阈值（3-of-5 中任意 3 人）',
     status             VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING-待审批 APPROVED-已批准 REJECTED-已驳回 CANCELLED-已撤销 EXECUTED-已执行',
     approved_count     INT          NOT NULL DEFAULT 0 COMMENT '已同意人数',
     rejected_count     INT          NOT NULL DEFAULT 0 COMMENT '已驳回人数',
     executed_at        DATETIME     NULL COMMENT '执行时间（批准并重建完成后填写）',
-    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_user_id BIGINT       NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64)  NULL COMMENT '创建人真实姓名',
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT       NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64)  NULL COMMENT '修改人真实姓名',
+    updated_at         DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_subca_op_no (op_no),
     KEY idx_subca_status (status),
@@ -654,23 +759,40 @@ CREATE TABLE IF NOT EXISTS ssl_ca_subca_ticket (
 CREATE TABLE IF NOT EXISTS ssl_ca_subca_approval (
     id                 BIGINT       NOT NULL AUTO_INCREMENT,
     ticket_id          BIGINT       NOT NULL COMMENT '关联申请单 id',
-    approver_username  VARCHAR(64)  NOT NULL COMMENT '审批人账号（须为该公司 5 名保管人之一）',
-    approver_real_name VARCHAR(64)  NULL COMMENT '审批人真实姓名',
+    approver_user_id   BIGINT       NOT NULL COMMENT '审批人ID（ssl_sys_user.id，须为该公司 5 名保管人之一）',
+    approver_real_name VARCHAR(64)  NULL COMMENT '审批人真实姓名（写入时快照，不回查用户表）',
     decision           VARCHAR(16)  NOT NULL COMMENT 'APPROVED-同意 REJECTED-驳回',
     comment            VARCHAR(500) NULL COMMENT '审批意见（驳回必填）',
+    share_json         TEXT         NULL COMMENT '审批人提交的根私钥份额（秘钥片）JSON（index/total/threshold/yHex）；3 名保管人通过即收集到 ≥3 份用于执行重建解封根私钥',
     decided_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '审批时间',
+    created_by_user_id BIGINT       NULL COMMENT '创建人ID（ssl_sys_user.id）',
+    created_by_name    VARCHAR(64)  NULL COMMENT '创建人真实姓名',
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_by_user_id BIGINT       NULL COMMENT '修改人ID（ssl_sys_user.id）',
+    updated_by_name    VARCHAR(64)  NULL COMMENT '修改人真实姓名',
+    updated_at         DATETIME     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_approval_ticket_approver (ticket_id, approver_username),
+    UNIQUE KEY uk_approval_ticket_approver (ticket_id, approver_user_id),
     KEY idx_approval_ticket (ticket_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='二级CA重建申请单逐人审批记录（5 名保管人各投一票）';
 
--- 幂等播种：根私钥份额保管人指定权（ca:share:assign）、二级CA重建申请/执行权
--- （ca:subca:rebuild:apply / ca:subca:rebuild:execute）。审批动作本身由"是否为该公司保管人"收口，不另设权限点。
+-- 幂等播种：二级CA重建的三个权限点。
+-- 发起/执行归重建动因方（公司管理员；平台侧应急通道给安全管理员）；保管人只在审批中心投票并交出本人份额，
+-- 不再持有执行权（避免同一批人既审批又执行）；系统管理员退回只读 ca:subca:rebuild:view。
+-- 审批动作本身由"是否为该公司保管人"收口，不另设权限点；存量库的越界授权由 DataInitializer 启动时自动修剪。
+-- 保管人指定权 ca:share:assign 只归公司管理员，见上方公司管理段的播种。
 INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
-    ('ADMIN', 'ca:share:assign'),
-    ('KEY_ADMIN', 'ca:share:assign'),
+    ('ADMIN', 'ca:subca:rebuild:view'),
+    ('KEY_ADMIN', 'ca:subca:rebuild:view'),
+    ('COMPANY_ADMIN', 'ca:subca:rebuild:view'),
+    ('SECURITY_ADMIN', 'ca:subca:rebuild:view'),
     ('COMPANY_ADMIN', 'ca:subca:rebuild:apply'),
-    ('ADMIN', 'ca:subca:rebuild:apply'),
-    ('KEY_ADMIN', 'ca:subca:rebuild:execute'),
-    ('ADMIN', 'ca:subca:rebuild:execute'),
-    ('COMPANY_ADMIN', 'ca:subca:rebuild:execute');
+    ('SECURITY_ADMIN', 'ca:subca:rebuild:apply'),
+    ('COMPANY_ADMIN', 'ca:subca:rebuild:execute'),
+    ('SECURITY_ADMIN', 'ca:subca:rebuild:execute');
+
+-- 升级迁移（幂等）：二级CA重建审批记录新增 share_json 列（审批人提交的根私钥份额/秘钥片）。
+-- 存量库导入本脚本时若表已存在（CREATE IF NOT EXISTS 不会加列），由下方 ALTER 补齐；注意按分号整段执行（含 PREPARE/EXECUTE 会话变量块）。
+SET @c_subca = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_subca_approval' AND column_name = 'share_json');
+SET @s_subca = IF(@c_subca = 0, 'ALTER TABLE ssl_ca_subca_approval ADD COLUMN share_json TEXT NULL COMMENT ''审批人提交的根私钥份额（秘钥片）JSON；3 名保管人通过即收集到 ≥3 份用于执行重建解封根私钥''', 'SELECT 1');
+PREPARE s_subca FROM @s_subca; EXECUTE s_subca; DEALLOCATE PREPARE s_subca;

@@ -3,12 +3,10 @@ package com.csssl.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
-
-import java.time.LocalDateTime;
+import lombok.EqualsAndHashCode;
 
 /**
  * CA 公司注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额），公司间互不信任。
@@ -17,8 +15,9 @@ import java.time.LocalDateTime;
  * 仍是 {@link #LEGACY_NAMESPACE}，两者刻意分开，避免主公司切换后找不到旧密钥目录。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_ca_company")
-public class CaCompany {
+public class CaCompany extends AuditColumns {
 
     /**
      * 存量单根的密钥目录/DN 命名空间（路径兼容判断专用，不随主公司变化）
@@ -74,10 +73,4 @@ public class CaCompany {
      * 备注
      */
     private String description;
-
-    /**
-     * 创建时间
-     */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 }

@@ -68,14 +68,9 @@ public class AdminUserController {
     @PreAuthorize("hasAuthority('user:list')")
     @GetMapping
     public Result<Page<SysUser>> page(@Valid UserPageQueryDTO query, HttpServletRequest request) {
-        // readCompanyScope：公司用户锁本公司（传别公司 403）；全局用户不传=null=全部（唯一跨公司读口）
-        String scope = CompanyScope.readCompanyScope(UserUtils.requireLoginUser().getCompanyUscc(), query.getCompanyUscc());
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         if (query.getRoleCode() != null && !query.getRoleCode().isBlank()) {
             qw.eq(SysUser::getRoleCode, query.getRoleCode());
-        }
-        if (scope != null) {
-            qw.eq(SysUser::getCompanyUscc, scope);
         }
         qw.orderByAsc(SysUser::getId);
         Page<SysUser> page = userMapper.selectPage(new Page<>(query.getPageNo(), query.getPageSize()), qw);
@@ -107,22 +102,6 @@ public class AdminUserController {
         }
         requireAssignableRole(role);
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String myCompany = loginUser.getCompanyUscc();
-        String reqCompany = blankToNull(body.getCompanyUscc());
-        String targetCompany;
-        if (myCompany != null) {
-            // 公司 ADMIN：一律落本公司；请求 companyUscc 与本人公司不一致=越域 403；不可任命公司主（ADMIN）
-            targetCompany = CompanyScope.effectiveCompany(myCompany, reqCompany);
-            if (RoleCodeEnum.ADMIN.name().equals(role)) {
-                throw new SecurityException("权限不足：公司管理员不可创建 ADMIN 角色账号（公司主由全局 ADMIN 任命）");
-            }
-        } else {
-            // 全局 ADMIN：显式 companyUscc=建该公司用户（公司须存在）；缺省=全局用户（company_uscc NULL）
-            targetCompany = reqCompany;
-            if (targetCompany != null) {
-                companyService.get(targetCompany);
-            }
-        }
         String password = body.getPassword();
         AuthService.checkPasswordComplexity(password);
         SysUser user = new SysUser();
@@ -131,46 +110,28 @@ public class AdminUserController {
         user.setRealName(body.getRealName() == null || body.getRealName().isBlank()
                 ? username.trim() : body.getRealName().trim());
         user.setRoleCode(role);
-        user.setCompanyUscc(targetCompany);
         user.setStatus(1);
         user.setFailedAttempts(0);
         user.setTokenVersion(0);
         user.setCreatedAt(LocalDateTime.now());
         userMapper.insert(user);
-        auditService.record(loginUser.getUsername(), "USER_CREATE", String.valueOf(user.getId()),
-                "创建账号：" + user.getUsername() + "，角色=" + role + "，姓名=" + user.getRealName()
-                        + "，公司=" + (targetCompany == null ? "全局" : targetCompany),
-                clientIp(request), auditCompany(targetCompany, myCompany));
+        auditService.record(loginUser, "USER_CREATE", String.valueOf(user.getId()),
+                "创建账号：" + user.getUsername() + "，角色=" + role + "，姓名=" + user.getRealName(),
+                clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
         user.setPassword(null);
         return Result.success("创建成功", user);
     }
 
     /**
      * 用户简易列表（保管人下拉用）：返回精简字段（username/realName/roleCode/companyUscc/status），
-     * 不含口令等敏感信息。用于"新建公司指定密钥保管人""手动指派保管人"等下拉。
-     * 仅开公司/指派保管人权限可见，避免普通账号枚举账号。
-     *
      * <p>公司域收敛：只返回"平台级密钥管理员"（company_uscc 为空，即平台密钥管理岗）
      * 与（传了 companyUscc 时）该公司本域的密钥管理员；不返回其他公司的员工。</p>
      */
     @PreAuthorize("hasAnyAuthority('company:create','ca:share:assign')")
     @GetMapping("/simple")
     public Result<List<UserSimpleVO>> simple(@RequestParam(required = false) String companyUscc) {
-        // 分权制衡（GM/T 0034 §10.1、NIST SP 800-57 M-of-N 双控）：
-        // 根私钥份额保管人必须为平台"密钥管理员(KEY_ADMIN)"角色——其职责定义即"根密钥门限分持/封存/解封与份额保管"，
-        // 与厂商 key-ceremony "具名保管人"对齐，且天然排除系统管理员(ADMIN)等冲突角色，避免一人既掌平台又掌根私钥。
-        // 故保管人下拉仅返回 KEY_ADMIN；禁用账号仍返回（前端置灰不可选），便于指定人知悉账号存在但不可用。
-        // 另按公司域收敛：平台级（company_uscc 空）+ 目标公司本域，杜绝跨公司枚举与选错人。
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         qw.eq(SysUser::getRoleCode, RoleCodeEnum.KEY_ADMIN.name());
-        String target = companyUscc == null ? null : companyUscc.trim();
-        if (target == null || target.isBlank()) {
-            qw.isNull(SysUser::getCompanyUscc).or().eq(SysUser::getCompanyUscc, "");
-        } else {
-            qw.and(w -> w.isNull(SysUser::getCompanyUscc).or()
-                    .eq(SysUser::getCompanyUscc, "")
-                    .or().eq(SysUser::getCompanyUscc, target));
-        }
         qw.orderByAsc(SysUser::getId);
         List<SysUser> users = userMapper.selectList(qw);
         List<UserSimpleVO> vos = users.stream().map(u -> {
@@ -178,7 +139,7 @@ public class AdminUserController {
             v.setUsername(u.getUsername());
             v.setRealName(u.getRealName());
             v.setRoleCode(u.getRoleCode());
-            v.setCompanyUscc(u.getCompanyUscc());
+            v.setCompanyUscc(CaCompany.PRIMARY_COMPANY_USCC);
             v.setStatus(u.getStatus());
             return v;
         }).collect(java.util.stream.Collectors.toList());
@@ -199,22 +160,8 @@ public class AdminUserController {
             throw new IllegalArgumentException("用户不存在（id=" + id + "）");
         }
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String operator = loginUser.getUsername();
-        String myCompany = loginUser.getCompanyUscc();
-
 
         String ip = clientIp(request);
-        String targetCompany = user.getCompanyUscc();
-        if (myCompany != null) {
-            // 公司 ADMIN：目标必须为本公司用户（全局用户 company_uscc=NULL 亦不可触碰）
-            if (targetCompany == null || !myCompany.equals(targetCompany)) {
-                throw new SecurityException("权限不足：不能操作其他公司或全局账号");
-            }
-            String newRole = blankToNull(body.getRoleCode());
-            if (newRole != null && RoleCodeEnum.ADMIN.name().equals(newRole.trim().toUpperCase())) {
-                throw new SecurityException("权限不足：公司管理员不可任命/变更为 ADMIN 角色（公司主由全局 ADMIN 任命）");
-            }
-        }
 
         LambdaUpdateWrapper<SysUser> uw = new LambdaUpdateWrapper<SysUser>().eq(SysUser::getId, id);
         List<String> changes = new ArrayList<>();
@@ -270,26 +217,18 @@ public class AdminUserController {
         if (touched) {
             userMapper.update(null, uw);
         }
-        // 审计归位：按目标用户公司（全局用户=平台主公司留痕）
-        String auditCompany = auditCompany(targetCompany, myCompany);
+        // 单租户化后统一按平台主公司留痕
+        String auditCompany = CaCompany.PRIMARY_COMPANY_USCC;
         if (!changes.isEmpty()) {
-            auditService.record(operator, "USER_UPDATE", String.valueOf(id),
+            auditService.record(loginUser, "USER_UPDATE", String.valueOf(id),
                     "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip, auditCompany);
         }
         if (resetPassword) {
-            auditService.record(operator, "USER_RESET_PWD", String.valueOf(id),
+            auditService.record(loginUser, "USER_RESET_PWD", String.valueOf(id),
                     "重置账号 " + user.getUsername() + " 的登录口令（口令不入库留痕、需该用户重新登录）", ip, auditCompany);
         }
         user.setPassword(null);
         return Result.success("更新成功", user);
-    }
-
-    /** 审计公司归位：目标账号公司优先；全局账号（company_uscc NULL）按操作者域，操作者亦全局则 default */
-    private static String auditCompany(String targetUserCompany, String operatorCompany) {
-        if (targetUserCompany != null && !targetUserCompany.isBlank()) {
-            return targetUserCompany;
-        }
-        return operatorCompany == null || operatorCompany.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : operatorCompany;
     }
 
     private boolean isSupportedRole(String role) {

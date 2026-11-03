@@ -58,9 +58,25 @@ export function rejectCompanyOp(id, comment) {
 export function cancelCompanyOp(id) {
   return request.post(`/admin/company-ops/${id}/cancel`)
 }
+/** 原保管人投票（重新指派保管人单专用：{agree,comment}；>3 同意自动执行，2 驳回否决，不经过公司审批员） */
+export function voteCompanyOp(id, data) {
+  return request.post(`/admin/company-ops/${id}/vote`, data)
+}
 /** 领取接入凭证回执（仅发起人本人、一次性；密钥仅返回本次响应） */
 export function takeCompanyOpReceipt(id) {
   return request.get(`/admin/company-ops/${id}/receipt`)
+}
+/** 审批轨迹（按步时间正序，面向业务用户） */
+export function listCompanyOpTrail(id) {
+  return request.get(`/admin/company-ops/${id}/trail`)
+}
+/** 催办：向被指派审批人（或重新指派保管人的原 5 名保管人）推送站内信并补 URGE 轨迹（仅提交人可催办） */
+export function urgeCompanyOp(id) {
+  return request.post(`/admin/company-ops/${id}/urge`)
+}
+/** 变更单详情（待办聚合页深链直达用） */
+export function detailCompanyOp(id) {
+  return request.get(`/admin/company-ops/${id}`)
 }
 
 /** 公司列表模块级缓存（各页公司下拉共用；失败返回空数组不阻断页面） */
@@ -127,8 +143,8 @@ export function assignShares(data) {
 }
 /**
  * 某公司密钥份额总览（一次调用返回全部）：
- * { holders:[{shareIndex,holderUsername,holderRealName}], mine:{index,total,threshold,yHex,shareJson}|null, threshold, total }
- * holders 对密钥管理员/系统管理员/公司管理员可见；mine 仅保管人本人可见（非保管人=null）。
+ * { holders:[{shareIndex,holderRealName}], mine:{index,total,threshold,yHex,shareJson}|null, threshold, total }
+ * holders 对密钥管理员/系统管理员/公司管理员可见（只给姓名，账号不下发）；mine 仅保管人本人可见（非保管人=null）。
  */
 export function getShareOverview(companyUscc) {
   return request.get('/admin/ca/shares/overview', { params: { companyUscc } })
@@ -140,12 +156,12 @@ export function listSimpleUsers(companyUscc) {
   return request.get('/admin/users/simple', { params: { companyUscc } })
 }
 
-// ===== 二级CA 重建申请单（发起→5名保管人 3-of-5 审批→批准执行：粘贴≥3份额加载根私钥后重建） =====
+// ===== 二级CA 重建申请单（发起/执行=公司管理员或安全管理员；保管人只投票并附本人份额；系统管理员只读） =====
 /** 发起重建申请：{companyUscc, reason}（ca:subca:rebuild:apply；会自动通知 5 名保管人） */
 export function applySubCaRebuild(data) {
   return request.post('/admin/ca/subca-rebuild/apply', data)
 }
-/** 申请单分页：{pageNo,pageSize,status,keyword}（ca:subca:rebuild:apply 可见全部） */
+/** 申请单分页：{pageNo,pageSize,status,keyword,companyUscc}（ca:subca:rebuild:view 即可只读巡检；公司用户服务端强制锁本公司，全局用户不传=跨公司只读） */
 export function pageSubCaRebuild(params) {
   return request.get('/admin/ca/subca-rebuild/page', { params })
 }
@@ -153,11 +169,15 @@ export function pageSubCaRebuild(params) {
 export function pendingSubCaRebuild() {
   return request.get('/admin/ca/subca-rebuild/pending')
 }
+/** 当前登录人作为发起人且已审批通过（待执行）的申请单（消息待办 → 待我执行） */
+export function myExecutableSubCaRebuild() {
+  return request.get('/admin/ca/subca-rebuild/mine-executable')
+}
 /** 申请单详情 */
 export function detailSubCaRebuild(id) {
   return request.get(`/admin/ca/subca-rebuild/${id}`)
 }
-/** 审批同意：{comment}（须为保管人；3-of-5 任意 3 人同意即批准） */
+/** 审批同意：{comment, shareJson}（须为保管人；同意必须附上本人持有的根私钥份额；3-of-5 任意 3 人同意即批准） */
 export function approveSubCaRebuild(id, data) {
   return request.post(`/admin/ca/subca-rebuild/${id}/approve`, data)
 }
@@ -169,27 +189,25 @@ export function rejectSubCaRebuild(id, data) {
 export function cancelSubCaRebuild(id) {
   return request.post(`/admin/ca/subca-rebuild/${id}/cancel`)
 }
-/** 执行重建：{shareJsons[≥3]}（ca:subca:rebuild:execute；粘贴份额加载根私钥后重建二级CA） */
+/** 执行重建：{useCollectedShares:true} 用审批阶段已收集的保管人份额；或 {shareJsons[≥3]} 手动粘贴（ca:subca:rebuild:execute；保管人无此权限，避免既审批又执行） */
 export function executeSubCaRebuild(id, data) {
   return request.post(`/admin/ca/subca-rebuild/${id}/execute`, data)
 }
+/** 审批轨迹（按步时间正序，与 RA 申请 / 操作单 / 变更单同一条轨迹表） */
+export function listSubCaRebuildTrail(id) {
+  return request.get(`/admin/ca/subca-rebuild/${id}/trail`)
+}
+/** 催办：向尚未投票的保管人推送站内信并补 URGE 轨迹（仅发起人本人） */
+export function urgeSubCaRebuild(id) {
+  return request.post(`/admin/ca/subca-rebuild/${id}/urge`)
+}
 
-// ===== 证书管理 =====
+// ===== 证书管理（只读台账 + 生命周期操作单；后端无直发签发接口，发证只走 RA 申请与二级CA重建申请） =====
 export function pageCerts(params) {
   return request.get('/admin/certs', { params })
 }
 export function getCert(id) {
   return request.get(`/admin/certs/${id}`)
-}
-export function issueCert(data, companyUscc) {
-  return request.post('/admin/certs', data, { params: { companyUscc } })
-}
-export function issueCertByCsr(data, companyUscc) {
-  return request.post('/admin/certs/csr', data, { params: { companyUscc } })
-}
-/** 公钥直签（RA 场景）：申请方自持私钥，提交 Subject DN + 公钥 PEM + 模板/CN/SAN */
-export function issueCertByPublicKey(data, companyUscc) {
-  return request.post('/admin/certs/public-key', data, { params: { companyUscc } })
 }
 export function downloadCertPem(id) {
   return request.get(`/admin/certs/${id}/cert.pem`)
@@ -290,6 +308,10 @@ export function deleteTemplate(id) {
 export function pageApplications(params) {
   return request.get('/admin/applications', { params })
 }
+/** 申请单详情（待办聚合页深链直达用） */
+export function detailApplication(id) {
+  return request.get(`/admin/applications/${id}`)
+}
 export function submitApplication(data, companyUscc) {
   return request.post('/admin/applications', data, { params: { companyUscc } })
 }
@@ -349,6 +371,18 @@ export function rejectCertOp(id, comment, companyUscc) {
 }
 export function cancelCertOp(id, companyUscc) {
   return request.post(`/admin/cert-ops/${id}/cancel`, null, { params: { companyUscc } })
+}
+/** 审批轨迹（按步时间正序，面向业务用户） */
+export function listCertOpTrail(id) {
+  return request.get(`/admin/cert-ops/${id}/trail`)
+}
+/** 催办：向被指派审批人推送站内信并补 URGE 轨迹（仅提交人可催办） */
+export function urgeCertOp(id, companyUscc) {
+  return request.post(`/admin/cert-ops/${id}/urge`, null, { params: { companyUscc } })
+}
+/** 操作单详情（待办聚合页深链直达用） */
+export function detailCertOp(id) {
+  return request.get(`/admin/cert-ops/${id}`)
 }
 
 // ===== 导出（PKCS#12 软件证书 / 审计归档 CSV） =====

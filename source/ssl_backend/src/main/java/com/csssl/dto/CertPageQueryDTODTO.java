@@ -12,7 +12,7 @@ import lombok.EqualsAndHashCode;
 public class CertPageQueryDTODTO extends PageParam {
 
     /**
-     * 证书类型精确过滤（SERVER/CLIENT/SUB_CA）
+     * 证书类型精确过滤（SERVER/CLIENT/ROOT/SUB_CA）；留空=根CA+终端证书，不含二级CA（二级CA 由根CA 行入口查）
      */
     private String certType;
 

@@ -12,26 +12,23 @@ import java.util.List;
 /**
  * 当前登录人身份载体，同时是 {@code SecurityContextHolder} 里 {@code Authentication#getPrincipal()} 的类型。
  *
- * <p>对标 HIS（cslk）的 {@code CurrentUser}：把「用户名 / 真实姓名 / 角色 / 公司数据域 / 生效权限」整合成
- * 唯一对象装进 {@code SecurityContextHolder}，业务侧用 {@link com.csssl.util.UserUtils#getLoginUser()} 取，
- * 不再散落依赖 {@code HttpServletRequest} 属性。这样：</p>
- * <ul>
- *   <li>与前端解耦——身份由 TokenAuthFilter 在校验 JWT 签名 + 回查库后写入，前端无法伪造；</li>
- *   <li>可在任意线程/异步上下文（定时任务、@Async、服务层）拿到登录人，不再强依赖 request；</li>
- *   <li>{@code getAuthorities()} 含 {@code ROLE_<role>} 与各权限点，既驱动 {@code @PreAuthorize(hasAuthority)}，
- *       也支持未来 {@code hasRole}。</li>
- * </ul>
+ * <p>对标 HIS（cslk）的 {@code CurrentUser}：把「用户ID / 真实姓名 / 角色 / 生效权限」整合成
+ * 唯一对象装进 {@code SecurityContextHolder}，业务侧用 {@link com.csssl.util.UserUtils#getLoginUser()} 取。
+ *
+ * <p><b>关键设计铁律：本类不暴露登录账号（username）</b>。账号是凭证，禁止写入任何业务表、
+ * 禁止下发给业务接口出参、禁止在业务代码间传递——只有登录鉴权链路（TokenAuthFilter + JwtUtil）
+ * 内部可接触账号，出了过滤器一律以 user_id + 真实姓名快照运作。</p>
  */
 @Getter
 public class LoginUser implements UserDetails {
 
     /**
-     * 登录账号
+     * 用户ID（{@code ssl_sys_user.id}）：业务表的操作人一律存它
      */
-    private final String username;
+    private final Long userId;
 
     /**
-     * 真实姓名（落库操作人列口径；令牌快照，登录时写入）
+     * 真实姓名（落库操作人姓名列的口径；取自拦截器回查到的用户行，非前端可伪造）
      */
     private final String realName;
 
@@ -39,11 +36,6 @@ public class LoginUser implements UserDetails {
      * 当前生效角色编码（库内当前值，非令牌快照）
      */
     private final String roleCode;
-
-    /**
-     * 公司数据域：null/空=全局用户（跨公司账号）；非空=公司用户，一律锁定本公司
-     */
-    private final String companyUscc;
 
     /**
      * 是否法定内置角色（builtin=1）
@@ -55,14 +47,19 @@ public class LoginUser implements UserDetails {
      */
     private final List<String> permissions;
 
-    public LoginUser(String username, String realName, String roleCode, String companyUscc,
+    public LoginUser(Long userId, String realName, String roleCode,
                      boolean builtin, List<String> permissions) {
-        this.username = username;
+        this.userId = userId;
         this.realName = realName;
         this.roleCode = (roleCode == null || roleCode.isBlank()) ? null : roleCode.trim().toUpperCase();
-        this.companyUscc = (companyUscc == null || companyUscc.isBlank()) ? null : companyUscc.trim();
         this.builtin = builtin;
         this.permissions = permissions == null ? List.of() : List.copyOf(permissions);
+    }
+
+    @Override
+    public String getUsername() {
+        // 刻意返回 null：账号不在业务上下文暴露
+        return null;
     }
 
     @Override

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
@@ -15,8 +16,9 @@ import java.time.LocalDateTime;
  * app_id 与 secret 均为随机不可猜串，secret 密文存密钥保险库（api-clients/{appId}），本表不落明文。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_api_client")
-public class ApiClient {
+public class ApiClient extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -59,11 +61,6 @@ public class ApiClient {
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastUsedAt;
-
-    private String createdBy;
-
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime rotatedAt;

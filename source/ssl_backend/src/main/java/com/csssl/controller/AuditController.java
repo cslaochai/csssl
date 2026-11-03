@@ -9,6 +9,7 @@ import com.csssl.vo.AuditVerifyVO;
 import com.csssl.dto.ChainVerifyQueryDTO;
 import com.csssl.vo.ChainVerifyVO;
 import com.csssl.entity.AuditLog;
+import com.csssl.entity.CaCompany;
 import com.csssl.service.AuditService;
 import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
@@ -45,7 +46,7 @@ public class AuditController {
     @GetMapping
     public Result<Page<AuditLog>> page(@Valid AuditPageQueryDTODTO query, HttpServletRequest request) {
         return Result.success("查询成功", auditService.page(query.getPageNo(), query.getPageSize(), query.getAction(),
-                CompanyScope.readCompanyScope(UserUtils.requireLoginUser().getCompanyUscc(), query.getCompanyUscc())));
+                CompanyScope.readCompanyScope(query.getCompanyUscc())));
     }
 
     /**
@@ -60,7 +61,7 @@ public class AuditController {
             throw new IllegalArgumentException("参数 id 不能为空");
         }
         AuditLog row = auditService.load(id);
-        CompanyScope.requireRowVisible(UserUtils.requireLoginUser().getCompanyUscc(), AuditService.companyOf(row));
+
         return Result.success("验签完成", auditService.verifyLog(id));
     }
 
@@ -72,7 +73,7 @@ public class AuditController {
     @GetMapping("/export")
     public Result<AuditExportVO> export(@RequestParam(required = false) String companyUscc,
                                         HttpServletRequest request) {
-        return Result.success("导出完成", auditService.exportCsv(CompanyScope.readCompanyScope(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc)));
+        return Result.success("导出完成", auditService.exportCsv(CompanyScope.readCompanyScope(companyUscc)));
     }
 
     /**

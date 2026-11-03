@@ -44,6 +44,8 @@ public final class PermissionCatalog {
     public static final String MENU_USERS = "menu:users";
     public static final String MENU_ROLES = "menu:roles";
     public static final String MENU_AUDIT = "menu:audit";
+    public static final String MENU_APPROVAL_CENTER = "menu:approval-center";
+    public static final String MENU_MY_APPROVALS = "menu:my-approvals";
 
     // ===== 操作权限点 =====
     public static final String APP_SUBMIT = "app:submit";
@@ -55,8 +57,6 @@ public final class PermissionCatalog {
     public static final String APP_LIST_APPROVERS = "app:listApprovers";
 
     public static final String CERT_LIST = "cert:list";
-    public static final String CERT_ISSUE = "cert:issue";
-    public static final String CERT_ISSUE_SUBCA = "cert:issue:subca";
     public static final String CERT_REVOKE = "cert:revoke";
     public static final String CERT_SUSPEND = "cert:suspend";
     public static final String CERT_RENEW = "cert:renew";
@@ -79,6 +79,7 @@ public final class PermissionCatalog {
     public static final String CA_SHARE_MIGRATE = "ca:share:migrate";
     public static final String CA_SHARE_UNSEAL = "ca:share:unseal";
     public static final String CA_SHARE_ASSIGN = "ca:share:assign";
+    public static final String CA_SUBCA_REBUILD_VIEW = "ca:subca:rebuild:view";
     public static final String CA_SUBCA_REBUILD_APPLY = "ca:subca:rebuild:apply";
     public static final String CA_SUBCA_REBUILD_EXECUTE = "ca:subca:rebuild:execute";
     public static final String CA_ROOT_DOWNLOAD = "ca:root:download";
@@ -123,20 +124,20 @@ public final class PermissionCatalog {
         menu(MENU_USERS, "用户管理", "管理账号的建号、改角色、启停与重置口令");
         menu(MENU_ROLES, "角色配置", "角色档案与菜单/按钮权限授权");
         menu(MENU_AUDIT, "审计日志", "操作留痕查询、验签与归档（审计独立）");
+        menu(MENU_APPROVAL_CENTER, "审批中心", "二级CA重建申请单查询、保管人审批（附本人份额）与发起人执行重建");
+        menu(MENU_MY_APPROVALS, "我的待办", "四条审批流统一聚合：待我处理 / 我发起的 / 已办，一屏看完当前该谁管");
 
         // ---------- RA 申请 ----------
         action("RA申请", APP_SUBMIT, "提交证书申请", "录入员代录申请单，与审核分离");
         action("RA申请", APP_APPROVE, "审核批准", "审核人不得与提交人同一人");
         action("RA申请", APP_REJECT, "审核驳回", "审核意见落库并留痕");
-        action("RA申请", APP_ISSUE, "按申请签发", "对已批准申请签发证书");
+        action("RA申请", APP_ISSUE, "按申请签发", "唯一发证出口：对已批准申请按批准快照签发（平台不提供直发接口）");
         action("RA申请", APP_CANCEL, "撤销申请", "仅提交人本人或系统管理员可撤销");
         action("RA申请", APP_URGE, "催办审批人", "向被指派审批人发站内信提醒（仅提交人）");
         action("RA申请", APP_LIST_APPROVERS, "查看本公司审批人", "提交表单下拉可选，不依赖 user:list");
 
         // ---------- 证书业务 ----------
         action("证书业务", CERT_LIST, "查看证书台账", "证书列表与详情查询");
-        action("证书业务", CERT_ISSUE, "签发证书", "在线/CSR/公钥直签三类签发");
-        action("证书业务", CERT_ISSUE_SUBCA, "签发二级CA", "可继续签发证书的中间CA，仅系统管理员");
         action("证书业务", CERT_REVOKE, "吊销证书", "吊销后进入 CRL/OCSP");
         action("证书业务", CERT_SUSPEND, "挂起/解除挂起", "certificateHold 与恢复");
         action("证书业务", CERT_RENEW, "证书更新", "原证吊销 + 同公钥重签");
@@ -160,9 +161,10 @@ public final class PermissionCatalog {
         action("根CA与密钥", CA_SHARE_DOWNLOAD, "下载门限份额", "份额建议 5 份分人分管");
         action("根CA与密钥", CA_SHARE_MIGRATE, "门限化迁移", "单点加密私钥切换为 Shamir(3,5)");
         action("根CA与密钥", CA_SHARE_UNSEAL, "份额解封", "任意 3 份重组根私钥（仅内存）");
-        action("根CA与密钥", CA_SHARE_ASSIGN, "指派密钥保管人", "把根私钥 5 份门限份额各绑定一名保管人（仅密钥管理员/系统管理员）");
-        action("根CA与密钥", CA_SUBCA_REBUILD_APPLY, "发起二级CA重建申请", "动用根私钥重建二级CA 须先提单，通知 5 名保管人审批");
-        action("根CA与密钥", CA_SUBCA_REBUILD_EXECUTE, "执行二级CA重建", "凭 ≥3 份保管人份额加载根私钥后重建二级CA");
+        action("根CA与密钥", CA_SHARE_ASSIGN, "指派密钥保管人", "重新指派根私钥 5 份门限份额保管人（仅公司管理员发起；变更单须原保管人投票超过 3 人同意后执行）");
+        action("根CA与密钥", CA_SUBCA_REBUILD_VIEW, "查询二级CA重建申请单", "只读巡检：可看申请单与逐人审批轨迹，不能发起也不能执行");
+        action("根CA与密钥", CA_SUBCA_REBUILD_APPLY, "发起二级CA重建申请", "动用根私钥重建二级CA 须先提单，通知 5 名保管人审批（公司管理员/安全管理员）");
+        action("根CA与密钥", CA_SUBCA_REBUILD_EXECUTE, "执行二级CA重建", "凭审批阶段收集的 ≥3 份保管人份额加载根私钥后重建二级CA（发起人本人执行）");
         action("根CA与密钥", CA_ROOT_DOWNLOAD, "下载根证书", "供子系统信任链配置");
         action("根CA与密钥", CA_SUBCA_DOWNLOAD, "下载二级CA证书", "中间CA链配置");
 

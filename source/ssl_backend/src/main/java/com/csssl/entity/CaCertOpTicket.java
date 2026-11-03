@@ -1,12 +1,14 @@
 package com.csssl.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
@@ -17,8 +19,9 @@ import java.time.LocalDateTime;
  * → 批准即执行（同事务内落 CRL/OCSP 状态或重签新证）。直接执行通道已拆除，含系统管理员在内一律走单。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_cert_op_ticket")
-public class CaCertOpTicket {
+public class CaCertOpTicket extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -71,12 +74,13 @@ public class CaCertOpTicket {
     private String status;
 
     /**
-     * 发起人（登录账号，用于审批人不得同人校验）
+     * 发起人ID（ssl_sys_user.id，用于审批人不得同人校验）
      */
-    private String requestedBy;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long requestedByUserId;
 
     /**
-     * 发起人真实姓名（展示用）
+     * 发起人真实姓名（写入时快照，不回查用户表；展示用）
      */
     private String requestedByName;
 
@@ -87,12 +91,13 @@ public class CaCertOpTicket {
     private LocalDateTime requestedAt;
 
     /**
-     * 审批人（登录账号）
+     * 审批人ID（ssl_sys_user.id）
      */
-    private String reviewedBy;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long reviewedByUserId;
 
     /**
-     * 审批人真实姓名（展示用）
+     * 审批人真实姓名（写入时快照，不回查用户表；展示用）
      */
     private String reviewedByName;
 
@@ -101,6 +106,17 @@ public class CaCertOpTicket {
      */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime reviewedAt;
+
+    /**
+     * 被指派审批人ID（提交时按角色 + 积压最少自动分派；审批准入闸门，只有本人可批）
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long assigneeUserId;
+
+    /**
+     * 被指派审批人真实姓名（写入时快照，不回查用户表；展示用）
+     */
+    private String assigneeRealName;
 
     /**
      * 审批意见（驳回必填）
@@ -114,8 +130,20 @@ public class CaCertOpTicket {
     private LocalDateTime executedAt;
 
     /**
-     * 创建时间
+     * 非表字段：当前登录人可否撤回本单（待审批且发起人是我；与 cancel 同一口径，前端只看它）
      */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
+    @TableField(exist = false)
+    private Boolean revocable;
+
+    /**
+     * 非表字段：当前登录人可否审批本单（待审批且被指派给我，或指派人已停用/未指派且我在审核员池）
+     */
+    @TableField(exist = false)
+    private Boolean reviewable;
+
+    /**
+     * 非表字段：当前登录人可否催办本单（待审批且已指派审批人）
+     */
+    @TableField(exist = false)
+    private Boolean urgeable;
 }

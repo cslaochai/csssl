@@ -68,10 +68,9 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph ISSUE["签发（三条路）"]
-        A1["RA 申请单<br/>提交→审核→签发"] --> Z
-        A2["直发（OPERATOR）<br/>平台生成密钥对"] --> Z
-        A3["CSR / 公钥签发<br/>申请方自持私钥"] --> Z
+    subgraph ISSUE["发证（仅两条路）"]
+        A1["RA 申请单<br/>提交→被指派审批人批准→按单签发"] --> Z
+        A2["二级CA重建申请<br/>5 名保管人 3-of-5 审批→根CA 重签"] --> Z
     end
     Z["有效证书"] --> B{"变更"}
     B -- "吊销/挂起/解除挂起/更新/换密钥" --> C["提交操作单（PENDING）"]
@@ -83,6 +82,7 @@ flowchart TB
 ```
 
 - 直接执行端点已**全部拆除**：吊销/挂起/解除挂起/更新/换密钥含 ADMIN 在内一律走单
+- **直发签发端点已删除**（`POST /admin/certs`、`/certs/csr`、`/certs/public-key` 连同 `cert:issue` 权限点）：证书管理页只是台账，任何发证必须先在申请单/重建单上留下主体与模板快照，并经被指派的他人批准；对外 API 通道（`/ca/api/v1`）同样只有申请/撤销/吊销，无签发
 - 硬校验：同证书同类型仅一张 PENDING、执行前重验证书状态、吊销/挂起必填原因、更新/换密钥必填新有效期、换密钥提交时即校验私钥在库（fail early）、根CA不走单
 
 ## 目录结构
@@ -156,9 +156,6 @@ npm run dev                  # http://localhost:5175
 | 接口 | 说明 |
 |---|---|
 | `GET /admin/certs` · `/{id}` | 证书列表/详情（含 keyHeld 私钥是否在库） |
-| `POST /admin/certs` | 直发签发（OPERATOR，平台生成密钥对） |
-| `POST /admin/certs/csr` | CSR 签发（申请方自持私钥） |
-| `POST /admin/certs/public-key` | 公钥签发（RA 主通道，收公钥代录） |
 | `GET /admin/certs/{id}/cert.pem` | 下载证书（叶子+SUB_CA 完整链） |
 | `GET /admin/certs/{id}/key.pem` | 下载私钥（仅 KEY_ADMIN + 开关控制，仅平台代生成场景有） |
 | `POST /admin/certs/{id}/export/p12` | 导出 PKCS#12（口令不进访问日志） |
@@ -167,6 +164,7 @@ npm run dev                  # http://localhost:5175
 | `POST /admin/cert-ops/{id}/approve` · `/reject` · `/cancel` | 审批（批准即执行）/驳回/发起人撤销 |
 
 > **吊销/挂起/解除挂起/更新/换密钥没有直接执行接口**——只能提交操作单，APPROVER 审批通过才执行。
+> **发证只有 RA 申请的 `POST /admin/applications/{id}/issue` 一个出口**（二级CA 另走 `/admin/ca/subca-rebuild`）；证书管理页无签发按钮，后端无直发端点。
 
 ### 租户 / CA 根 / CRL / 审计 / 系统管理
 
@@ -201,14 +199,14 @@ npm run dev                  # http://localhost:5175
 | 角色 | 职责边界 |
 |---|---|
 | ADMIN 系统管理员 | **只管人工信息**（账号/角色档案），证书/申请/租户档案与审计只查看检索；签发/审核/吊销/租户变更/角色授权一律不沾 |
-| OPERATOR CA操作员 | 申请录入、直发签发、发起操作单 |
+| OPERATOR CA操作员 | 申请录入、对已批准申请执行签发、发起操作单 |
 | APPROVER 审核员 | 审核申请单与操作单（不得与发起人同一人） |
 | AUDITOR 审计员 | 审计查询/验签/归档，只读独立 |
 | SECURITY_ADMIN 安全管理员 | 证书模板与策略（KeyUsage/EKU/策略OID） |
 | KEY_ADMIN 密钥管理员 | 根密钥门限分持/封存/解封、私钥导出开关 |
 | TENANT_ADMIN 租户管理员 | 新建租户直接执行；发起暂停/恢复/关闭/接入密钥重置变更单；API 客户端登记与轮换 |
 | TENANT_APPROVER 租户审批员 | 审批租户变更单（暂停/恢复/关闭/接入密钥重置），批准即执行；不得与发起人同一人 |
-| USER_ADMIN / RA_ADMIN / CERT_OFFICER / AUDIT_ADMIN | 用户角色档案 / RA 流程配置 / 仅签发执行 / 审计策略（按需启用） |
+| USER_ADMIN / RA_ADMIN / CERT_OFFICER / AUDIT_ADMIN | 用户角色档案 / RA 流程配置 / 按已批准申请执行签发 / 审计策略（按需启用） |
 
 权限每次请求从库现取（配置 ∩ 法定上限），改完即时生效、无需重登。
 

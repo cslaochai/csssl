@@ -5,6 +5,7 @@ import com.csssl.common.Result;
 import com.csssl.dto.TemplateCreateDTO;
 import com.csssl.dto.TemplatePageQueryDTO;
 import com.csssl.dto.TemplateUpdateDTO;
+import com.csssl.entity.CaCompany;
 import com.csssl.entity.CertTemplate;
 import com.csssl.entity.LoginUser;
 import com.csssl.service.CertTemplateService;
@@ -42,13 +43,13 @@ public class CertTemplateController {
     public Result<Page<CertTemplate>> page(@Valid TemplatePageQueryDTO query,
                                            HttpServletRequest request) {
         return Result.success("查询成功", templateService.page(query.getPageNo(), query.getPageSize(), query.getKeyword(),
-                CompanyScope.readCompanyScope(UserUtils.requireLoginUser().getCompanyUscc(), query.getCompanyUscc())));
+                CompanyScope.readCompanyScope(query.getCompanyUscc())));
     }
 
     /** 模板详情（按可见集过滤：公司用户访问他公司模板按不存在处理） */
     @GetMapping("/{id}")
     public Result<CertTemplate> detail(@PathVariable Long id, HttpServletRequest request) {
-        return Result.success("查询成功", templateService.detailVisible(id, UserUtils.requireLoginUser().getCompanyUscc()));
+        return Result.success("查询成功", templateService.detailVisible(id, null));
     }
 
     /**
@@ -59,13 +60,11 @@ public class CertTemplateController {
     @PostMapping
     public Result<CertTemplate> create(@Valid @RequestBody TemplateCreateDTO body, HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        String myCompany = loginUser.getCompanyUscc();
+        String myCompany = null;
         String reqCompany = body.getCompanyUscc();
-        String tplCompany = myCompany != null && !myCompany.isBlank()
-                ? CompanyScope.effectiveCompany(myCompany, reqCompany)
-                : (reqCompany == null || reqCompany.isBlank() ? null : reqCompany.trim());
+        String tplCompany = reqCompany == null || reqCompany.isBlank() ? null : reqCompany.trim();
         return Result.success("模板创建成功",
-                templateService.create(body, loginUser.getUsername(), clientIp(request), tplCompany, myCompany));
+                templateService.create(body, loginUser, clientIp(request), tplCompany, myCompany));
     }
 
     /** 更新模板（仅安全管理员/系统管理员；变更落审计；公司操作者仅限本公司模板） */
@@ -75,8 +74,8 @@ public class CertTemplateController {
                                        HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("模板更新成功",
-                templateService.update(id, body, loginUser.getUsername(), clientIp(request),
-                        loginUser.getCompanyUscc()));
+                templateService.update(id, body, loginUser, clientIp(request),
+                        CaCompany.PRIMARY_COMPANY_USCC));
     }
 
     /** 删除模板（仅安全管理员/系统管理员；内置模板不可删；变更落审计；公司操作者仅限本公司模板） */
@@ -84,8 +83,8 @@ public class CertTemplateController {
     @PostMapping("/{id}/delete")
     public Result<Void> delete(@PathVariable Long id, HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
-        templateService.delete(id, loginUser.getUsername(), clientIp(request),
-                loginUser.getCompanyUscc());
+        templateService.delete(id, loginUser, clientIp(request),
+                CaCompany.PRIMARY_COMPANY_USCC);
         return Result.success("模板已删除", null);
     }
 

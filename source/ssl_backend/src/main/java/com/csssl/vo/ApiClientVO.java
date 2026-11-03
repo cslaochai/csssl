@@ -40,7 +40,6 @@ public class ApiClientVO {
         vo.setSecretVersion(c.getSecretVersion());
         vo.setStatus(c.getStatus());
         vo.setLastUsedAt(c.getLastUsedAt());
-        vo.setCreatedBy(c.getCreatedBy());
         vo.setCreatedAt(c.getCreatedAt());
         vo.setRotatedAt(c.getRotatedAt());
         return vo;

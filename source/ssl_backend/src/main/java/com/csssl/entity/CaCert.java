@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
@@ -14,8 +15,9 @@ import java.time.LocalDateTime;
  * CA 证书总账：根CA与所有签发证书（含吊销信息）。私钥密文落库 ssl_key_vault（SM4），不进本表。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_ca_cert")
-public class CaCert {
+public class CaCert extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -99,15 +101,4 @@ public class CaCert {
      */
     @JsonSerialize(using = ToStringSerializer.class)
     private Long templateId;
-
-    /**
-     * 创建人
-     */
-    private String createdBy;
-
-    /**
-     * 创建时间
-     */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 }

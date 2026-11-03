@@ -415,7 +415,6 @@ public class CaService implements ApplicationRunner {
         row.setCertPem(PemUtil.certToPem(cert));
         row.setDescription(CaCompany.LEGACY_NAMESPACE.equals(companyUscc)
                 ? "系统根CA（首次启动自动初始化）" : "公司根CA（开公司时初始化）");
-        row.setCreatedBy("SYSTEM");
         row.setCreatedAt(LocalDateTime.now());
         certMapper.insert(row);
         // 门限化由调用方（run/initRoot）按"份额文件齐全"判据触发 ensureRootShares，无需内存标志
@@ -446,7 +445,6 @@ public class CaService implements ApplicationRunner {
             row.setStatus("VALID");
             row.setCertPem(certPem);
             row.setDescription("系统根CA（从落盘文件恢复）");
-            row.setCreatedBy("SYSTEM");
             row.setCreatedAt(LocalDateTime.now());
             certMapper.insert(row);
             return row;
@@ -715,14 +713,7 @@ public class CaService implements ApplicationRunner {
             if (!RoleCodeEnum.KEY_ADMIN.name().equals(u.getRoleCode())) {
                 throw new IllegalArgumentException("保管人「" + u.getUsername() + "」角色须为密钥管理员(KEY_ADMIN)，当前为「" + u.getRoleCode() + "」");
             }
-            // 公司域约束：保管人只能是"平台级账号"（company_uscc 为空，平台密钥管理岗）或该公司本域账号。
-            // 严禁其他公司的员工持有本公司根私钥份额（跨公司密钥外泄 + 审批越权）。
-            String holderCompany = u.getCompanyUscc();
-            boolean platformLevel = holderCompany == null || holderCompany.isBlank();
-            if (!platformLevel && !holderCompany.equals(companyUscc)) {
-                throw new IllegalArgumentException("保管人「" + u.getUsername() + "」属于其他公司（" + holderCompany
-                        + "），不得担任本公司（" + companyUscc + "）的根私钥保管人；仅平台级密钥管理员或本公司账号可选");
-            }
+            // 单租户化后账号不再携带公司域，保管人归属由本公司 key_share 表绑定决定
         }
         // 清空旧绑定后重绑（幂等）
         keyShareMapper.delete(new LambdaQueryWrapper<CompanyKeyShare>()
@@ -736,7 +727,7 @@ public class CaService implements ApplicationRunner {
             CompanyKeyShare row = new CompanyKeyShare();
             row.setCompanyUscc(companyUscc);
             row.setShareIndex(i);
-            row.setHolderUsername(u.getUsername());
+            row.setHolderUserId(u.getId());
             row.setHolderRealName(u.getRealName());
             row.setShareJson(json);
             row.setCreatedAt(LocalDateTime.now());
@@ -762,10 +753,13 @@ public class CaService implements ApplicationRunner {
      * 查询当前登录人是否为某公司份额保管人，并返回其自身份额（仅本人可见）；
      * 非保管人返回 null（调用方据此屏蔽）。
      */
-    public CompanyKeyShare readShareForHolder(String companyUscc, String username) {
+    public CompanyKeyShare readShareForHolder(String companyUscc, Long userId) {
+        if (userId == null) {
+            return null;
+        }
         return keyShareMapper.selectOne(new LambdaQueryWrapper<CompanyKeyShare>()
                 .eq(CompanyKeyShare::getCompanyUscc, companyUscc)
-                .eq(CompanyKeyShare::getHolderUsername, username));
+                .eq(CompanyKeyShare::getHolderUserId, userId));
     }
 
     /**
@@ -1156,7 +1150,6 @@ public class CaService implements ApplicationRunner {
         row.setStatus("VALID");
         row.setCertPem(PemUtil.certToPem(subCert));
         row.setDescription("服务签发二级CA（根签发，承担在线签发/CRL/OCSP）");
-        row.setCreatedBy("SYSTEM");
         row.setCreatedAt(LocalDateTime.now());
         certMapper.insert(row);
         log.info("[SUB_CA][{}] 已用根签发二级CA：cn={}, algorithm={}, serial={}, 有效期{}天",

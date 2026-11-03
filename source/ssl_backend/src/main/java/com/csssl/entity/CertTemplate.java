@@ -3,20 +3,19 @@ package com.csssl.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
-
-import java.time.LocalDateTime;
+import lombok.EqualsAndHashCode;
 
 /**
  * 证书模板：固化证书类型/算法/有效期/KeyUsage/EKU/策略OID（GM/T 0034 §5.3.4 证书策略管理，
  * GM/T 0015 证书格式）。签发必须按模板进行，杜绝手工拼扩展项。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_cert_template")
-public class CertTemplate {
+public class CertTemplate extends AuditColumns {
 
     @TableId(type = IdType.ASSIGN_ID)
     @JsonSerialize(using = ToStringSerializer.class)
@@ -76,10 +75,4 @@ public class CertTemplate {
      * 模板说明
      */
     private String description;
-
-    /**
-     * 创建时间
-     */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime createdAt;
 }

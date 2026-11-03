@@ -72,8 +72,8 @@ public class SecurityConfig {
     private static void forbidden(HttpServletRequest request, HttpServletResponse response,
                                   org.springframework.security.access.AccessDeniedException e) throws IOException {
         LoginUser loginUser = UserUtils.getLoginUser();
-        log.warn("[权限拦截] 拒绝访问 user={} 角色={} uri={}",
-                loginUser == null ? null : loginUser.getUsername(),
+        log.warn("[权限拦截] 拒绝访问 user={} roleCode={} uri={}",
+                loginUser == null ? null : loginUser.getRealName(),
                 loginUser == null ? null : loginUser.getRoleCode(),
                 request.getRequestURI());
         write(response, 403, "权限不足");

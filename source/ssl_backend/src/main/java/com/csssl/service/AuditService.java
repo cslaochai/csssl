@@ -2,9 +2,12 @@ package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.csssl.config.AuditMetaObjectHandler;
 import com.csssl.entity.AuditLog;
 import com.csssl.entity.CaCompany;
+import com.csssl.entity.LoginUser;
 import com.csssl.mapper.AuditLogMapper;
+import com.csssl.util.UserUtils;
 import com.csssl.vo.AuditExportVO;
 import com.csssl.vo.AuditVerifyVO;
 import com.csssl.vo.ChainBrokenVO;
@@ -44,6 +47,17 @@ public class AuditService {
      */
     private static final int DETAIL_MAX_LEN = 500;
 
+    /**
+     * 现行防篡改签名口径：canonical 首段为 user_id
+     */
+    public static final int SIGN_VER_UID = 2;
+
+    /**
+     * 历史签名口径：canonical 首段为登录账号。账号列已从库中删除，老记录无法再逐行重算验签，
+     * 只参与哈希链衔接（对账时跳过自签名校验，不判为断链）。
+     */
+    public static final int SIGN_VER_LEGACY_USERNAME = 1;
+
     private final AuditLogMapper auditLogMapper;
     private final AuditSigner auditSigner;
 
@@ -52,7 +66,7 @@ public class AuditService {
      */
     public static String canonical(AuditLog logRow) {
         String base = String.join("|",
-                nz(logRow.getUsername()), nz(logRow.getAction()), nz(logRow.getTarget()),
+                nz(logRow.getUserId()), nz(logRow.getAction()), nz(logRow.getTarget()),
                 nz(logRow.getDetail()), nz(logRow.getIp()),
                 logRow.getCreatedAt() == null ? "" : TS.format(logRow.getCreatedAt()));
         return logRow.getPrevSign() == null || logRow.getPrevSign().isBlank()
@@ -86,6 +100,10 @@ public class AuditService {
         return s == null ? "" : s;
     }
 
+    private static String nz(Long v) {
+        return v == null ? "" : String.valueOf(v);
+    }
+
     /**
      * 超长详情截断到列宽内（保留可读尾部标记，签名基于截断后的值，验签自洽）
      */
@@ -97,29 +115,51 @@ public class AuditService {
     }
 
     /**
-     * 记录一条审计日志（自动签名防篡改 + 哈希链；公司归属缺省=平台主公司/全局操作）
+     * 记录一条审计日志（当前登录人，公司归属缺省=平台主公司/全局操作）
      */
     @Transactional(rollbackFor = Exception.class)
-    public void record(String username, String action, String target, String detail, String ip) {
-        record(username, action, target, detail, ip, CaCompany.PRIMARY_COMPANY_USCC);
+    public void record(String action, String target, String detail, String ip) {
+        record(UserUtils.getLoginUser(), action, target, detail, ip, CaCompany.PRIMARY_COMPANY_USCC);
+    }
+
+    /**
+     * 记录一条审计日志（登录人版，自动签名防篡改 + 哈希链；公司归属缺省=平台主公司/全局操作）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void record(LoginUser actor, String action, String target, String detail, String ip) {
+        record(actor, action, target, detail, ip, CaCompany.PRIMARY_COMPANY_USCC);
     }
 
     /**
      * 记录一条审计日志（公司域版）：companyUscc 落到审计行 company_uscc 列，供数据域强制过滤。
      *
      * <p>口径：签发/吊销/挂起等记对象（证书/申请单）所属公司；登录/建号等按用户公司；
-     * 全局操作与 companyUscc 为空的入参统一归位 default（列 NOT NULL DEFAULT 'default'）。
-     * 注意 company_uscc 不参与 canonical 签名串——存量记录签名口径不变，公司归属仅作检索/过滤维度。</p>
+     * 全局操作与 companyUscc 为空的入参统一归位平台主公司（列 NOT NULL DEFAULT 'default'）。
+     * 注意 company_uscc 不参与 canonical 签名串——记录签名口径不变，公司归属仅作检索/过滤维度。</p>
      */
     @Transactional(rollbackFor = Exception.class)
-    public void record(String username, String action, String target, String detail, String ip, String companyUscc) {
+    public void record(LoginUser actor, String action, String target, String detail, String ip, String companyUscc) {
+        recordAs(actor == null ? null : actor.getUserId(),
+                actor == null ? AuditMetaObjectHandler.SYSTEM_NAME : actor.getRealName(),
+                action, target, detail, ip, companyUscc);
+    }
+
+    /**
+     * 记录一条审计日志（无登录态口径）：外部 API 调用、登录失败等场景直接指定 userId + displayName；
+     * 登录账号绝不入审计表。userId 留空时 displayName 写「系统」或外部客户端名称。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void recordAs(Long userId, String displayName, String action, String target,
+                         String detail, String ip, String companyUscc) {
         AuditLog logRow = new AuditLog();
-        logRow.setUsername(username == null || username.isBlank() ? "SYSTEM" : username);
+        logRow.setUserId(userId);
+        logRow.setRealName(displayName);
         logRow.setCompanyUscc(companyUscc == null || companyUscc.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : companyUscc);
         logRow.setAction(action);
         logRow.setTarget(target);
         logRow.setDetail(truncate(detail));
         logRow.setIp(ip);
+        logRow.setSignVer(SIGN_VER_UID);
         // 截断到微秒：LocalDateTime.now() 含纳秒，MySQL DATETIME(6) 存储时对第 7 位四舍五入，
         // 若直接入库会与 canonical 中的 .SSSSSS 截断值差 1 微秒导致验签偶发失败
         LocalDateTime now = LocalDateTime.now();
@@ -135,8 +175,8 @@ public class AuditService {
         }
         try {
             logRow.setSign(auditSigner.sign(canonical(logRow)));
-            log.debug("[审计] 签名完成 user={} action={} canonical={} sign={}",
-                    logRow.getUsername(), logRow.getAction(), canonical(logRow), logRow.getSign());
+            log.debug("[审计] 签名完成 uid={} action={} canonical={} sign={}",
+                    logRow.getUserId(), logRow.getAction(), canonical(logRow), logRow.getSign());
         } catch (Exception e) {
             // 签名失败不阻断审计留痕（记录仍入库），仅告警
             log.warn("[审计] 签名失败，记录不带签名入库: {}", e.getMessage());
@@ -164,9 +204,20 @@ public class AuditService {
     }
 
     /**
-     * 兼容验签：优先新格式（含哈希链段），失败再按旧格式（无 prevSign 段）校验，保证 P0 老记录仍可验
+     * 是否为旧签名口径（canonical 首段是登录账号）：账号列已从库中删除，这类记录不可再逐行重算验签。
+     */
+    private static boolean legacyCanonical(AuditLog row) {
+        return row.getSignVer() == null || row.getSignVer() == SIGN_VER_LEGACY_USERNAME;
+    }
+
+    /**
+     * 兼容验签：优先新格式（含哈希链段），失败再按旧格式（无 prevSign 段）校验。
+     * 旧签名口径（sign_ver=1）的记录直接判不可验——重算需要用已删除的账号列。
      */
     private boolean verifyCompat(AuditLog logRow) {
+        if (legacyCanonical(logRow)) {
+            return false;
+        }
         if (logRow.getSign() == null || logRow.getSign().isBlank()) {
             return false;
         }
@@ -194,15 +245,19 @@ public class AuditService {
             throw new IllegalArgumentException("审计记录不存在（id=" + id + "）");
         }
         String canon = canonical(logRow);
-        boolean valid = verifyCompat(logRow);
+        boolean legacy = legacyCanonical(logRow);
+        boolean valid = !legacy && verifyCompat(logRow);
         String chainNote = valid && logRow.getPrevSign() != null && !logRow.getPrevSign().isBlank()
                 ? "，且哈希链指向的记录签名一致" : "";
         AuditVerifyVO vo = new AuditVerifyVO();
         vo.setId(id);
         vo.setValid(valid);
-        vo.setMessage(valid ? "签名有效：记录未被篡改，由审计签名密钥签发" + chainNote
+        vo.setMessage(legacy
+                ? "该记录为旧签名口径（规范化串首段是登录账号）：账号列已按最小暴露原则从审计表移除，无法再逐行重算验签；"
+                + "其完整性只通过哈希链衔接体现，新记录一律按 user_id 口径签名"
+                : valid ? "签名有效：记录未被篡改，由审计签名密钥签发" + chainNote
                 : "签名校验失败：记录内容已被改动或签名缺失");
-        vo.setCanonical(canon);
+        vo.setCanonical(legacy ? "" : canon);
         vo.setSign(logRow.getSign() == null ? "" : logRow.getSign());
         vo.setPrevSign(logRow.getPrevSign() == null ? "" : logRow.getPrevSign());
         return vo;
@@ -271,10 +326,13 @@ public class AuditService {
      */
     private void checkChainRow(AuditLog row, AuditLog prevRow, List<ChainBrokenVO> broken) {
         Long id = row.getId();
-        if (row.getSign() == null || row.getSign().isBlank()) {
-            broken.add(brokenItem(id, "记录无签名，无法自证未被篡改"));
-        } else if (!verifyCompat(row)) {
-            broken.add(brokenItem(id, "自签名校验失败：内容已被改动或签名不匹配"));
+        // 旧签名口径无法重算（需要用已删除的账号列），只校验链接关系，不判自签名有效性
+        if (!legacyCanonical(row)) {
+            if (row.getSign() == null || row.getSign().isBlank()) {
+                broken.add(brokenItem(id, "记录无签名，无法自证未被篡改"));
+            } else if (!verifyCompat(row)) {
+                broken.add(brokenItem(id, "自签名校验失败：内容已被改动或签名不匹配"));
+            }
         }
         if (row.getPrevId() == null) {
             if (prevRow != null) {
@@ -362,16 +420,18 @@ public class AuditService {
         }
         List<AuditLog> logs = auditLogMapper.selectList(qw);
         StringBuilder sb = new StringBuilder("\uFEFF"); // UTF-8 BOM，Excel 直接识别中文
-        sb.append("id,username,company_uscc,action,target,detail,ip,created_at,prev_sign,sign\n");
+        sb.append("id,user_id,real_name,company_uscc,action,target,detail,ip,created_at,sign_ver,prev_sign,sign\n");
         for (AuditLog l : logs) {
             sb.append(l.getId()).append(',')
-                    .append(csv(l.getUsername())).append(',')
+                    .append(csv(nz(l.getUserId()))).append(',')
+                    .append(csv(l.getRealName())).append(',')
                     .append(csv(companyOf(l))).append(',')
                     .append(csv(l.getAction())).append(',')
                     .append(csv(l.getTarget())).append(',')
                     .append(csv(l.getDetail())).append(',')
                     .append(csv(l.getIp())).append(',')
                     .append(l.getCreatedAt() == null ? "" : TS.format(l.getCreatedAt())).append(',')
+                    .append(l.getSignVer() == null ? SIGN_VER_LEGACY_USERNAME : l.getSignVer()).append(',')
                     .append(csv(l.getPrevSign())).append(',')
                     .append(csv(l.getSign())).append('\n');
         }

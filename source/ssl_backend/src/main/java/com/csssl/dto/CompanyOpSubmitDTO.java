@@ -23,4 +23,10 @@ public class CompanyOpSubmitDTO {
      * 变更事由（审批依据，必填）
      */
     private String reason;
+
+    /**
+     * 新密钥保管人账号（仅 REASSIGN_HOLDERS 重新指派保管人专用，须恰好 5 名、互不相同、均为启用的密钥管理员）。
+     * 其他变更类型忽略本字段。
+     */
+    private java.util.List<String> newHolders;
 }

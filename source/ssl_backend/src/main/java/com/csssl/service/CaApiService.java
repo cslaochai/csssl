@@ -172,7 +172,8 @@ public class CaApiService {
         CertApplication app = requireOwnIssuedApplication(client, cert);
         requireEmployeeMatch(client, app, body);
         String reason = body.getReason().trim();
-        certService.revoke(cert.getId(), reason, apiUsername(client), ip);
+        LoginUser apiActor = new LoginUser(null, apiUsername(client), null, false, null);
+        certService.revoke(cert.getId(), reason, apiActor, ip);
         ApiCertStatusVO vo = statusVo(certService.findById(cert.getId()));
         log.info("[对外API][{}] 吊销证书 appId={}, serial={}, applyNo={}, employee={}, reason={}",
                 client.getCompanyUscc(), client.getAppId(), cert.getSerialHex(), app.getApplyNo(),

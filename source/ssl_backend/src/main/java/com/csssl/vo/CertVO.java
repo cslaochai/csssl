@@ -34,8 +34,7 @@ public class CertVO {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime revokedAt;
     private String description;
-    private String createdBy;
-    /** 签发人中文姓名（展示用，后端按 username 回填；查不到时为 null 前端回落账号） */
+    /** 签发人中文姓名（业务表姓名快照；未登录的系统签发为「系统」） */
     private String createdByName;
     /** 私钥是否在 CA 侧保险库（在线签发=true 可下载/导P12；CSR/公钥直签=false 私钥由申请方自持） */
     private Boolean keyHeld;
@@ -58,7 +57,7 @@ public class CertVO {
         vo.setRevokeReason(c.getRevokeReason());
         vo.setRevokedAt(c.getRevokedAt());
         vo.setDescription(c.getDescription());
-        vo.setCreatedBy(c.getCreatedBy());
+        vo.setCreatedByName(c.getCreatedByName());
         vo.setCreatedAt(c.getCreatedAt());
         return vo;
     }

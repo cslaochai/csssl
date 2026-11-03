@@ -3,7 +3,8 @@ package com.csssl.dto;
 import lombok.Data;
 
 /**
- * 公钥签发请求（RA 场景）：申请方自持私钥，仅提交 Subject DN 与公钥 PEM。
+ * 公钥签发的内部载体：由 RA 申请单（已批准）组装后传给 CertService#issueWithPublicKey，
+ * 不再作为任何 HTTP 端点的请求体——申请方自持私钥，只提交 Subject DN 与公钥 PEM。
  */
 @Data
 public class PublicKeyIssueDTO {

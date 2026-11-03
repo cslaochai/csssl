@@ -3,6 +3,8 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.csssl.config.AuditMetaObjectHandler;
+import com.csssl.entity.LoginUser;
 import com.csssl.entity.Message;
 import com.csssl.mapper.MessageMapper;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,8 @@ import java.util.List;
 
 /**
  * 站内信 / 消息中心（面向 CA 内部用户的待办与结果通知）。
+ *
+ * <p>收发件人一律 {@code ssl_sys_user.id} + 真实姓名快照：账号是凭证，不入业务表也不下发前端。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -21,47 +25,50 @@ public class MessageService {
 
     private final MessageMapper messageMapper;
 
-    /** 发消息（系统催办/审批结果通知统一入口） */
+    /**
+     * 发消息（催办/审批结果通知统一入口）：收件人按 user_id 归属；
+     * sender 为空表示系统自动通知（sender_user_id 留空、姓名写「系统」）。
+     */
     @Transactional(rollbackFor = Exception.class)
-    public void send(String companyUscc, String recipientUsername, String recipientRealName,
-                     String senderUsername, String type, String title, String content,
+    public void send(String companyUscc, Long recipientUserId, String recipientRealName,
+                     LoginUser sender, String type, String title, String content,
                      String bizType, String bizId) {
         Message m = new Message();
         m.setCompanyUscc(companyUscc == null || companyUscc.isBlank() ? "default" : companyUscc);
-        m.setRecipientUsername(recipientUsername);
+        m.setRecipientUserId(recipientUserId);
         m.setRecipientRealName(recipientRealName);
-        m.setSenderUsername(senderUsername);
+        m.setSenderUserId(sender == null ? null : sender.getUserId());
+        m.setSenderRealName(sender == null ? AuditMetaObjectHandler.SYSTEM_NAME : sender.getRealName());
         m.setType(type);
         m.setTitle(title);
         m.setContent(content);
         m.setBizType(bizType);
         m.setBizId(bizId);
         m.setReadFlag(0);
-        m.setCreatedAt(LocalDateTime.now());
         messageMapper.insert(m);
     }
 
     /** 当前登录人的消息分页（仅本人；readFlag=0 仅未读，null=全部） */
-    public Page<Message> pageMy(String username, long pageNo, long pageSize, Integer readFlag) {
+    public Page<Message> pageMy(Long userId, long pageNo, long pageSize, Integer readFlag) {
         LambdaQueryWrapper<Message> qw = new LambdaQueryWrapper<Message>()
-                .eq(Message::getRecipientUsername, username)
+                .eq(Message::getRecipientUserId, userId)
                 .eq(readFlag != null, Message::getReadFlag, readFlag)
                 .orderByDesc(Message::getCreatedAt);
         return messageMapper.selectPage(new Page<>(pageNo, pageSize), qw);
     }
 
     /** 未读消息数（铃铛红点） */
-    public long unreadCount(String username) {
+    public long unreadCount(Long userId) {
         return messageMapper.selectCount(new LambdaQueryWrapper<Message>()
-                .eq(Message::getRecipientUsername, username)
+                .eq(Message::getRecipientUserId, userId)
                 .eq(Message::getReadFlag, 0));
     }
 
     /** 标记已读（单条或批量 id；ids 为空=标记全部已读） */
     @Transactional(rollbackFor = Exception.class)
-    public void markRead(String username, List<Long> ids) {
+    public void markRead(Long userId, List<Long> ids) {
         messageMapper.update(null, new LambdaUpdateWrapper<Message>()
-                .eq(Message::getRecipientUsername, username)
+                .eq(Message::getRecipientUserId, userId)
                 .in(ids != null && !ids.isEmpty(), Message::getId, ids)
                 .set(Message::getReadFlag, 1)
                 .set(Message::getReadAt, LocalDateTime.now()));

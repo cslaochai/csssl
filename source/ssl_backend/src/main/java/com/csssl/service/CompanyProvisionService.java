@@ -1,6 +1,7 @@
 package com.csssl.service;
 
 import com.csssl.entity.CaCompany;
+import com.csssl.entity.LoginUser;
 import com.csssl.service.CaService;
 import com.csssl.vo.ApiClientSecretVO;
 import com.csssl.vo.CompanyCreateVO;
@@ -35,14 +36,14 @@ public class CompanyProvisionService {
     @Transactional(rollbackFor = Exception.class)
     public CompanyCreateVO create(String uscc, String companyName, String subjectO, String algorithm,
                                  String contact, String contactPhone, String description,
-                                 List<String> shareHolders, String username, String ip) {
+                                 List<String> shareHolders, LoginUser actor, String ip) {
         CaCompany company = companyService.create(uscc, companyName, subjectO, algorithm,
                 contact, contactPhone, description);
         ApiClientSecretVO credential = apiClientService.create(company.getUscc(),
-                ApiClientService.DEFAULT_CLIENT_NAME, null, null, username, ip);
+                ApiClientService.DEFAULT_CLIENT_NAME, null, null, actor, ip);
         // 建根（initRoot 已在 companyService.create 内完成）→ 指定 5 名密钥份额保管人，一人一份落表
         caService.assignRootShares(company.getUscc(), shareHolders);
-        auditService.record(username, "COMPANY_CREATE", company.getUscc(),
+        auditService.record(actor, "COMPANY_CREATE", company.getUscc(),
                 "新建公司 " + company.getCompanyName() + "（统一社会信用代码=" + company.getUscc()
                         + "，主体O=" + company.getSubjectO() + "，算法=" + company.getAlgorithm()
                         + "），已初始化独立根CA与SUB_CA、指定 " + (shareHolders == null ? 0 : shareHolders.size())

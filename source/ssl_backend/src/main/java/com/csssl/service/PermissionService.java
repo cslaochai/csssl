@@ -93,7 +93,7 @@ public class PermissionService {
             log.warn("[权限] 未登录访问受限接口 uri={}", request.getRequestURI());
             throw new SecurityException("未登录或登录已过期");
         }
-        String user = loginUser.getUsername();
+        String user = loginUser.getRealName();
         String role = loginUser.getRoleCode();
         if (permCodes == null || permCodes.length == 0) {
             return;
@@ -132,7 +132,7 @@ public class PermissionService {
      * @param auditCompany 审计归属公司（角色配置属全局管理动作，通常 default；公司管理员操作记本公司）
      */
     @Transactional(rollbackFor = Exception.class)
-    public void save(String roleCode, Collection<String> permCodes, String operator, String ip, String auditCompany) {
+    public void save(String roleCode, Collection<String> permCodes, LoginUser actor, String ip, String auditCompany) {
         if (roleCode == null || roleCode.isBlank()) {
             throw new IllegalArgumentException("角色编码不能为空");
         }
@@ -188,9 +188,9 @@ public class PermissionService {
             permMapper.insert(row);
         }
         cache.remove(rc);
-        auditService.record(operator, "ROLE_PERM_UPDATE", rc,
+        auditService.record(actor, "ROLE_PERM_UPDATE", rc,
                 diffDetail(rc, before, target), ip, auditCompany);
-        log.info("[角色] {} 权限已更新：{} 项（操作人 {}）", rc, target.size(), operator);
+        log.info("[角色] {} 权限已更新：{} 项（操作人 {}）", rc, target.size(), actor == null ? "系统" : actor.getRealName());
     }
 
     /**

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 /**
  * 密钥保险库条目：私钥 SM4 加密后的 hex 密文落库（替代原 key.pem.enc 文件形态）。
@@ -11,8 +12,9 @@ import lombok.Data;
  * 数据库被整库拖走也拿不到明文。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ssl_key_vault")
-public class KeyVaultEntry {
+public class KeyVaultEntry extends AuditColumns {
 
     @TableId(type = IdType.AUTO)
     private Long id;

@@ -25,6 +25,25 @@
 - **按钮显隐**：由服务端逐行回算一个 `reviewable` 随列表返回，前端只看它（不再自己拼 `hasPerm`），保证前后端同一口径；不可处理的动作**直接不渲染**，禁止置灰加解释文案。
 - 处理人停用/被删时单据回落到处理人池共同接管，避免永久卡死。范例：`CertApplicationService#applyViewerScope` / `#checkAssignee`。
 
+## 人员身份口径（业务表禁止存登录账号）
+
+登录账号 `ssl_sys_user.username` 是可登录凭据的一半，**只允许存在用户表这一处**；业务表、审计 detail 文案、消息正文、接口出参一律不得出现账号：
+
+- 人员列一律 `xxx_user_id BIGINT`（指向 `ssl_sys_user.id`）+ 配套的真实姓名快照列（`xxx_name` / `xxx_real_name`）；名单类列同理，用「idCSV + 姓名CSV」两组同序，不用账号CSV。
+- 姓名**只在写入时**从 `UserUtils.getLoginUser().getRealName()` 取快照落库，读的时候直接读那一列。**禁止**写「按账号回查 `ssl_sys_user` 拼姓名」的 helper——既是 N+1，又是账号泄露面。
+- 无登录态的自动流转/系统写入：`user_id` 留 NULL、姓名写「系统」（`AuditMetaObjectHandler.SYSTEM_NAME`），不许造 `id=0` 或 `api:xxx` 这类伪账号；对外 API 通道的操作人姓名写 `ssl_api_client.client_name`。
+- 6 个通用审计列（创建人ID/姓名/创建时间 + 修改人ID/姓名/修改时间）由 `AuditMetaObjectHandler` 自动填：实体一律 `extends AuditColumns`，业务代码不许手工 `setCreatedAt(...)`。正在做的工作流（`flow_*` 表 + `com.csssl.workflow`）暂不挂这组列。
+- 人的比较一律 `Objects.equals(...getUserId(), ...)`；查询条件、`LambdaQueryWrapper` 方法引用、裸列名全部用 `*_user_id`。
+- 允许显示账号的只有四处：用户与角色管理页、登录页演示凭据弹窗、审批人下拉、保管人下拉。
+- `ssl_sys_user` 没有 `company_uscc`，`LoginUser` 也不带它：人不挂公司，操作哪家公司由请求参数显式声明 + 角色权限点收口，口径集中在 `CompanyScope`（只认请求参数，没有 operatorCompany 首参，也没有 `requireRowVisible`）。
+
+## 发证只有两条路径（禁止直发）
+
+- 叶子证书：RA 申请单（`/admin/applications` 提交→被指派审批人批准→持 `app:issue` 按批准快照签发）。
+- 二级CA：`/admin/ca/subca-rebuild`（5 名保管人 3-of-5 审批 + 份额解封后用根CA 重签），叶子证书不得由 SUB_CA 之外的路径签。
+- **不得新增任何直接签发端点/服务方法/权限点**：`POST /admin/certs`、`/admin/certs/csr`、`/admin/certs/public-key` 与 `cert:issue` 已删除（含 `IssueCertRequestDTO`/`CsrIssueRequestDTO`、前端签发按钮与 `issueCert*` 封装），对外 API 通道 `/ca/api/v1` 也只有 apply/cancel/revoke。
+- 「证书管理」页是台账不是发证入口：不要在那儿加签发按钮；`CertService#issueWithPublicKey(companyUscc, req, policy, ...)` 是唯一发证出口，且只允许 `CertApplicationService#issue` 调用。
+
 ## 常用命令
 
 - 后端：`source/ssl_backend` 下 `mvn -q -DskipTests compile`；本机 8092 是开发实例，验证新接口另起 8093：`mvn -q spring-boot:run -Dspring-boot.run.arguments=--server.port=8093`（测完只杀自己起的进程，勿动 8092）。
@@ -40,6 +59,7 @@
   口令经环境变量 `MYSQL_PWD` 传入（不出现在命令行里）；需 PATH 中有 mysql 客户端。
 - **纯 SQL**：`mysql -h <host> -u <user> -p <db> < source/ssl_backend/db/reset.sql`，再导入 `schema.sql`。
 - ⚠️ **`reset.sql` 会连用户账号一起删**。只清业务数据、保留账号 → 改用 `db/reset-keep-users.sql`（保留 `ssl_sys_user` / `ssl_sys_role` / `ssl_role_perm`）。
+- 🔁 **保留历史数据只做结构升级**（不改口径的常规发版不要跑它）：`db/migrate-actor-user-id.sql` —— 幂等可重跑，给业务表加 `*_user_id` + 姓名快照、把账号列的数据搬过去后 DROP 旧列，补 6 个通用审计列与 `ssl_audit_log.sign_ver`，最后删 `ssl_sys_user.company_uscc`。清库路线（`reset.sql` + `schema.sql`）与迁移路线二选一，别混着跑。
 - ⚠️ **清库前必须先备份**（库 + 磁盘 `master.key`）：
   - 备份库：导出为 SQL（结构+数据）即可回灌；但 `cert_pem` 等 PEM 文本含真实换行，回灌时 INSERT 语句**跨多行**，须累积到以 `);` 结尾才算一条。
   - 备份 `store-dir/master.key`：旧 `ssl_key_vault` 密文依赖它，丢了旧私钥**永久解不开**。

@@ -52,7 +52,7 @@ public class CaRootController {
     @GetMapping("/status")
     public Result<CaStatusVO> status(@RequestParam(required = false) String companyUscc,
                                      HttpServletRequest request) {
-        String company = CompanyScope.effectiveCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.effectiveCompany(companyUscc);
         checkCompanyForRead(company);
         return Result.success("查询成功", caService.status(company));
     }
@@ -62,11 +62,10 @@ public class CaRootController {
     @PostMapping("/init")
     public Result<CaStatusVO> init(@RequestParam(required = false) String companyUscc,
                                    HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForWrite(company);
-        String username = UserUtils.requireLoginUser().getUsername();
         CaStatusVO vo = caService.initRoot(company);
-        auditService.record(username, "CA_INIT", tag(company, null),
+        auditService.record(UserUtils.requireLoginUser(), "CA_INIT", tag(company, null),
                 "初始化根CA[" + company + "]：" + vo.getCn() + "（序列号 " + vo.getSerialHex() + "）",
                 clientIp(request), company);
         return Result.success("根CA初始化完成", vo);
@@ -77,11 +76,10 @@ public class CaRootController {
     @PostMapping("/seal")
     public Result<CaStatusVO> seal(@RequestParam(required = false) String companyUscc,
                                    HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForWrite(company);
-        String username = UserUtils.requireLoginUser().getUsername();
         caService.sealRootKey(company);
-        auditService.record(username, "CA_SEAL", tag(company, null),
+        auditService.record(UserUtils.requireLoginUser(), "CA_SEAL", tag(company, null),
                 "封存根CA私钥（离线化）[" + company + "]", clientIp(request), company);
         CaStatusVO vo = caService.status(company);
         return Result.success("根CA私钥已封存离线，日常签发由 SUB_CA 承担", vo);
@@ -92,11 +90,10 @@ public class CaRootController {
     @PostMapping("/unseal")
     public Result<CaStatusVO> unseal(@RequestParam(required = false) String companyUscc,
                                      HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForWrite(company);
-        String username = UserUtils.requireLoginUser().getUsername();
         caService.unsealRootKey(company);
-        auditService.record(username, "CA_UNSEAL", tag(company, null),
+        auditService.record(UserUtils.requireLoginUser(), "CA_UNSEAL", tag(company, null),
                 "解封根CA私钥[" + company + "]", clientIp(request), company);
         return Result.success("根CA私钥已解封，恢复在线态", caService.status(company));
     }
@@ -108,7 +105,7 @@ public class CaRootController {
     @GetMapping("/shares")
     public Result<RootSharesVO> shares(@RequestParam(required = false) String companyUscc,
                                        HttpServletRequest request) {
-        String company = CompanyScope.effectiveCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.effectiveCompany(companyUscc);
         checkCompanyForRead(company);
         return Result.success("查询成功", caService.shareState(company));
     }
@@ -121,11 +118,10 @@ public class CaRootController {
     @PostMapping("/shares/migrate")
     public Result<RootSharesVO> migrateShares(@RequestParam(required = false) String companyUscc,
                                               HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForWrite(company);
-        String username = UserUtils.requireLoginUser().getUsername();
         RootSharesVO state = caService.migrateRootShares(company);
-        auditService.record(username, "CA_SHARE_GENERATE", tag(company, "ROOT"),
+        auditService.record(UserUtils.requireLoginUser(), "CA_SHARE_GENERATE", tag(company, "ROOT"),
                 "根私钥切换为 Shamir(3,5) 门限分持[" + company + "]（5 份份额落盘，原始加密文件已删除）",
                 clientIp(request), company);
         return Result.success("根私钥已切换为 Shamir(3,5) 门限分持，请下载并离线保管 5 份份额", state);
@@ -137,14 +133,13 @@ public class CaRootController {
     public Result<RootShareVO> downloadShare(@PathVariable int index,
                                              @RequestParam(required = false) String companyUscc,
                                              HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForRead(company);
         if (index < 1 || index > CaService.SHARE_TOTAL) {
             throw new IllegalArgumentException("份额编号无效（有效范围 1~" + CaService.SHARE_TOTAL + "）");
         }
         String json = caService.readShareJson(company, index);
-        String username = UserUtils.requireLoginUser().getUsername();
-        auditService.record(username, "CA_SHARE_DOWNLOAD", tag(company, "SHARE-" + index),
+        auditService.record(UserUtils.requireLoginUser(), "CA_SHARE_DOWNLOAD", tag(company, "SHARE-" + index),
                 "导出公司[" + company + "]第 " + index + " 份根密钥门限份额（请离线保管）", clientIp(request), company);
         try {
             RootShareVO share = new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, RootShareVO.class);
@@ -160,12 +155,11 @@ public class CaRootController {
     public Result<CaStatusVO> unsealShares(@RequestParam(required = false) String companyUscc,
                                            @Valid @RequestBody ShareUnsealDTO body,
                                            HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForWrite(company);
         List<String> shares = body.getShares();
-        String username = UserUtils.requireLoginUser().getUsername();
         caService.unsealRootKeyWithShares(company, shares);
-        auditService.record(username, "CA_UNSEAL_SHARES", tag(company, "ROOT"),
+        auditService.record(UserUtils.requireLoginUser(), "CA_UNSEAL_SHARES", tag(company, "ROOT"),
                 "通过 " + (shares == null ? 0 : shares.size()) + " 份门限份额解封根私钥（内存缓存）[" + company + "]",
                 clientIp(request), company);
         return Result.success("根私钥已通过 " + (shares == null ? 0 : shares.size()) + " 份份额解封（内存缓存），可进行 SUB_CA 轮换等维护", caService.status(company));
@@ -180,11 +174,10 @@ public class CaRootController {
     @PreAuthorize("hasAuthority('ca:share:assign')")
     @PostMapping("/shares/assign")
     public Result<Void> assignShares(@Valid @RequestBody ShareAssignDTO body, HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), body.getCompanyUscc());
+        String company = CompanyScope.requireExplicitCompany(body.getCompanyUscc());
         checkCompanyForWrite(company);
-        String username = UserUtils.requireLoginUser().getUsername();
         caService.assignRootShares(company, body.getHolderUsernames());
-        auditService.record(username, "CA_SHARE_ASSIGN", tag(company, null),
+        auditService.record(UserUtils.requireLoginUser(), "CA_SHARE_ASSIGN", tag(company, null),
                 "指定根私钥份额保管人[" + company + "]：" + String.join(",", body.getHolderUsernames()), clientIp(request), company);
         return Result.success("已指定 " + (body.getHolderUsernames() == null ? 0 : body.getHolderUsernames().size()) + " 名密钥保管人（一人一份）", null);
     }
@@ -199,10 +192,9 @@ public class CaRootController {
     @PreAuthorize("hasAnyAuthority('ca:share:view','ca:share:assign','ca:subca:rebuild:apply','ca:subca:rebuild:execute')")
     @GetMapping("/shares/overview")
     public Result<CaShareOverviewVO> shareOverview(@RequestParam(required = false) String companyUscc) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForRead(company);
-        String username = UserUtils.requireLoginUser().getUsername();
-        return Result.success("查询成功", rebuildService.overview(company, username));
+        return Result.success("查询成功", rebuildService.overview(company, UserUtils.requireLoginUser()));
     }
 
     /** 导出根证书 PEM（供各子系统信任链配置） */
@@ -210,10 +202,9 @@ public class CaRootController {
     @GetMapping("/root/download")
     public String downloadRoot(@RequestParam(required = false) String companyUscc,
                                HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForRead(company);
-        String username = UserUtils.requireLoginUser().getUsername();
-        auditService.record(username, "CERT_DOWNLOAD", tag(company, "ROOT"),
+        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", tag(company, "ROOT"),
                 "导出根CA证书[" + company + "]", clientIp(request), company);
         return caService.exportRootPem(company);
     }
@@ -223,10 +214,9 @@ public class CaRootController {
     @GetMapping("/subca/download")
     public String downloadSubCa(@RequestParam(required = false) String companyUscc,
                                 HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(UserUtils.requireLoginUser().getCompanyUscc(), companyUscc);
+        String company = CompanyScope.requireExplicitCompany(companyUscc);
         checkCompanyForRead(company);
-        String username = UserUtils.requireLoginUser().getUsername();
-        auditService.record(username, "CERT_DOWNLOAD", tag(company, "SUB_CA"),
+        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", tag(company, "SUB_CA"),
                 "导出服务签发二级CA证书[" + company + "]", clientIp(request), company);
         return caService.exportSubCaPem(company);
     }

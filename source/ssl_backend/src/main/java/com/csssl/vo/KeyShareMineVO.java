@@ -29,9 +29,9 @@ public class KeyShareMineVO {
     private String yHex;
 
     /**
-     * 保管人账号
+     * 保管人真实姓名
      */
-    private String holderUsername;
+    private String holderRealName;
 
     /**
      * 份额完整 JSON（用于复制后粘贴到"加载根私钥"输入框；含 index/total/threshold/yHex）

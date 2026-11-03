@@ -1,5 +1,6 @@
 package com.csssl.service;
 
+import com.csssl.entity.LoginUser;
 import com.csssl.util.CertUtil;
 import com.csssl.util.KeyVault;
 import com.csssl.util.PemUtil;
@@ -168,9 +169,9 @@ public class TsaService {
     /**
      * 审计留痕（盖章动作）
      */
-    public void audit(String username, String serial, String digestPrefix, String ip) {
+    public void audit(LoginUser actor, String serial, String digestPrefix, String ip) {
         try {
-            auditService.record(username == null ? "ANON" : username, "TSA_STAMP",
+            auditService.record(actor, "TSA_STAMP",
                     serial, "时间戳盖章：摘要 " + digestPrefix + "…", ip);
         } catch (Exception e) {
             log.warn("[TSA] 审计记录失败（不影响盖章）: {}", e.getMessage());

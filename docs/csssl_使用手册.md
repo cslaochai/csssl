@@ -68,7 +68,7 @@ npm run dev                  # http://localhost:5175
 
 操作要点：
 
-- **权限树**分「页面菜单」与「按钮」两类：置灰项超出该角色法定边界，不可勾选（例如给操作员勾"签发二级CA"会置灰；绕过前端直接调接口同样返回 403）。
+- **权限树**分「页面菜单」与「按钮」两类：置灰项超出该角色法定边界，不可勾选（例如给审核员勾"按申请签发"会置灰；绕过前端直接调接口同样返回 403）。平台侧已无"签发证书"这一权限点——发证只能落在已批准的申请单上。
 - **即时生效**：保存后受影响账号下一次请求即按新权限校验；修改自己所属角色时，侧栏与按钮就地刷新，无需重新登录。
 - **停用角色**：该角色账号立即不可登录，已登录会话下一次请求即失效（401）。系统管理员角色不可停用，且必须保留角色配置权限（防自锁）。
 - 角色配置属**全局管理动作**：机构管理员（`org_key` 非空）不可进入，服务端另做数据域校验。
@@ -89,7 +89,7 @@ npm run dev                  # http://localhost:5175
 ```json
 {"username":"ca_operator","realName":"CA操作员","roleCode":"OPERATOR","password":"Csssl2026","orgKey":""}
 ```
-> 接口校验按**权限点**执行（如 `cert:issue`、`app:approve`、`user:list`），不再按角色名硬编码；无权限统一返回 403「权限不足」，所需权限点与当前角色只写服务端日志。
+> 接口校验按**权限点**执行（如 `app:approve`、`cert:revoke`、`user:list`），不再按角色名硬编码；无权限统一返回 403「权限不足」，所需权限点与当前角色只写服务端日志。
 
 ---
 
@@ -108,13 +108,13 @@ npm run dev                  # http://localhost:5175
 
 ---
 
-## 6. RA 申请-审核-签发流程（推荐入口，合规必经）
+## 6. RA 申请-审核-签发流程（唯一发证入口，合规必经）
 
 **菜单：证书申请（`/admin/applications`）**。状态机：`PENDING → APPROVED / REJECTED → ISSUED / CANCELLED`。
 
 流程（对应 §5.2.2 + §10.1g 录入审核分离）：
 
-1. **提交申请（OPERATOR/ADMIN）**——录入机构/个人主体与公钥（身份核验材料由机构侧留存，平台不采集证件号）：
+1. **提交申请（持 `app:submit`：OPERATOR）**——录入机构/个人主体与公钥（身份核验材料由机构侧留存，平台不采集证件号），**提交时必须指定审批人**：
    ```json
    POST /admin/applications
    {
@@ -123,36 +123,41 @@ npm run dev                  # http://localhost:5175
      "subjectDn": "CN=张三,O=麓康医院,OU=门诊部",
      "templateId": 2,                      // 用内置 DOCTOR_SIGN 模板
      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----",  // 申请方自持私钥，仅提交公钥
+     "assigneeUsername": "hujing",         // 必填：本单只能由被指派的审批人审核
      "san": "", "description": "门诊医师电子签名证书"
    }
    ```
-   返回申请单号 `RA20261027...`，状态 PENDING。
-2. **审核（APPROVER/ADMIN，必须 ≠ 提交人）**：
+   返回申请单号 `RA20261027...`，状态 PENDING。对外 API 通道（HIS 直连）无人可挑，由服务端在启用中的审核员里按积压最少自动分派。
+2. **审核（被指派的 APPROVER，必须 ≠ 提交人）**：
    - 批准：`POST /admin/applications/{id}/approve` `{"comment":"材料核验通过"}`
    - 驳回：`POST /admin/applications/{id}/reject` `{"comment":"执业信息与申请材料不符"}`
-   - **审核人与提交人同一人 → 403**（违反 §10.1g 分权制衡）。
-3. **签发（OPERATOR/ADMIN）**：`POST /admin/applications/{id}/issue`——复用模板+公钥签发，私钥始终在申请方手中，服务器只落证书；签发后申请单状态 ISSUED 并回填证书ID。
+   - **审核人与提交人同一人 → 403**（违反 §10.1g 分权制衡）；**当前登录人 ≠ 被指派审批人同样 → 403**。
+   - 列表可见范围同样按角色收口：审核员只看「指派给我的 + 无人认领的」，操作员只看「我提的 + 待我签发的」，ADMIN/RA_ADMIN 保持数据域全量只读。
+3. **签发（持 `app:issue`：OPERATOR/CERT_OFFICER）**：`POST /admin/applications/{id}/issue`——按批准时固化的模板快照与申请方公钥签发，私钥始终在申请方手中，服务器只落证书；签发后申请单状态 ISSUED 并回填证书ID。
 4. 撤销：`POST /admin/applications/{id}/cancel`（仅 PENDING/APPROVED 可撤）。
 
-> 医生/前置机侧生成密钥对 → 提交公钥 → 领回证书。**签名私钥不出申请方设备**，这是 RA 场景与"在线签发（服务器生成私钥）"的本质区别。
+> 医生/前置机侧生成密钥对 → 提交公钥 → 领回证书。**签名私钥不出申请方设备**，这是 RA 场景与"服务器代生成私钥"的本质区别。
 
 ---
 
-## 7. 直接签发（三种方式，不走 RA 时用）
+## 7. 没有直发通道（原三种直签已删除）
 
-| 方式 | 接口 | 适用 |
+平台**不提供任何直接签发接口**。下列端点连同 `cert:issue` 权限点、服务方法与请求体已一并删除，前端「证书管理」页也不再有签发按钮：
+
+| 已删除 | 原用途 | 现在怎么办 |
 |---|---|---|
-| 在线签发 | `POST /admin/certs` | 服务器生成密钥对并落盘私钥（开发/测试便捷） |
-| CSR 签发 | `POST /admin/certs/csr` | 申请方已生成 CSR（PKCS#10） |
-| 公钥签发 | `POST /admin/certs/public-key` | 申请方提交 DN+公钥，私钥自持（HIS 医生证书对接） |
+| `POST /admin/certs` | 在线签发（服务器生成密钥对并落盘私钥） | 走 RA 申请：私钥改由申请方自持，CA 代持私钥不再是支持的场景 |
+| `POST /admin/certs/csr` | CSR 签发 | 走 RA 申请（提交公钥 PEM） |
+| `POST /admin/certs/public-key` | 公钥直签 | 走 RA 申请 `/{id}/issue`（同一份签发逻辑，但必须先有批准的申请单） |
 
-在线签发示例：
-```json
-POST /admin/certs
-{"subjectCn":"csmig-pre","certType":"SERVER","algorithm":"SM2","validityDays":365,"san":"192.168.88.130","templateId":1,"description":"医保前置机通信证书"}
-```
-吊销：`POST /admin/certs/{id}/revoke` `{"reason":"私钥泄露/人员离职"}` → 立即进 CRL，OCSP 状态转 revoked。
-下载：`GET /admin/certs/{id}/cert.pem`（证书）；`GET /admin/certs/{id}/key.pem`（私钥，受 `allow-private-key-download` 开关控制，生产建议关闭）。
+理由：直发绕开双人复核，也绕开申请单上固化的主体与模板快照——签发出来的内容与审批人对齐不了。对外 API 通道（`/ca/api/v1`）同样只有 `apply/sign`（提单）、`apply/cancel`、`certificates/revoke`，**没有签发口**。
+
+需要二级CA（SUB_CA）不是在这里签：SUB_CA 只能由根CA 签发，走「二级CA重建申请」（`/admin/ca/subca-rebuild`，5 名密钥保管人 3-of-5 审批 + 份额解封后执行）。
+
+吊销/下载口径不变：
+
+吊销：`POST /admin/cert-ops` `{"action":"REVOKE","reason":"私钥泄露/人员离职"}` → 由**他人**审批通过后执行，进 CRL，OCSP 状态转 revoked。
+下载：`GET /admin/certs/{id}/cert.pem`（证书）；`GET /admin/certs/{id}/key.pem`（私钥，受 `allow-private-key-download` 开关控制，生产建议关闭；新签证书私钥由申请方自持，CA 侧无钥可下）。
 
 ---
 
@@ -195,9 +200,9 @@ HIS 病历签名流程：计算病历摘要 → 调 TSA 盖章 → 把 token 与
 
 | 场景 | 操作 | 建议模板 |
 |---|---|---|
-| HIS 各微服务服务端证书（TLS/mTLS） | 在线签发 SERVER 证书，配 HTTPS | SERVER_COMM |
+| HIS 各微服务服务端证书（TLS/mTLS） | 服务端自生成密钥对 → RA 申请（公钥 + SAN 填服务域名）→ 签发，配 HTTPS | SERVER_COMM |
 | 医生电子签名证书 | 医生侧生成 SM2 密钥对 → RA 申请（公钥）→ 签发 | DOCTOR_SIGN |
-| 医保前置机（csmig）通信证书 | 在线/CSR 签发，SAN 填前置机 IP | SERVER_COMM |
+| 医保前置机（csmig）通信证书 | 前置机侧生成密钥对 → RA 申请，SAN 填前置机 IP | SERVER_COMM |
 | 报文加签加密 | 复用已签证书私钥：SM2 签名 + SM4 加密（CSSSL-SEC-V1 信封，见 csmig 联调指南） | — |
 | 病历时间证明 | TSA 盖章 | — |
 
@@ -215,8 +220,9 @@ HIS 病历签名流程：计算病历摘要 → 调 TSA 盖章 → 把 token 与
 | 根CA | `GET /ssl/admin/ca/status`、`POST /ssl/admin/ca/init|seal|unseal`、`POST /ssl/admin/ca/shares*` | `ca:init` / `ca:seal` / `ca:unseal` / `ca:share:*` |
 | 用户 | `GET/POST /ssl/admin/users`、`POST /ssl/admin/users/{id}` | `user:list` / `user:create` / `user:update` |
 | 模板 | `GET /ssl/admin/templates`、`POST /ssl/admin/templates`、`POST /ssl/admin/templates/{id}[/delete]` | 查询登录即可；写需 `template:create|update|delete` |
-| 证书 | `GET /ssl/admin/certs`、`POST /ssl/admin/certs[|/csr|/public-key]`、`POST /ssl/admin/certs/{id}/revoke|suspend|unsuspend|renew|rekey`、`GET /ssl/admin/certs/{id}/cert.pem[|/key.pem]` | `cert:list` / `cert:issue` / `cert:revoke` / `cert:suspend` / `cert:renew` / `cert:rekey` / `cert:download` / `cert:key:download` / `cert:export` |
-| 申请单 | `GET /ssl/admin/applications`、`POST /ssl/admin/applications`、`POST /ssl/admin/applications/{id}/approve|reject|issue|cancel` | `app:submit` / `app:approve` / `app:reject` / `app:issue` / `app:cancel` |
+| 证书 | `GET /ssl/admin/certs`、`GET /ssl/admin/certs/{id}`、`GET /ssl/admin/certs/{id}/cert.pem[|/key.pem]`、`POST /ssl/admin/certs/{id}/export/p12`（**无签发端点**） | `cert:list` / `cert:download` / `cert:key:download` / `cert:export` |
+| 证书操作单 | `POST /ssl/admin/cert-ops`、`POST /ssl/admin/cert-ops/{id}/approve|reject|cancel` | 发起需 `cert:revoke|suspend|renew|rekey`，审批需 `cert:op:approve` |
+| 申请单 | `GET /ssl/admin/applications`、`POST /ssl/admin/applications`、`POST /ssl/admin/applications/{id}/approve|reject|issue|cancel`（`approve`/`reject` 只有被指派的审批人可执行） | `app:submit` / `app:approve` / `app:reject` / `app:issue` / `app:cancel` |
 | 审计 | `GET /ssl/admin/audit`、`POST /ssl/admin/audit/verify`、`GET /ssl/admin/audit/chain-verify|export` | `audit:view` / `audit:verify` / `audit:chain` / `audit:export` |
 | 公共 | `GET /ssl/ca/public/root|subca|crl`、`POST /ssl/ca/public/verify|ocsp` | 匿名 |
 | TSA | `POST /ssl/tsa/stamp`、`GET /ssl/tsa/publicKey` | 匿名（业务系统调用） |
@@ -231,7 +237,7 @@ HIS 病历签名流程：计算病历摘要 → 调 TSA 盖章 → 把 token 与
 |---|---|
 | 启动后表没变？ | 正常现象：系统启动不执行 DDL；表结构变更需手工执行 `db/schema.sql`（幂等，可重复跑） |
 | 8092 被占用 | 旧进程未停；停掉后重启，或 `SSL_...` 环境变量临时换端口验证 |
-| 角色不符 403 | 403「权限不足」不再区分角色名：到 **角色配置** 页核对该角色是否勾选对应权限点（`cert:issue`、`app:approve` 等）；或看服务端日志 `[权限] 拒绝访问 ... 所需权限点=` |
+| 角色不符 403 | 403「权限不足」不再区分角色名：到 **角色配置** 页核对该角色是否勾选对应权限点（`app:approve`、`cert:revoke` 等）；或看服务端日志 `[权限] 拒绝访问 ... 所需权限点=` |
 | 侧栏没有某个菜单 | 角色配置页的「页面菜单」权限点未勾选；保存后即时生效（当前账号刷新即用） |
 | 审核自己录入的申请 403 | 用 APPROVER 账号审（换人），符合 §10.1g |
 | 根私钥在哪 | `data/certs/root.key.pem.enc`（SM4 加密），主密钥 `master.key` 或 `SSL_MASTER_KEY` |

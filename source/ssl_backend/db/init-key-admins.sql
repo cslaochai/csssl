@@ -4,9 +4,9 @@
 -- 用途：新建公司时「密钥保管人(5人)」下拉需要 5 个 KEY_ADMIN 账号，
 --       否则下拉为空、无法建公司。清库后（或首次部署）执行本脚本补齐。
 --
--- 角色说明：保管人限定为 KEY_ADMIN（密钥管理员），且建公司时该公司账号
---           尚不存在 → 只能指定**平台级**账号（company_uscc = NULL）。
---           公司建好后可在「公司详情 → 重新指定保管人」改指为公司自有账号。
+-- 角色说明：保管人限定为 KEY_ADMIN（密钥管理员）。建公司时该公司账号尚不存在，
+--           所以下拉里选的是已有的 KEY_ADMIN 账号；公司建好后可在
+--           「公司详情 → 重新指定保管人」改指为公司自有账号。
 --
 -- 口令：统一 123456（BCrypt 存储，$2a$10$ 前缀 = hutool BCrypt）。
 --       ⚠️ 生产环境请勿使用本脚本，或务必改掉口令。
@@ -24,24 +24,25 @@ WHERE NOT EXISTS (SELECT 1 FROM ssl_sys_role WHERE role_code = 'KEY_ADMIN');
 
 -- ---------- 2) 建 5 名平台级密钥管理员 ----------
 -- 口令哈希 = BCrypt("123456", gensalt) —— 与现有测试账号同源，登录走同一套校验
-INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, company_uscc)
-SELECT 'keyman1', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人甲', 'KEY_ADMIN', 1, 0, 0, NOW(), NULL
+
+INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, created_by_name)
+SELECT 'keyman1', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人甲', 'KEY_ADMIN', 1, 0, 0, NOW(), '系统'
 WHERE NOT EXISTS (SELECT 1 FROM ssl_sys_user WHERE username = 'keyman1');
 
-INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, company_uscc)
-SELECT 'keyman2', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人乙', 'KEY_ADMIN', 1, 0, 0, NOW(), NULL
+INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, created_by_name)
+SELECT 'keyman2', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人乙', 'KEY_ADMIN', 1, 0, 0, NOW(), '系统'
 WHERE NOT EXISTS (SELECT 1 FROM ssl_sys_user WHERE username = 'keyman2');
 
-INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, company_uscc)
-SELECT 'keyman3', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人丙', 'KEY_ADMIN', 1, 0, 0, NOW(), NULL
+INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, created_by_name)
+SELECT 'keyman3', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人丙', 'KEY_ADMIN', 1, 0, 0, NOW(), '系统'
 WHERE NOT EXISTS (SELECT 1 FROM ssl_sys_user WHERE username = 'keyman3');
 
-INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, company_uscc)
-SELECT 'keyman4', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人丁', 'KEY_ADMIN', 1, 0, 0, NOW(), NULL
+INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, created_by_name)
+SELECT 'keyman4', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人丁', 'KEY_ADMIN', 1, 0, 0, NOW(), '系统'
 WHERE NOT EXISTS (SELECT 1 FROM ssl_sys_user WHERE username = 'keyman4');
 
-INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, company_uscc)
-SELECT 'keyman5', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人戊', 'KEY_ADMIN', 1, 0, 0, NOW(), NULL
+INSERT INTO ssl_sys_user (username, password, real_name, role_code, status, failed_attempts, token_version, created_at, created_by_name)
+SELECT 'keyman5', '$2a$10$UnxLvi4PXVz9kXu/onfjremQOjyZg7a394BIZxkTRLAlDt5JObSPe', '密钥保管人戊', 'KEY_ADMIN', 1, 0, 0, NOW(), '系统'
 WHERE NOT EXISTS (SELECT 1 FROM ssl_sys_user WHERE username = 'keyman5');
 
 -- ---------- 3) 赋权：KEY_ADMIN 法定上限（对齐 RoleCodeEnum.defaultMax）----------
@@ -55,10 +56,10 @@ INSERT IGNORE INTO ssl_role_perm (role_code, perm_code) VALUES
     ('KEY_ADMIN', 'ca:share:view'),           ('KEY_ADMIN', 'ca:share:download'),
     ('KEY_ADMIN', 'ca:share:migrate'),        ('KEY_ADMIN', 'ca:share:unseal'),
     ('KEY_ADMIN', 'ca:root:download'),        ('KEY_ADMIN', 'ca:subca:download'),
-    ('KEY_ADMIN', 'ca:share:assign'),         ('KEY_ADMIN', 'ca:subca:rebuild:execute'),
-    ('KEY_ADMIN', 'crl:download');
+    ('KEY_ADMIN', 'ca:share:assign'),         ('KEY_ADMIN', 'ca:subca:rebuild:view'),
+    ('KEY_ADMIN', 'menu:approval-center'),    ('KEY_ADMIN', 'crl:download');
 
 -- ---------- 4) 自检 ----------
 -- 预期：5 行
-SELECT username, real_name, role_code, status, company_uscc
+SELECT username, real_name, role_code, status
 FROM ssl_sys_user WHERE role_code = 'KEY_ADMIN' ORDER BY username;

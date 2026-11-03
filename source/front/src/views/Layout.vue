@@ -38,7 +38,7 @@
         </div>
         <div class="header-divider"></div>
         <el-badge :hidden="unreadCount === 0" :max="99" :value="unreadCount" type="danger">
-          <button class="header-icon-btn" title="消息中心" @click="goMessages">
+          <button class="header-icon-btn" title="消息待办" @click="goMessages">
             <el-icon>
               <Bell/>
             </el-icon>
@@ -161,10 +161,9 @@ const router = useRouter()
 
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => route.meta.title || '长沙麓康CA认证中心')
-const username = computed(() => localStorage.getItem('username') || '')
-// 顶栏展示姓名：中文姓名优先，缺失时回落账号
+// 顶栏只展示真实姓名：登录账号是可登录凭据的一半，不下沉到展示层
 const realName = ref(localStorage.getItem('realName') || '')
-const displayName = computed(() => realName.value || username.value)
+const displayName = computed(() => realName.value)
 // 不做角色缺省回退：role 丢失由守卫按未登录处理（清会话跳登录页）
 const role = computed(() => localStorage.getItem('role') || '')
 // 角色名称以角色配置页维护的档案为准（登录/刷新时落 localStorage），编码仅作兜底
@@ -279,6 +278,7 @@ onUnmounted(() => {
 
 // ===== 菜单树：页面属性（标题/图标/角色）单一来源=路由 meta，此处只定义分组 =====
 const GROUP_DEFS = [
+  {key: 'portal', title: '门户', icon: 'Menu'},
   {key: 'business', title: '证书业务', icon: 'Tickets'},
   {key: 'company', title: '公司管理', icon: 'OfficeBuilding'},
   {key: 'platform', title: '平台管理', icon: 'Setting'}

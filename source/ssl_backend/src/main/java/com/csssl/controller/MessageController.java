@@ -34,7 +34,7 @@ public class MessageController {
                                           @RequestParam(defaultValue = "10") long pageSize,
                                           @RequestParam(required = false) Integer readFlag) {
         LoginUser u = UserUtils.requireLoginUser();
-        return Result.success("查询成功", messageService.pageMy(u.getUsername(), pageNo, pageSize, readFlag));
+        return Result.success("查询成功", messageService.pageMy(u.getUserId(), pageNo, pageSize, readFlag));
     }
 
     /** 未读消息数（登录后铃铛红点） */
@@ -42,7 +42,7 @@ public class MessageController {
     @GetMapping("/unread-count")
     public Result<Long> unreadCount() {
         LoginUser u = UserUtils.requireLoginUser();
-        return Result.success("查询成功", messageService.unreadCount(u.getUsername()));
+        return Result.success("查询成功", messageService.unreadCount(u.getUserId()));
     }
 
     /** 标记已读（body: ids 数组，空=标记全部已读） */
@@ -50,7 +50,7 @@ public class MessageController {
     @PostMapping("/read")
     public Result<Void> markRead(@RequestBody(required = false) List<Long> ids) {
         LoginUser u = UserUtils.requireLoginUser();
-        messageService.markRead(u.getUsername(), ids);
+        messageService.markRead(u.getUserId(), ids);
         return Result.success("已标记已读", null);
     }
 }
