@@ -1,4 +1,4 @@
-package com.csssl.controller;
+package com.csssl.api.controller;
 
 import com.csssl.common.Result;
 import com.csssl.config.CaApiAuthFilter;

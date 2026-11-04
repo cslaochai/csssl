@@ -2,8 +2,8 @@ package com.csssl.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
-import com.csssl.dto.ApplicationAuditDTO;
 import com.csssl.dto.CompanyOpPageQueryDTO;
+import com.csssl.dto.IdCommentDTO;
 import com.csssl.dto.CompanyOpSubmitDTO;
 import com.csssl.dto.CompanyOpVoteDTO;
 import com.csssl.dto.IdDTO;
@@ -76,7 +76,7 @@ public class CompanyOpTicketController {
      */
     @PreAuthorize("hasAuthority('company:op:approve')")
     @PostMapping("/approve")
-    public Result<CompanyOpTicket> approve(@Valid @RequestBody ApplicationAuditDTO body,
+    public Result<CompanyOpTicket> approve(@RequestBody IdCommentDTO body,
                                            HttpServletRequest request) {
         if (body.getId() == null) {
             throw new IllegalArgumentException("参数 id 不能为空");
@@ -90,7 +90,7 @@ public class CompanyOpTicketController {
      */
     @PreAuthorize("hasAuthority('company:op:approve')")
     @PostMapping("/reject")
-    public Result<CompanyOpTicket> reject(@Valid @RequestBody ApplicationAuditDTO body,
+    public Result<CompanyOpTicket> reject(@RequestBody IdCommentDTO body,
                                           HttpServletRequest request) {
         if (body.getId() == null) {
             throw new IllegalArgumentException("参数 id 不能为空");

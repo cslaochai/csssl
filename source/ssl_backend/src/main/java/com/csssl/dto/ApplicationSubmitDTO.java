@@ -11,8 +11,9 @@ import lombok.Data;
 public class ApplicationSubmitDTO {
 
     /**
-     * 受理公司（缺省走 ?companyUscc= / 登录域归一）
+     * 受理公司（必须显式指定）
      */
+    @NotBlank(message = "参数 companyUscc 不能为空（受理公司）")
     private String companyUscc;
 
     /**

@@ -6,11 +6,9 @@ import com.csssl.dto.TemplateCreateDTO;
 import com.csssl.dto.TemplatePageQueryDTO;
 import com.csssl.dto.TemplateUpdateDTO;
 import com.csssl.dto.IdDTO;
-import com.csssl.entity.CaCompany;
 import com.csssl.entity.CertTemplate;
 import com.csssl.entity.LoginUser;
 import com.csssl.service.CertTemplateService;
-import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -44,7 +42,7 @@ public class CertTemplateController {
     public Result<Page<CertTemplate>> page(@Valid @RequestBody TemplatePageQueryDTO query,
                                            HttpServletRequest request) {
         return Result.success("查询成功", templateService.page(query.getPageNo(), query.getPageSize(), query.getKeyword(),
-                CompanyScope.readCompanyScope(query.getCompanyUscc())));
+                query.getCompanyUscc()));
     }
 
     /**

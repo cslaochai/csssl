@@ -10,10 +10,7 @@ import com.csssl.dto.ChainVerifyQueryDTO;
 import com.csssl.dto.CompanyUsccDTO;
 import com.csssl.vo.ChainVerifyVO;
 import com.csssl.entity.AuditLog;
-import com.csssl.entity.CaCompany;
 import com.csssl.service.AuditService;
-import com.csssl.util.CompanyScope;
-import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -47,7 +44,7 @@ public class AuditController {
     @PostMapping("/page")
     public Result<Page<AuditLog>> page(@Valid @RequestBody AuditPageQueryDTODTO query, HttpServletRequest request) {
         return Result.success("查询成功", auditService.page(query.getPageNo(), query.getPageSize(), query.getAction(),
-                CompanyScope.readCompanyScope(query.getCompanyUscc())));
+                query.getCompanyUscc()));
     }
 
     /**
@@ -74,7 +71,7 @@ public class AuditController {
     public Result<AuditExportVO> export(@RequestBody(required = false) CompanyUsccDTO body,
                                         HttpServletRequest request) {
         String companyUscc = body == null ? null : body.getCompanyUscc();
-        return Result.success("导出完成", auditService.exportCsv(CompanyScope.readCompanyScope(companyUscc)));
+        return Result.success("导出完成", auditService.exportCsv(companyUscc));
     }
 
     /**

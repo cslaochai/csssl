@@ -8,11 +8,9 @@ import com.csssl.dto.SubCaRebuildExecuteDTO;
 import com.csssl.dto.SubcaPageQueryDTO;
 import com.csssl.dto.IdDTO;
 import com.csssl.entity.ApplicationTrail;
-import com.csssl.entity.CaCompany;
 import com.csssl.entity.LoginUser;
 import com.csssl.service.AuditService;
 import com.csssl.service.CaSubCaRebuildService;
-import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
 import com.csssl.vo.CaSubCaTicketVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,7 +44,7 @@ public class CaSubCaRebuildController {
     @PreAuthorize("hasAuthority('ca:subca:rebuild:apply')")
     @PostMapping("/apply")
     public Result<CaSubCaTicketVO> apply(@Valid @RequestBody SubCaRebuildApplyDTO body, HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body.getCompanyUscc());
+        String company = body.getCompanyUscc();
         LoginUser actor = UserUtils.requireLoginUser();
         return Result.success("已发起二级CA重建申请，已通知 5 名密钥保管人审批",
                 rebuildService.apply(body, actor, clientIp(request)));
@@ -60,7 +58,7 @@ public class CaSubCaRebuildController {
     public Result<Page<CaSubCaTicketVO>> page(@Valid @RequestBody SubcaPageQueryDTO body) {
         LoginUser actor = UserUtils.requireLoginUser();
         // 数据域后端强制：公司用户锁本公司，全局用户不传则跨公司只读
-        String scope = CompanyScope.readCompanyScope(body.getCompanyUscc());
+        String scope = body.getCompanyUscc();
         return Result.success("查询成功", rebuildService.page(body.getPageNo(), body.getPageSize(),
                 body.getStatus(), body.getKeyword(), scope, false, actor));
     }

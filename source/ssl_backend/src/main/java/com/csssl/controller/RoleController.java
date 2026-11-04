@@ -12,7 +12,6 @@ import com.csssl.dto.RoleUpdateDTO;
 import com.csssl.dto.CodeDTO;
 import com.csssl.vo.RoleDetailVO;
 import com.csssl.vo.RoleVO;
-import com.csssl.entity.CaCompany;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
 import com.csssl.entity.LoginUser;

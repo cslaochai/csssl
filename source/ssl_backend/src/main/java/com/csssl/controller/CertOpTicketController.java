@@ -9,13 +9,11 @@ import com.csssl.dto.IdDTO;
 import com.csssl.dto.IdCompanyUsccDTO;
 import com.csssl.entity.ApplicationTrail;
 import com.csssl.entity.CaCertOpTicket;
-import com.csssl.entity.CaCompany;
 import com.csssl.entity.LoginUser;
 import com.csssl.enums.CertOpTypeEnum;
 import com.csssl.service.CertOpTicketService;
 import com.csssl.service.PermissionService;
 import com.csssl.util.PermissionCatalog;
-import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -51,7 +49,7 @@ public class CertOpTicketController {
         LoginUser viewer = UserUtils.requireLoginUser();
         return Result.success("查询成功", ticketService.page(query.getPageNo(), query.getPageSize(),
                 query.getStatus(), query.getOpType(), query.getKeyword(),
-                CompanyScope.readCompanyScope(query.getCompanyUscc()), viewer));
+                query.getCompanyUscc(), viewer));
     }
 
     /**
@@ -83,7 +81,7 @@ public class CertOpTicketController {
         } else if (opType == CertOpTypeEnum.REKEY) {
             permissionService.require(request, PermissionCatalog.CERT_REKEY);
         }
-        String effCompany = CompanyScope.requireExplicitCompany(submitDTO.getCompanyUscc());
+        String effCompany = submitDTO.getCompanyUscc();
         return Result.success("操作单已提交，待审批", ticketService.submit(submitDTO.getOpType(), submitDTO.getCertId(),
                 submitDTO.getReason(), submitDTO.getValidityDays(), submitDTO.getAssigneeUserId(),
                 loginUser, clientIp(request), effCompany));
@@ -102,7 +100,7 @@ public class CertOpTicketController {
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("已批准并执行", ticketService.approve(body.getId(), body.getComment(),
                 loginUser, clientIp(request),
-                CompanyScope.requireExplicitCompany(body.getCompanyUscc())));
+                body.getCompanyUscc()));
     }
 
     /**
@@ -118,7 +116,7 @@ public class CertOpTicketController {
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("已驳回", ticketService.reject(body.getId(), body.getComment(),
                 loginUser, clientIp(request),
-                CompanyScope.requireExplicitCompany(body.getCompanyUscc())));
+                body.getCompanyUscc()));
     }
 
     /**
@@ -132,7 +130,7 @@ public class CertOpTicketController {
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("已撤销", ticketService.cancel(body.getId(),
                 loginUser, clientIp(request),
-                CompanyScope.requireExplicitCompany(body.getCompanyUscc())));
+                body.getCompanyUscc()));
     }
 
     /**

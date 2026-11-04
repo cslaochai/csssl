@@ -4,10 +4,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
 import com.csssl.dto.*;
 import com.csssl.entity.CaCert;
-import com.csssl.entity.CaCompany;
 import com.csssl.service.AuditService;
 import com.csssl.service.CertService;
-import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
 import com.csssl.vo.CertOverviewVO;
 import com.csssl.vo.CertVO;
@@ -56,7 +54,7 @@ public class CertController {
     @PostMapping("/certs/page")
     public Result<Page<CertVO>> page(@Valid @RequestBody CertPageQueryDTODTO query, HttpServletRequest request) {
         // 公司用户锁本公司（显式传别公司 403）；全局用户不传=null=跨公司全量只读
-        String scope = CompanyScope.readCompanyScope(query.getCompanyUscc());
+        String scope = query.getCompanyUscc();
         return Result.success("查询成功", certService.page(query.getPageNo(), query.getPageSize(),
                 query.getCertType(), query.getStatus(), query.getKeyword(), scope));
     }
@@ -83,7 +81,7 @@ public class CertController {
         }
         CaCert row = certService.findById(body.getId());
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
-                "下载证书：" + row.getSubjectCn(), clientIp(request), CompanyScope.companyOfRow(row.getCompanyUscc()));
+                "下载证书：" + row.getSubjectCn(), clientIp(request), row.getCompanyUscc());
         return certService.certPem(body.getId());
     }
 
@@ -103,7 +101,7 @@ public class CertController {
         byte[] zip = certService.certZipBytes(body.getId());
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
                 "导出证书压缩包(ZIP)：" + row.getSubjectCn(), clientIp(request),
-                CompanyScope.companyOfRow(row.getCompanyUscc()));
+                row.getCompanyUscc());
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("application/zip"))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
@@ -122,7 +120,7 @@ public class CertController {
         }
         CaCert row = certService.findById(body.getId());
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
-                "下载私钥：" + row.getSubjectCn(), clientIp(request), CompanyScope.companyOfRow(row.getCompanyUscc()));
+                "下载私钥：" + row.getSubjectCn(), clientIp(request), row.getCompanyUscc());
         return certService.keyPem(body.getId());
     }
 
@@ -143,7 +141,7 @@ public class CertController {
         byte[] p12 = certService.exportP12(body.getId(), password);
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
                 "导出PKCS#12（口令加密）：" + row.getSubjectCn(), clientIp(request),
-                CompanyScope.companyOfRow(row.getCompanyUscc()));
+                row.getCompanyUscc());
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("application/x-pkcs12"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + body.getId() + ".p12\"")
@@ -157,7 +155,7 @@ public class CertController {
     public Result<CertOverviewVO> overview(@RequestBody(required = false) CompanyUsccDTO body,
                                            HttpServletRequest request) {
         String companyUscc = body == null ? null : body.getCompanyUscc();
-        return Result.success("查询成功", certService.overview(CompanyScope.effectiveCompany(companyUscc)));
+        return Result.success("查询成功", certService.overview(companyUscc));
     }
 
     private String clientIp(HttpServletRequest request) {

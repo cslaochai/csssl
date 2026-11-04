@@ -1,5 +1,6 @@
 package com.csssl.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.util.List;
@@ -11,8 +12,9 @@ import java.util.List;
 public class ShareAssignDTO {
 
     /**
-     * 公司标识（统一社会信用代码）
+     * 公司标识（必须显式指定）
      */
+    @NotBlank(message = "参数 companyUscc 不能为空（公司域）")
     private String companyUscc;
 
     /**

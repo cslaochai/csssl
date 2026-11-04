@@ -14,7 +14,6 @@ import com.csssl.vo.CaShareOverviewVO;
 import com.csssl.vo.CaStatusVO;
 import com.csssl.vo.RootShareVO;
 import com.csssl.vo.RootSharesVO;
-import com.csssl.util.CompanyScope;
 import com.csssl.util.UserUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -53,7 +52,7 @@ public class CaRootController {
     @PostMapping("/status")
     public Result<CaStatusVO> status(@RequestBody(required = false) CompanyUsccDTO body,
                                      HttpServletRequest request) {
-        String company = CompanyScope.effectiveCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         return Result.success("查询成功", caService.status(company));
     }
@@ -65,7 +64,7 @@ public class CaRootController {
     @PostMapping("/init")
     public Result<CaStatusVO> init(@RequestBody(required = false) CompanyUsccDTO body,
                                    HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         CaStatusVO vo = caService.initRoot(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_INIT", tag(company, null),
@@ -81,7 +80,7 @@ public class CaRootController {
     @PostMapping("/seal")
     public Result<CaStatusVO> seal(@RequestBody(required = false) CompanyUsccDTO body,
                                    HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         caService.sealRootKey(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_SEAL", tag(company, null),
@@ -97,7 +96,7 @@ public class CaRootController {
     @PostMapping("/unseal")
     public Result<CaStatusVO> unseal(@RequestBody(required = false) CompanyUsccDTO body,
                                      HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         caService.unsealRootKey(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_UNSEAL", tag(company, null),
@@ -114,7 +113,7 @@ public class CaRootController {
     @PostMapping("/shares")
     public Result<RootSharesVO> shares(@RequestBody(required = false) CompanyUsccDTO body,
                                        HttpServletRequest request) {
-        String company = CompanyScope.effectiveCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         return Result.success("查询成功", caService.shareState(company));
     }
@@ -127,7 +126,7 @@ public class CaRootController {
     @PostMapping("/shares/migrate")
     public Result<RootSharesVO> migrateShares(@RequestBody(required = false) CompanyUsccDTO body,
                                               HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         RootSharesVO state = caService.migrateRootShares(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_SHARE_GENERATE", tag(company, "ROOT"),
@@ -147,7 +146,7 @@ public class CaRootController {
             throw new IllegalArgumentException("参数 index 不能为空");
         }
         int index = body.getIndex();
-        String company = CompanyScope.requireExplicitCompany(body.getCompanyUscc());
+        String company = body.getCompanyUscc();
         checkCompanyForRead(company);
         if (index < 1 || index > CaService.SHARE_TOTAL) {
             throw new IllegalArgumentException("份额编号无效（有效范围 1~" + CaService.SHARE_TOTAL + "）");
@@ -170,7 +169,7 @@ public class CaRootController {
     @PostMapping("/unseal-shares")
     public Result<CaStatusVO> unsealShares(@Valid @RequestBody ShareUnsealDTO body,
                                            HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body.getCompanyUscc());
+        String company = body.getCompanyUscc();
         checkCompanyForWrite(company);
         List<String> shares = body.getShares();
         caService.unsealRootKeyWithShares(company, shares);
@@ -189,7 +188,7 @@ public class CaRootController {
     @PreAuthorize("hasAuthority('ca:share:assign')")
     @PostMapping("/shares/assign")
     public Result<Void> assignShares(@Valid @RequestBody ShareAssignDTO body, HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body.getCompanyUscc());
+        String company = body.getCompanyUscc();
         checkCompanyForWrite(company);
         caService.assignRootShares(company, body.getHolderUsernames());
         auditService.record(UserUtils.requireLoginUser(), "CA_SHARE_ASSIGN", tag(company, null),
@@ -207,7 +206,7 @@ public class CaRootController {
     @PreAuthorize("hasAnyAuthority('ca:share:view','ca:share:assign','ca:subca:rebuild:apply','ca:subca:rebuild:execute')")
     @PostMapping("/shares/overview")
     public Result<CaShareOverviewVO> shareOverview(@RequestBody(required = false) CompanyUsccDTO body) {
-        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         return Result.success("查询成功", rebuildService.overview(company, UserUtils.requireLoginUser()));
     }
@@ -219,7 +218,7 @@ public class CaRootController {
     @PostMapping("/root/download")
     public String downloadRoot(@RequestBody(required = false) CompanyUsccDTO body,
                                HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", tag(company, "ROOT"),
                 "导出根CA证书[" + company + "]", clientIp(request), company);
@@ -233,7 +232,7 @@ public class CaRootController {
     @PostMapping("/subca/download")
     public String downloadSubCa(@RequestBody(required = false) CompanyUsccDTO body,
                                 HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
+        String company = (body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", tag(company, "SUB_CA"),
                 "导出服务签发二级CA证书[" + company + "]", clientIp(request), company);

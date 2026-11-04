@@ -15,7 +15,6 @@ import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
-import com.csssl.util.CompanyScope;
 import com.csssl.vo.CertOverviewVO;
 import com.csssl.vo.CertVO;
 import lombok.RequiredArgsConstructor;

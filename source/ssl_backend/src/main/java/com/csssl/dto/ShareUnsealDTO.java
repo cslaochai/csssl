@@ -1,5 +1,6 @@
 package com.csssl.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.util.List;
@@ -11,8 +12,9 @@ import java.util.List;
 public class ShareUnsealDTO {
 
     /**
-     * 公司域（全局用户必须显式传入，公司用户服务端锁本公司）
+     * 公司域（必须显式指定）
      */
+    @NotBlank(message = "参数 companyUscc 不能为空（公司域）")
     private String companyUscc;
 
     /**

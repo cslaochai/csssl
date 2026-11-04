@@ -20,7 +20,6 @@ import com.csssl.mapper.CaSubCaTicketMapper;
 import com.csssl.mapper.CertApplicationMapper;
 import com.csssl.mapper.CompanyKeyShareMapper;
 import com.csssl.mapper.CompanyOpTicketMapper;
-import com.csssl.util.CompanyScope;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.vo.WorkflowTodoBoardVO;
 import com.csssl.vo.WorkflowTodoVO;

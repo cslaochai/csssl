@@ -1,5 +1,6 @@
 package com.csssl.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
@@ -14,8 +15,9 @@ public class ApplicationAuditDTO {
     private Long id;
 
     /**
-     * 公司数据域（全局用户显式指定；替换原来的 @RequestParam companyUscc）
+     * 公司数据域（必须显式指定）
      */
+    @NotBlank(message = "参数 companyUscc 不能为空（公司域）")
     private String companyUscc;
 
     /**

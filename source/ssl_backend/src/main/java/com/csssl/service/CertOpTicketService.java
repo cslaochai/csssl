@@ -15,7 +15,6 @@ import com.csssl.mapper.CaCertOpTicketMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.ApplicationTrailService;
 import com.csssl.service.MessageService;
-import com.csssl.util.CompanyScope;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.workflow.WorkflowEngineService;
 import lombok.RequiredArgsConstructor;
@@ -191,7 +190,9 @@ public class CertOpTicketService {
             throw new IllegalArgumentException("操作类型仅支持 REVOKE-吊销 / SUSPEND-挂起 / UNSUSPEND-解除挂起 / RENEW-证书更新 / REKEY-密钥更新");
         }
         CaCert cert = certService.findById(certId);
-        CompanyScope.requireWriteCompany(effCompany, cert.getCompanyUscc());
+        if (!effCompany.equals(cert.getCompanyUscc())) {
+            throw new SecurityException("权限不足：不能操作其他公司数据");
+        }
         requireCompanyMatch(cert.getCompanyUscc(), effCompany);
         if ("ROOT".equals(cert.getCertType())
                 || (opType == CertOpTypeEnum.REKEY && "SUB_CA".equals(cert.getCertType()))) {
@@ -548,7 +549,7 @@ public class CertOpTicketService {
     }
 
     private String companyOf(CaCert cert) {
-        return CompanyScope.companyOfRow(cert.getCompanyUscc());
+        return cert.getCompanyUscc();
     }
 
     private String opText(String opType) {

@@ -3,7 +3,6 @@ package com.csssl.controller;
 import com.csssl.common.Result;
 import com.csssl.dto.CodeDTO;
 import com.csssl.dto.IdDTO;
-import com.csssl.entity.CaCompany;
 import com.csssl.service.AuditService;
 import com.csssl.util.UserUtils;
 import com.csssl.vo.UserSimpleVO;
