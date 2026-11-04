@@ -78,7 +78,7 @@ public class CertService {
      */
     private static String companyOf(CaCert row) {
         String k = row.getCompanyUscc();
-        return k == null || k.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : k;
+        return k == null || k.isBlank() ? "default" : k;
     }
 
     /**
@@ -188,7 +188,7 @@ public class CertService {
         for (CertVO vo : vos) {
             vo.setCompanyName(companyNames.get(vo.getCompanyUscc()));
             String rowCompany = vo.getCompanyUscc() == null || vo.getCompanyUscc().isBlank()
-                    ? CaCompany.PRIMARY_COMPANY_USCC : vo.getCompanyUscc();
+                    ? "default" : vo.getCompanyUscc();
             vo.setKeyHeld(caService.issuedKeyExists(rowCompany, vo.getSerialHex()));
         }
     }
@@ -576,7 +576,7 @@ public class CertService {
      * 概览统计：按公司域过滤（证书总量/状态分布/类型分布/30天内到期），供仪表盘渲染
      */
     public CertOverviewVO overview(String companyUscc) {
-        String company = companyUscc == null || companyUscc.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : companyUscc;
+        String company = companyUscc == null || companyUscc.isBlank() ? "default" : companyUscc;
         List<CaCert> all = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCompanyUscc, company));
         long valid = 0, revoked = 0, expired = 0;

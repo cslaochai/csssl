@@ -1,7 +1,9 @@
 package com.csssl.controller;
 
 import com.csssl.common.Result;
+import com.csssl.dto.CompanyUsccDTO;
 import com.csssl.dto.ShareAssignDTO;
+import com.csssl.dto.ShareDownloadDTO;
 import com.csssl.dto.ShareUnsealDTO;
 import com.csssl.entity.CaCompany;
 import com.csssl.service.AuditService;
@@ -18,12 +20,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -48,21 +47,25 @@ public class CaRootController {
     private final CompanyService companyService;
     private final CaSubCaRebuildService rebuildService;
 
-    /** 根CA状态（含 SUB_CA 与根密钥封存/门限状态）；公司用户锁本公司 */
-    @GetMapping("/status")
-    public Result<CaStatusVO> status(@RequestParam(required = false) String companyUscc,
+    /**
+     * 根CA状态（含 SUB_CA 与根密钥封存/门限状态）；公司用户锁本公司
+     */
+    @PostMapping("/status")
+    public Result<CaStatusVO> status(@RequestBody(required = false) CompanyUsccDTO body,
                                      HttpServletRequest request) {
-        String company = CompanyScope.effectiveCompany(companyUscc);
+        String company = CompanyScope.effectiveCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         return Result.success("查询成功", caService.status(company));
     }
 
-    /** 初始化根CA（幂等：已存在则原样返回；私钥丢失则吊销旧根并重建；系统管理员/密钥管理员） */
+    /**
+     * 初始化根CA（幂等：已存在则原样返回；私钥丢失则吊销旧根并重建；系统管理员/密钥管理员）
+     */
     @PreAuthorize("hasAuthority('ca:init')")
     @PostMapping("/init")
-    public Result<CaStatusVO> init(@RequestParam(required = false) String companyUscc,
+    public Result<CaStatusVO> init(@RequestBody(required = false) CompanyUsccDTO body,
                                    HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         CaStatusVO vo = caService.initRoot(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_INIT", tag(company, null),
@@ -71,12 +74,14 @@ public class CaRootController {
         return Result.success("根CA初始化完成", vo);
     }
 
-    /** 封存根私钥（离线化/清除门限解封缓存）：日常签发由 SUB_CA 承担；系统管理员/密钥管理员 */
+    /**
+     * 封存根私钥（离线化/清除门限解封缓存）：日常签发由 SUB_CA 承担；系统管理员/密钥管理员
+     */
     @PreAuthorize("hasAuthority('ca:seal')")
     @PostMapping("/seal")
-    public Result<CaStatusVO> seal(@RequestParam(required = false) String companyUscc,
+    public Result<CaStatusVO> seal(@RequestBody(required = false) CompanyUsccDTO body,
                                    HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         caService.sealRootKey(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_SEAL", tag(company, null),
@@ -85,12 +90,14 @@ public class CaRootController {
         return Result.success("根CA私钥已封存离线，日常签发由 SUB_CA 承担", vo);
     }
 
-    /** 解封根私钥（旧模式恢复在线态；门限分持态请走份额解封接口；系统管理员/密钥管理员） */
+    /**
+     * 解封根私钥（旧模式恢复在线态；门限分持态请走份额解封接口；系统管理员/密钥管理员）
+     */
     @PreAuthorize("hasAuthority('ca:unseal')")
     @PostMapping("/unseal")
-    public Result<CaStatusVO> unseal(@RequestParam(required = false) String companyUscc,
+    public Result<CaStatusVO> unseal(@RequestBody(required = false) CompanyUsccDTO body,
                                      HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         caService.unsealRootKey(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_UNSEAL", tag(company, null),
@@ -100,12 +107,14 @@ public class CaRootController {
 
     // ==================== Shamir(3,5) 门限分持 ====================
 
-    /** 门限份额状态（5 份各自存在性 + 阈值）；公司用户锁本公司 */
+    /**
+     * 门限份额状态（5 份各自存在性 + 阈值）；公司用户锁本公司
+     */
     @PreAuthorize("hasAuthority('ca:share:view')")
-    @GetMapping("/shares")
-    public Result<RootSharesVO> shares(@RequestParam(required = false) String companyUscc,
+    @PostMapping("/shares")
+    public Result<RootSharesVO> shares(@RequestBody(required = false) CompanyUsccDTO body,
                                        HttpServletRequest request) {
-        String company = CompanyScope.effectiveCompany(companyUscc);
+        String company = CompanyScope.effectiveCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         return Result.success("查询成功", caService.shareState(company));
     }
@@ -116,9 +125,9 @@ public class CaRootController {
      */
     @PreAuthorize("hasAuthority('ca:share:migrate')")
     @PostMapping("/shares/migrate")
-    public Result<RootSharesVO> migrateShares(@RequestParam(required = false) String companyUscc,
+    public Result<RootSharesVO> migrateShares(@RequestBody(required = false) CompanyUsccDTO body,
                                               HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForWrite(company);
         RootSharesVO state = caService.migrateRootShares(company);
         auditService.record(UserUtils.requireLoginUser(), "CA_SHARE_GENERATE", tag(company, "ROOT"),
@@ -127,13 +136,18 @@ public class CaRootController {
         return Result.success("根私钥已切换为 Shamir(3,5) 门限分持，请下载并离线保管 5 份份额", state);
     }
 
-    /** 下载单份门限份额（JSON 文本，供密钥管理员离线保管；建议 5 份分人分管） */
+    /**
+     * 下载单份门限份额（JSON 文本，供密钥管理员离线保管；建议 5 份分人分管）
+     */
     @PreAuthorize("hasAuthority('ca:share:download')")
-    @GetMapping("/shares/{index}")
-    public Result<RootShareVO> downloadShare(@PathVariable int index,
-                                             @RequestParam(required = false) String companyUscc,
+    @PostMapping("/shares/download")
+    public Result<RootShareVO> downloadShare(@RequestBody ShareDownloadDTO body,
                                              HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        if (body.getIndex() == null) {
+            throw new IllegalArgumentException("参数 index 不能为空");
+        }
+        int index = body.getIndex();
+        String company = CompanyScope.requireExplicitCompany(body.getCompanyUscc());
         checkCompanyForRead(company);
         if (index < 1 || index > CaService.SHARE_TOTAL) {
             throw new IllegalArgumentException("份额编号无效（有效范围 1~" + CaService.SHARE_TOTAL + "）");
@@ -149,13 +163,14 @@ public class CaRootController {
         }
     }
 
-    /** 份额解封：提交任意 3 份门限份额重组根私钥（仅内存，用后请封存清除） */
+    /**
+     * 份额解封：提交任意 3 份门限份额重组根私钥（仅内存，用后请封存清除）
+     */
     @PreAuthorize("hasAuthority('ca:share:unseal')")
     @PostMapping("/unseal-shares")
-    public Result<CaStatusVO> unsealShares(@RequestParam(required = false) String companyUscc,
-                                           @Valid @RequestBody ShareUnsealDTO body,
+    public Result<CaStatusVO> unsealShares(@Valid @RequestBody ShareUnsealDTO body,
                                            HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        String company = CompanyScope.requireExplicitCompany(body.getCompanyUscc());
         checkCompanyForWrite(company);
         List<String> shares = body.getShares();
         caService.unsealRootKeyWithShares(company, shares);
@@ -190,52 +205,62 @@ public class CaRootController {
      * </ul>
      */
     @PreAuthorize("hasAnyAuthority('ca:share:view','ca:share:assign','ca:subca:rebuild:apply','ca:subca:rebuild:execute')")
-    @GetMapping("/shares/overview")
-    public Result<CaShareOverviewVO> shareOverview(@RequestParam(required = false) String companyUscc) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+    @PostMapping("/shares/overview")
+    public Result<CaShareOverviewVO> shareOverview(@RequestBody(required = false) CompanyUsccDTO body) {
+        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         return Result.success("查询成功", rebuildService.overview(company, UserUtils.requireLoginUser()));
     }
 
-    /** 导出根证书 PEM（供各子系统信任链配置） */
+    /**
+     * 导出根证书 PEM（供各子系统信任链配置）
+     */
     @PreAuthorize("hasAuthority('ca:root:download')")
-    @GetMapping("/root/download")
-    public String downloadRoot(@RequestParam(required = false) String companyUscc,
+    @PostMapping("/root/download")
+    public String downloadRoot(@RequestBody(required = false) CompanyUsccDTO body,
                                HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", tag(company, "ROOT"),
                 "导出根CA证书[" + company + "]", clientIp(request), company);
         return caService.exportRootPem(company);
     }
 
-    /** 导出当前 SUB_CA 证书 PEM（中间CA链配置） */
+    /**
+     * 导出当前 SUB_CA 证书 PEM（中间CA链配置）
+     */
     @PreAuthorize("hasAuthority('ca:subca:download')")
-    @GetMapping("/subca/download")
-    public String downloadSubCa(@RequestParam(required = false) String companyUscc,
+    @PostMapping("/subca/download")
+    public String downloadSubCa(@RequestBody(required = false) CompanyUsccDTO body,
                                 HttpServletRequest request) {
-        String company = CompanyScope.requireExplicitCompany(companyUscc);
+        String company = CompanyScope.requireExplicitCompany(body == null ? null : body.getCompanyUscc());
         checkCompanyForRead(company);
         auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", tag(company, "SUB_CA"),
                 "导出服务签发二级CA证书[" + company + "]", clientIp(request), company);
         return caService.exportSubCaPem(company);
     }
 
-    /** 读操作：非 default 公司必须已登记（default 不查表，保证启动首序与存量行为不变） */
+    /**
+     * 读操作：非 default 公司必须已登记（default 不查表，保证启动首序与存量行为不变）
+     */
     private void checkCompanyForRead(String companyUscc) {
         if (!CaCompany.LEGACY_NAMESPACE.equals(companyUscc)) {
             companyService.get(companyUscc);
         }
     }
 
-    /** 写操作：非 default 公司还须 ACTIVE（SUSPENDED/CLOSED 拒绝密钥形态变更与重建） */
+    /**
+     * 写操作：非 default 公司还须 ACTIVE（SUSPENDED/CLOSED 拒绝密钥形态变更与重建）
+     */
     private void checkCompanyForWrite(String companyUscc) {
         if (!CaCompany.LEGACY_NAMESPACE.equals(companyUscc)) {
             companyService.requireActive(companyUscc);
         }
     }
 
-    /** 审计 target：默认域沿用原 target 文案（兼容存量检索），新公司加 companyUscc 前缀 */
+    /**
+     * 审计 target：默认域沿用原 target 文案（兼容存量检索），新公司加 companyUscc 前缀
+     */
     private String tag(String companyUscc, String legacyTarget) {
         String base = legacyTarget == null ? "" : legacyTarget;
         return CaCompany.LEGACY_NAMESPACE.equals(companyUscc) ? base : companyUscc + ":" + base;

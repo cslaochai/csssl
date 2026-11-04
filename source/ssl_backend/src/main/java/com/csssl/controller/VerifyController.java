@@ -43,91 +43,117 @@ public class VerifyController {
     private final OcspService ocspService;
     private final CompanyService companyService;
 
-    /** 根证书 PEM 下载（各子系统信任链配置） */
+    /**
+     * 根证书 PEM 下载（各子系统信任链配置）
+     */
     @GetMapping("/root")
     public String root() {
-        return caService.exportRootPem();
+        return caService.exportRootPem("default");
     }
 
-    /** 当前服务签发二级CA证书 PEM（中间CA链配置） */
+    /**
+     * 当前服务签发二级CA证书 PEM（中间CA链配置）
+     */
     @GetMapping("/subca")
     public String subCa() {
-        return caService.exportSubCaPem();
+        return caService.exportSubCaPem("default");
     }
 
-    /** 证书链在线校验（TLS/SIGN 用途可选） */
+    /**
+     * 证书链在线校验（TLS/SIGN 用途可选）
+     */
     @PostMapping("/verify")
     public Result<VerifyResultVO> verify(@RequestBody VerifyQueryDTO req) {
-        return Result.success("校验完成", verifyService.verify(req));
+        return Result.success("校验完成", verifyService.verify(req, "default"));
     }
 
-    /** CRL 下载（吊销列表，供业务系统缓存校验）：判重发布，内容未变复用已发布 CRL，不再每次 GET 自增 CRLNumber */
+    /**
+     * CRL 下载（吊销列表，供业务系统缓存校验）：判重发布，内容未变复用已发布 CRL，不再每次 GET 自增 CRLNumber
+     */
     @GetMapping("/crl")
     public String crl() {
-        return crlService.publishIfNeeded().pem();
+        return crlService.publishIfNeeded("default").pem();
     }
 
-    /** 增量 CRL（dCRL）下载：自最近全量发布以来新增的吊销/挂起条目（RFC 5280 §5.2.4），
-     *  依赖方用 DeltaCRLIndicator 与已缓存的全量 CRL 合并增量同步 */
+    /**
+     * 增量 CRL（dCRL）下载：自最近全量发布以来新增的吊销/挂起条目（RFC 5280 §5.2.4），
+     * 依赖方用 DeltaCRLIndicator 与已缓存的全量 CRL 合并增量同步
+     */
     @GetMapping("/crl/delta")
     public String crlDelta() {
-        return crlService.buildDeltaCrl().pem();
+        return crlService.buildDeltaCrl("default").pem();
     }
 
-    /** OCSP：POST 请求（Content-Type: application/ocsp-request，DER） */
+    /**
+     * OCSP：POST 请求（Content-Type: application/ocsp-request，DER）
+     */
     @PostMapping(value = "/ocsp", consumes = "application/ocsp-request",
             produces = "application/ocsp-response")
     public ResponseEntity<byte[]> ocspPost(@RequestBody byte[] body) {
-        byte[] resp = ocspService.respond(body);
+        byte[] resp = ocspService.respond("default", body);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
-    /** OCSP：GET 请求（RFC 6960 base64url 编码的 DER） */
+    /**
+     * OCSP：GET 请求（RFC 6960 base64url 编码的 DER）
+     */
     @GetMapping(value = "/ocsp/{b64url}", produces = "application/ocsp-response")
     public ResponseEntity<byte[]> ocspGet(@PathVariable String b64url) {
         byte[] req = Base64.getUrlDecoder().decode(b64url);
-        byte[] resp = ocspService.respond(req);
+        byte[] resp = ocspService.respond("default", req);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
     // ==================== 公司域公开端点（路线A） ====================
 
-    /** 公司根证书 PEM 下载（default 亦可走此路由，与 /root 等价） */
+    /**
+     * 公司根证书 PEM 下载（default 亦可走此路由，与 /root 等价）
+     */
     @GetMapping("/{companyUscc}/root")
     public String companyRoot(@PathVariable String companyUscc) {
         requireCompanyExists(companyUscc);
         return caService.exportRootPem(companyUscc);
     }
 
-    /** 公司当前 SUB_CA 证书 PEM（中间CA链配置） */
+    /**
+     * 公司当前 SUB_CA 证书 PEM（中间CA链配置）
+     */
     @GetMapping("/{companyUscc}/subca")
     public String companySubCa(@PathVariable String companyUscc) {
         requireCompanyExists(companyUscc);
         return caService.exportSubCaPem(companyUscc);
     }
 
-    /** 公司域证书链在线校验（沿该公司根链验证） */
+    /**
+     * 公司域证书链在线校验（沿该公司根链验证）
+     */
     @PostMapping("/{companyUscc}/verify")
     public Result<VerifyResultVO> companyVerify(@PathVariable String companyUscc, @RequestBody VerifyQueryDTO req) {
         requireCompanyExists(companyUscc);
         return Result.success("校验完成", verifyService.verify(req, companyUscc));
     }
 
-    /** 公司域 CRL 下载（判重发布逻辑同 default，per-company 独立编号） */
+    /**
+     * 公司域 CRL 下载（判重发布逻辑同 default，per-company 独立编号）
+     */
     @GetMapping("/{companyUscc}/crl")
     public String companyCrl(@PathVariable String companyUscc) {
         requireCompanyExists(companyUscc);
         return crlService.publishIfNeeded(companyUscc).pem();
     }
 
-    /** 公司域增量 CRL（dCRL）下载：该域自最近全量发布以来新增的吊销/挂起条目 */
+    /**
+     * 公司域增量 CRL（dCRL）下载：该域自最近全量发布以来新增的吊销/挂起条目
+     */
     @GetMapping("/{companyUscc}/crl/delta")
     public String companyCrlDelta(@PathVariable String companyUscc) {
         requireCompanyExists(companyUscc);
         return crlService.buildDeltaCrl(companyUscc).pem();
     }
 
-    /** 公司域 OCSP：POST 请求（该公司 SUB_CA 签响应；SUSPENDED/CLOSED 公司历史证书仍必须可查，只读不门禁） */
+    /**
+     * 公司域 OCSP：POST 请求（该公司 SUB_CA 签响应；SUSPENDED/CLOSED 公司历史证书仍必须可查，只读不门禁）
+     */
     @PostMapping(value = "/{companyUscc}/ocsp", consumes = "application/ocsp-request",
             produces = "application/ocsp-response")
     public ResponseEntity<byte[]> companyOcspPost(@PathVariable String companyUscc, @RequestBody byte[] body) {
@@ -136,7 +162,9 @@ public class VerifyController {
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
-    /** 公司域 OCSP：GET 请求（RFC 6960 base64url 编码的 DER） */
+    /**
+     * 公司域 OCSP：GET 请求（RFC 6960 base64url 编码的 DER）
+     */
     @GetMapping(value = "/{companyUscc}/ocsp/{b64url}", produces = "application/ocsp-response")
     public ResponseEntity<byte[]> companyOcspGet(@PathVariable String companyUscc, @PathVariable String b64url) {
         requireCompanyExists(companyUscc);

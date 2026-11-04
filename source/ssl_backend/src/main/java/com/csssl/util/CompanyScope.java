@@ -1,7 +1,5 @@
 package com.csssl.util;
 
-import com.csssl.entity.CaCompany;
-
 /**
  * 公司数据域口径（唯一入口，安全红线不设旁路）。
  *
@@ -15,11 +13,11 @@ public final class CompanyScope {
     }
 
     /**
-     * 公司数据域统一口径（所有公司域操作唯一入口）：显式传参=该公司，缺省=平台主公司/全局默认域。
+     * 公司数据域统一口径（所有公司域操作唯一入口）：显式传参=该公司，缺省=全局默认域（default）。
      */
     public static String effectiveCompany(String reqCompanyUscc) {
         String req = reqCompanyUscc == null || reqCompanyUscc.isBlank() ? null : reqCompanyUscc.trim();
-        return req == null ? CaCompany.PRIMARY_COMPANY_USCC : req;
+        return req == null ? "default" : req;
     }
 
     /**
@@ -58,6 +56,6 @@ public final class CompanyScope {
      * 数据行归属公司兜底：company_uscc 列 NOT NULL DEFAULT 'default'，历史语义空=默认域
      */
     public static String companyOfRow(String rowCompanyUscc) {
-        return rowCompanyUscc == null || rowCompanyUscc.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : rowCompanyUscc;
+        return rowCompanyUscc == null || rowCompanyUscc.isBlank() ? "default" : rowCompanyUscc;
     }
 }

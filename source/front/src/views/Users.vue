@@ -119,8 +119,8 @@
     </el-dialog>
 
     <!-- 账号详情（行点击） -->
-    <el-dialog v-model="detailVisible" :title="`账号详情：${detail?.username || ''}`" width="520px">
-      <el-descriptions :column="1" border>
+    <el-dialog v-model="detailVisible" :title="`账号详情：${detail?.username || ''}`" width="900px">
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="账号">{{ detail?.username }}</el-descriptions-item>
         <el-descriptions-item label="姓名">{{ detail?.realName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="角色">{{ detail ? roleText(detail.roleCode) : '' }}</el-descriptions-item>

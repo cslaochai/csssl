@@ -4,7 +4,6 @@ import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.csssl.dto.LoginDTO;
-import com.csssl.entity.CaCompany;
 import com.csssl.entity.SysRole;
 import com.csssl.entity.SysUser;
 import com.csssl.mapper.SysRoleMapper;
@@ -50,10 +49,10 @@ public class AuthService {
     private final PermissionService permissionService;
 
     /**
-     * 审计公司归位：单租户下账号一律归平台主公司
+     * 审计公司归位：平台级账号，审计归 default（非任何具体公司）
      */
     private static String companyOfUser(SysUser user) {
-        return CaCompany.PRIMARY_COMPANY_USCC;
+        return "default";
     }
 
     /**
@@ -102,7 +101,7 @@ public class AuthService {
 
         SysUser user = loadByUsername(username);
         if (user == null) {
-            auditService.recordAs(null, null, "LOGIN", null, "登录失败（账号或口令错误）", ip, CaCompany.PRIMARY_COMPANY_USCC);
+            auditService.recordAs(null, null, "LOGIN", null, "登录失败（账号或口令错误）", ip, "default");
             throw new IllegalArgumentException("账号或口令错误");
         }
         LocalDateTime now = LocalDateTime.now();
@@ -150,8 +149,6 @@ public class AuthService {
         data.setPerms(permissionService.effectiveList(user.getRoleCode()));
         // 单租户化后登录态不再携带账号公司域（业务表自身 company_uscc 决定归属）
         data.setCompanyUscc(null);
-        // 平台主公司（各公司标识由管理员在公司管理维护；全局账号默认落在它上面）
-        data.setPrimaryCompany(CaCompany.PRIMARY_COMPANY_USCC);
         return data;
     }
 

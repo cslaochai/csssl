@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.AuditMetaObjectHandler;
 import com.csssl.entity.AuditLog;
-import com.csssl.entity.CaCompany;
 import com.csssl.entity.LoginUser;
 import com.csssl.mapper.AuditLogMapper;
 import com.csssl.util.UserUtils;
@@ -84,7 +83,7 @@ public class AuditService {
      * 审计行归属公司（历史行为空按 default 归位，与列默认值语义一致）
      */
     public static String companyOf(AuditLog row) {
-        return row.getCompanyUscc() == null || row.getCompanyUscc().isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : row.getCompanyUscc();
+        return row.getCompanyUscc() == null || row.getCompanyUscc().isBlank() ? "default" : row.getCompanyUscc();
     }
 
     private static String csv(String s) {
@@ -115,19 +114,19 @@ public class AuditService {
     }
 
     /**
-     * 记录一条审计日志（当前登录人，公司归属缺省=平台主公司/全局操作）
+     * 记录一条审计日志（当前登录人，公司归属缺省=全局操作/default）
      */
     @Transactional(rollbackFor = Exception.class)
     public void record(String action, String target, String detail, String ip) {
-        record(UserUtils.getLoginUser(), action, target, detail, ip, CaCompany.PRIMARY_COMPANY_USCC);
+        record(UserUtils.getLoginUser(), action, target, detail, ip, "default");
     }
 
     /**
-     * 记录一条审计日志（登录人版，自动签名防篡改 + 哈希链；公司归属缺省=平台主公司/全局操作）
+     * 记录一条审计日志（登录人版，自动签名防篡改 + 哈希链；公司归属缺省=全局操作/default）
      */
     @Transactional(rollbackFor = Exception.class)
     public void record(LoginUser actor, String action, String target, String detail, String ip) {
-        record(actor, action, target, detail, ip, CaCompany.PRIMARY_COMPANY_USCC);
+        record(actor, action, target, detail, ip, "default");
     }
 
     /**
@@ -154,7 +153,7 @@ public class AuditService {
         AuditLog logRow = new AuditLog();
         logRow.setUserId(userId);
         logRow.setRealName(displayName);
-        logRow.setCompanyUscc(companyUscc == null || companyUscc.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : companyUscc);
+        logRow.setCompanyUscc(companyUscc == null || companyUscc.isBlank() ? "default" : companyUscc);
         logRow.setAction(action);
         logRow.setTarget(target);
         logRow.setDetail(truncate(detail));

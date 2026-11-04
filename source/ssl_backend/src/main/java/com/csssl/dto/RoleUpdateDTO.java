@@ -9,6 +9,11 @@ import lombok.Data;
 public class RoleUpdateDTO {
 
     /**
+     * 目标角色编码（来自 body，替换原来的 @PathVariable）
+     */
+    private String roleCode;
+
+    /**
      * 角色名称（null=不改）
      */
     private String roleName;

@@ -1,9 +1,12 @@
 package com.csssl.workflow;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.csssl.entity.SysUser;
 import com.csssl.mapper.FlowDefinitionMapper;
 import com.csssl.mapper.FlowNodeMapper;
 import com.csssl.mapper.FlowSkipMapper;
+import com.csssl.mapper.SysUserMapper;
+import com.csssl.vo.UserSimpleVO;
 import com.csssl.workflow.dto.DefJson;
 import com.csssl.workflow.dto.NodeJson;
 import com.csssl.workflow.dto.SkipJson;
@@ -34,10 +37,31 @@ public class WorkflowDefService {
     private final FlowDefinitionMapper definitionMapper;
     private final FlowNodeMapper nodeMapper;
     private final FlowSkipMapper skipMapper;
+    private final SysUserMapper sysUserMapper;
     private final ObjectMapper objectMapper;
 
     public List<FlowDefinition> list() {
         return definitionMapper.selectList(new QueryWrapper<FlowDefinition>().orderByDesc("update_time"));
+    }
+
+    /**
+     * 设计器选人下拉：全部启用用户（只暴露账号/姓名/角色）
+     */
+    public List<UserSimpleVO> listAssignableUsers() {
+        List<SysUser> users = sysUserMapper.selectList(new QueryWrapper<SysUser>()
+                .eq("status", 1)
+                .orderByAsc("role_code")
+                .orderByAsc("id"));
+        List<UserSimpleVO> vos = new ArrayList<>();
+        for (SysUser u : users) {
+            UserSimpleVO vo = new UserSimpleVO();
+            vo.setUsername(u.getUsername());
+            vo.setRealName(u.getRealName());
+            vo.setRoleCode(u.getRoleCode());
+            vo.setStatus(u.getStatus());
+            vos.add(vo);
+        }
+        return vos;
     }
 
     public FlowDefinition getPublished(String flowCode) {
@@ -200,6 +224,18 @@ public class WorkflowDefService {
     }
 
     /**
+     * 保存并发布（单一事务）：先落库当前设计，再置为已发布。
+     * 供设计器「保存并发布」按钮使用 —— 避免前端先发保存、再发发布两次请求，
+     * 也避免保存成功而发布失败时留下半成品。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Long saveAndPublish(DefJson dto) {
+        Long id = save(dto);
+        publish(id);
+        return id;
+    }
+
+    /**
      * 发布：校验流程结构完整后置为已发布，新启动的实例立即使用该定义。
      */
     @Transactional(rollbackFor = Exception.class)
@@ -226,12 +262,38 @@ public class WorkflowDefService {
                 if (!hasPass) {
                     throw new IllegalArgumentException("审批节点「" + n.getNodeName() + "」缺少通过流转线");
                 }
+                validateFixedAssignees(n);
             }
         }
         def.setIsPublish(1);
         def.setUpdateTime(LocalDateTime.now());
         definitionMapper.updateById(def);
         return true;
+    }
+
+    /**
+     * 发布前校验：审批节点必须配置办理人，且「固定人员」必须存在且启用。
+     * role:XXX 的用户由角色动态解析，不在此处校验。
+     */
+    private void validateFixedAssignees(FlowNode node) {
+        String flag = node.getPermissionFlag();
+        if (flag == null || flag.isBlank()) {
+            throw new IllegalArgumentException("审批节点「" + node.getNodeName() + "」未配置办理人");
+        }
+        for (String raw : flag.split("@@")) {
+            String f = raw.trim();
+            if (f.isEmpty() || f.startsWith("role:")) {
+                continue;
+            }
+            String username = f.startsWith("user:") ? f.substring("user:".length()) : f;
+            SysUser user = sysUserMapper.selectOne(new QueryWrapper<SysUser>()
+                    .eq("username", username)
+                    .last("limit 1"));
+            if (user == null || (user.getStatus() != null && user.getStatus() != 1)) {
+                throw new IllegalArgumentException("审批节点「" + node.getNodeName()
+                        + "」指定的办理人不存在或已停用：" + username);
+            }
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)

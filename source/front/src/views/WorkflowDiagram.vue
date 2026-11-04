@@ -9,12 +9,15 @@
         <div class="wf-node" :class="stateClass(s)">
           <div class="wf-dot">
             <el-icon v-if="s.state === 'DONE'"><Check /></el-icon>
+            <el-icon v-else-if="s.state === 'REJECTED'"><Close /></el-icon>
+            <el-icon v-else-if="s.state === 'CANCELLED'"><Close /></el-icon>
+            <el-icon v-else-if="s.state === 'SKIPPED'"><Minus /></el-icon>
             <span v-else>{{ i + 1 }}</span>
           </div>
           <div class="wf-label">{{ s.name }}</div>
           <div class="wf-actor">{{ s.actorLabel }}</div>
         </div>
-        <div v-if="i < diagram.steps.length - 1" class="wf-line" :class="{ done: isLineDone(s) }"></div>
+        <div v-if="i < diagram.steps.length - 1" class="wf-line" :class="lineClass(s, i)"></div>
       </template>
     </div>
   </div>
@@ -22,7 +25,7 @@
 </template>
 
 <script setup>
-import { Check } from '@element-plus/icons-vue'
+import { Check, Close, Minus } from '@element-plus/icons-vue'
 
 const props = defineProps({
   diagram: { type: Object, default: null }
@@ -33,18 +36,25 @@ function stateClass(s) {
     'is-done': s.state === 'DONE',
     'is-current': s.state === 'CURRENT',
     'is-pending': s.state === 'PENDING',
+    'is-rejected': s.state === 'REJECTED',
+    'is-cancelled': s.state === 'CANCELLED',
+    'is-skipped': s.state === 'SKIPPED',
     'is-terminal': s.terminal
   }
 }
 
-// 连接线：当前步之前（含当前）的线视为已完成
-function isLineDone(s) {
-  if (!props.diagram) return false
+// 连接线：已走过（DONE）节点之间的线为绿色；SKIPPED 段用虚线灰；REJECTED/CANCELLED 终止之后的线也不再用绿色
+function lineClass(s, i) {
+  if (!props.diagram) return {}
   const steps = props.diagram.steps
-  const idx = steps.findIndex(x => x.code === s.code)
-  const curIdx = steps.findIndex(x => x.code === props.diagram.currentStepCode)
-  if (curIdx < 0) return false
-  return idx < curIdx
+  const next = steps[i + 1]
+  // 当前段（从 s 到 next）两端都 DONE → 绿线
+  if (s.state === 'DONE' && next && next.state === 'DONE') return { done: true }
+  // 任一端是 SKIPPED → 虚线
+  if (s.state === 'SKIPPED' || (next && next.state === 'SKIPPED')) return { skipped: true }
+  // 走到 REJECTED/CANCELLED 就终止了，这段用虚线
+  if ((s.state === 'DONE' || s.state === 'CURRENT') && next && (next.state === 'REJECTED' || next.state === 'CANCELLED')) return { skipped: true }
+  return {}
 }
 </script>
 
@@ -110,6 +120,36 @@ function isLineDone(s) {
   background: #67c23a;
   color: #fff;
 }
+/* 驳回：红色 × */
+.wf-node.is-rejected .wf-dot {
+  border-color: #f56c6c;
+  background: #f56c6c;
+  color: #fff;
+}
+.wf-node.is-rejected .wf-label {
+  color: #f56c6c;
+}
+/* 撤销：灰色 × */
+.wf-node.is-cancelled .wf-dot {
+  border-color: #909399;
+  background: #909399;
+  color: #fff;
+}
+.wf-node.is-cancelled .wf-label {
+  color: #909399;
+}
+/* 跳过：浅色边框 + 虚线 icon */
+.wf-node.is-skipped .wf-dot {
+  border-color: #dcdfe6;
+  background: #f5f7fa;
+  color: #c0c4cc;
+}
+.wf-node.is-skipped .wf-label,
+.wf-node.is-skipped .wf-actor {
+  color: #c0c4cc;
+  text-decoration: line-through;
+  text-decoration-color: #e4e7ed;
+}
 .wf-label {
   margin-top: 6px;
   font-size: 13px;
@@ -136,6 +176,12 @@ function isLineDone(s) {
 }
 .wf-line.done {
   background: #67c23a;
+}
+.wf-line.skipped {
+  background: #e4e7ed;
+  background-image: linear-gradient(90deg, #c0c4cc 50%, transparent 50%);
+  background-size: 8px 2px;
+  background-repeat: repeat-x;
 }
 .wf-empty {
   color: #909399;

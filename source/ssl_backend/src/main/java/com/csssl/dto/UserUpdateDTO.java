@@ -9,6 +9,11 @@ import lombok.Data;
 public class UserUpdateDTO {
 
     /**
+     * 目标用户 ID（来自 body，替换原来的 @PathVariable）
+     */
+    private Long id;
+
+    /**
      * 姓名（null=不改）
      */
     private String realName;

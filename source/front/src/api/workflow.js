@@ -6,7 +6,7 @@ import request from './request'
 
 /** 全部工作流定义（用于总览页） */
 export function listWorkflows() {
-  return request.get('/admin/workflows')
+  return request.post('/admin/workflows/list', {})
 }
 
 /**
@@ -16,9 +16,7 @@ export function listWorkflows() {
  * @param {string} [assigneeRealName] 已指派的具体处理人（SINGLE_LEAST_BACKLOG 步骤用于展示具体人）
  */
 export function getWorkflowDiagram(bizType, status, assigneeRealName) {
-  return request.get('/admin/workflows/diagram', {
-    params: { bizType, status, assigneeRealName }
-  })
+  return request.post('/admin/workflows/diagram', { bizType, status, assigneeRealName })
 }
 
 /**
@@ -26,47 +24,57 @@ export function getWorkflowDiagram(bizType, status, assigneeRealName) {
  * 与我相关的单据，收敛成 {pending, initiated, done} 三组。
  */
 export function getWorkflowTodoBoard() {
-  return request.get('/admin/workflows/todo')
+  return request.post('/admin/workflows/todo', {})
 }
 
 // ============ Warm-Flow 流程定义 CRUD（拖拽设计器用） ============
 
 /** 列出所有流程定义 */
 export function listDefs() {
-  return request.get('/admin/workflow/defs')
+  return request.post('/admin/workflow/defs/list', {})
+}
+
+/** 设计器选人下拉：全部启用用户 */
+export function listAssignableUsers() {
+  return request.post('/admin/workflow/defs/users', {})
 }
 
 /** 按 flowCode 查已发布的流程定义 */
 export function getPublishedByCode(flowCode) {
-  return request.get(`/admin/workflow/defs/published/${flowCode}`)
+  return request.post('/admin/workflow/defs/published', { flowCode })
 }
 
 /** 查询完整设计数据（定义+节点+跳转），供设计器回显 */
 export function queryDesign(id) {
-  return request.get(`/admin/workflow/defs/${id}/design`)
+  return request.post('/admin/workflow/defs/design', { id })
 }
 
-/** 保存流程定义（新增或更新，草稿态） */
+/** 保存流程定义（新增或更新，草稿态），返回 id 字符串 */
 export function saveDef(defJson) {
   return request.post('/admin/workflow/defs/save', defJson)
 }
 
-/** 发布流程定义 */
+/** 保存并发布（设计器用：后端同一事务内先保存再发布），返回 id 字符串 */
+export function saveAndPublishDef(defJson) {
+  return request.post('/admin/workflow/defs/save-publish', defJson)
+}
+
+/** 发布流程定义（仅切换状态，列表页用） */
 export function publishDef(id) {
-  return request.post(`/admin/workflow/defs/${id}/publish`)
+  return request.post('/admin/workflow/defs/publish', { id })
 }
 
 /** 取消发布 */
 export function unpublishDef(id) {
-  return request.post(`/admin/workflow/defs/${id}/unpublish`)
+  return request.post('/admin/workflow/defs/unpublish', { id })
 }
 
 /** 删除流程定义 */
 export function deleteDef(id) {
-  return request.delete(`/admin/workflow/defs/${id}`)
+  return request.post('/admin/workflow/defs/delete', { id })
 }
 
 /** 导出 JSON 字符串 */
 export function exportDef(id) {
-  return request.get(`/admin/workflow/defs/${id}/export`)
+  return request.post('/admin/workflow/defs/export', { id })
 }

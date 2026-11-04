@@ -3,7 +3,7 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
-import com.csssl.config.KeyVaultConfig;
+import com.csssl.util.UsccValidator;
 import com.csssl.entity.ApiClient;
 import com.csssl.entity.CaCompany;
 import com.csssl.enums.CompanyStatusEnum;
@@ -122,7 +122,7 @@ public class CompanyService {
      * 按 companyUscc 查询（不存在返回 null）
      */
     public CaCompany findByUscc(String companyUscc) {
-        KeyVaultConfig.CompanyVaultResolver.checkCompanyUscc(companyUscc);
+        UsccValidator.checkCompanyUscc(companyUscc);
         return companyMapper.selectOne(new LambdaQueryWrapper<CaCompany>().eq(CaCompany::getUscc, companyUscc));
     }
 
@@ -223,12 +223,6 @@ public class CompanyService {
         // 开公司即建根：独立根CA → SUB_CA → 门限份额（复用带公司标识的初始化路径，幂等）
         caService.initRoot(code);
 
-        // 平台唯一在营公司即主公司：无公司参数入口（审计/兼容调用）归位到它，无需重启
-        Long actives = companyMapper.selectCount(new LambdaQueryWrapper<CaCompany>()
-                .eq(CaCompany::getStatus, CompanyStatusEnum.ACTIVE.getCode()));
-        if (actives != null && actives == 1) {
-            CaCompany.PRIMARY_COMPANY_USCC = code;
-        }
         return company;
     }
 

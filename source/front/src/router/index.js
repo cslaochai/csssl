@@ -30,11 +30,24 @@ const routes = [
         name: 'applications',
         component: () => import('@/views/Applications.vue'),
         meta: {
-          title: 'RA申请审核',
+          title: 'RA申请',
           perm: 'menu:applications',
           roles: ['ADMIN', 'OPERATOR', 'APPROVER'],
           group: 'business',
           icon: 'EditPen'
+        }
+      },
+      {
+        path: 'application-review',
+        name: 'application-review',
+        component: () => import('@/views/Applications.vue'),
+        // RA申请审核：申请单 + 证书操作单合并一张表，按「单据类型」筛选，审核人在这里批准/驳回/签发
+        meta: {
+          title: 'RA申请审核',
+          perm: 'menu:applications',
+          roles: ['ADMIN', 'APPROVER', 'RA_ADMIN', 'CERT_OFFICER'],
+          group: 'business',
+          icon: 'Stamp'
         }
       },
       {
@@ -165,15 +178,27 @@ const routes = [
         }
       },
       {
-        path: 'workflow-designer',
-        name: 'workflow-designer',
-        component: () => import('@/views/WorkflowDesigner.vue'),
-        // 流程设计器：Warm-Flow 拖拽式编辑器，仅系统管理员和安全管理员可用
+        path: 'workflow-management',
+        name: 'workflow-management',
+        component: () => import('@/views/WorkflowManagement.vue'),
+        // 流程管理：列表（分页查询）+ 操作列（编辑 / 发布·撤销 / 删除）
         meta: {
-          title: '流程设计器',
+          title: '流程管理',
           roles: ['ADMIN', 'SECURITY_ADMIN'],
           group: 'platform',
           icon: 'Connection'
+        }
+      },
+      {
+        path: 'workflow-designer/:id?',
+        name: 'workflow-designer',
+        component: () => import('@/views/WorkflowDesigner.vue'),
+        // 流程设计器：Warm-Flow 拖拽式编辑器，仅系统管理员和安全管理员可用；
+        // 从「流程管理」操作列点击「编辑」跳转进来，隐藏在左侧菜单
+        meta: {
+          title: '流程设计器',
+          roles: ['ADMIN', 'SECURITY_ADMIN'],
+          hidden: true
         }
       }
     ]

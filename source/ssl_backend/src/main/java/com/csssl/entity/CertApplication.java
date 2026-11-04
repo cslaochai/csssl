@@ -109,6 +109,12 @@ public class CertApplication extends AuditColumns {
     private String externalDeptName;
 
     /**
+     * 员工编号（主体DN 的 OU，WEB/API 通道必填）：同一公司内唯一识别，
+     * 与 HIS 员工编号对齐；重名医生靠它区分
+     */
+    private String employeeNo;
+
+    /**
      * 来源渠道：WEB-管理端录入 API-外部系统直连
      */
     private String channel;

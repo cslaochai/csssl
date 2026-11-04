@@ -25,6 +25,7 @@ import com.csssl.util.PermissionCatalog;
 import com.csssl.vo.WorkflowTodoBoardVO;
 import com.csssl.vo.WorkflowTodoVO;
 import com.csssl.workflow.WorkflowDefinition;
+import com.csssl.workflow.WorkflowEngineService;
 import com.csssl.workflow.WorkflowRegistry;
 import com.csssl.workflow.WorkflowStep;
 import lombok.RequiredArgsConstructor;
@@ -64,13 +65,14 @@ public class WorkflowTodoService {
     private final CaSubCaApprovalMapper subCaApprovalMapper;
     private final CompanyKeyShareMapper keyShareMapper;
     private final WorkflowRegistry registry;
+    private final WorkflowEngineService engine;
 
     /**
      * 聚合当前登录人的待办看板。
      */
     public WorkflowTodoBoardVO board(LoginUser viewer) {
         Long me = viewer.getUserId();
-        String scope = CaCompany.PRIMARY_COMPANY_USCC;
+        String scope = null; // 平台管理员看跨公司全量待办
 
         List<WorkflowTodoVO> pending = new ArrayList<>();
         List<WorkflowTodoVO> initiated = new ArrayList<>();
@@ -105,11 +107,13 @@ public class WorkflowTodoService {
         }
         qw.and(w -> w.eq(CertApplication::getAppliedByUserId, me)
                 .or().eq(CertApplication::getAssigneeUserId, me)
-                .or().eq(CertApplication::getReviewedByUserId, me));
+                .or().eq(CertApplication::getReviewedByUserId, me)
+                // 流程驱动后审批人由节点配置决定，待审单对候选办理人放开
+                .or().eq(CertApplication::getStatus, CertApplicationStatusEnum.PENDING.getCode()));
         List<CertApplication> rows = applicationMapper.selectList(qw);
         for (CertApplication app : rows) {
             boolean pendingReview = CertApplicationStatusEnum.PENDING.is(app.getStatus())
-                    && Objects.equals(me, app.getAssigneeUserId());
+                    && engine.canHandle(app.getApplyNo(), viewer);
             boolean pendingIssue = CertApplicationStatusEnum.APPROVED.is(app.getStatus())
                     && canIssue(viewer);
             WorkflowTodoVO vo = base("CERT_APPLICATION", app.getId(), app.getApplyNo(),
@@ -153,14 +157,15 @@ public class WorkflowTodoService {
         }
         qw.and(w -> w.eq(CaCertOpTicket::getRequestedByUserId, me)
                 .or().eq(CaCertOpTicket::getAssigneeUserId, me)
-                .or().eq(CaCertOpTicket::getReviewedByUserId, me));
+                .or().eq(CaCertOpTicket::getReviewedByUserId, me)
+                .or().eq(CaCertOpTicket::getStatus, TicketStatusEnum.PENDING.getCode()));
         List<CaCertOpTicket> rows = certOpMapper.selectList(qw);
         for (CaCertOpTicket t : rows) {
             WorkflowTodoVO vo = base("CERT_OP", t.getId(), t.getOpNo(),
                     certOpTitle(t), t.getCompanyUscc(), null,
                     t.getStatus(), t.getRequestedByName(), fmt(t.getRequestedAt()));
             boolean pendingReview = TicketStatusEnum.PENDING.is(t.getStatus())
-                    && Objects.equals(me, t.getAssigneeUserId());
+                    && engine.canHandle(t.getOpNo(), viewer);
             if (pendingReview) {
                 vo.setActionType("APPROVE");
                 vo.setActionLabel("去审批");
@@ -191,15 +196,17 @@ public class WorkflowTodoService {
         }
         qw.and(w -> w.eq(CompanyOpTicket::getRequestedByUserId, me)
                 .or().eq(CompanyOpTicket::getAssigneeUserId, me)
-                .or().eq(CompanyOpTicket::getReviewedByUserId, me));
+                .or().eq(CompanyOpTicket::getReviewedByUserId, me)
+                .or(x -> x.eq(CompanyOpTicket::getStatus, TicketStatusEnum.PENDING.getCode())
+                        .ne(CompanyOpTicket::getOpType, CompanyOpTypeEnum.REASSIGN_HOLDERS.getCode())));
         List<CompanyOpTicket> rows = companyOpMapper.selectList(qw);
         for (CompanyOpTicket t : rows) {
             WorkflowTodoVO vo = base("COMPANY_OP", t.getId(), t.getOpNo(),
                     companyOpTitle(t), t.getCompanyUscc(), t.getCompanyName(),
                     t.getStatus(), t.getRequestedByName(), fmt(t.getRequestedAt()));
             boolean pendingReview = TicketStatusEnum.PENDING.is(t.getStatus())
-                    && Objects.equals(me, t.getAssigneeUserId())
-                    && !CompanyOpTypeEnum.REASSIGN_HOLDERS.getCode().equals(t.getOpType());
+                    && !CompanyOpTypeEnum.REASSIGN_HOLDERS.getCode().equals(t.getOpType())
+                    && engine.canHandle(t.getOpNo(), viewer);
             if (pendingReview) {
                 vo.setActionType("APPROVE");
                 vo.setActionLabel("去审批");

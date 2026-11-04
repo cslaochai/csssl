@@ -9,15 +9,25 @@ import java.util.Map;
  */
 public class WorkflowDefinition {
 
-    /** 业务类型编码（与 ssl_message.biz_type / 轨迹 bizType 对齐） */
+    /**
+     * 业务类型编码（与 ssl_message.biz_type / 轨迹 bizType 对齐）
+     */
     private String bizType;
-    /** 流程名 */
+    /**
+     * 流程名
+     */
     private String name;
-    /** 流程说明 */
+    /**
+     * 流程说明
+     */
     private String description;
-    /** 有序步骤 */
+    /**
+     * 有序步骤
+     */
     private List<WorkflowStep> steps;
-    /** 单据状态 → 当前步骤编码 */
+    /**
+     * 单据状态 → 当前步骤编码
+     */
     private Map<String, String> statusToStep;
 
     public WorkflowStep stepByCode(String code) {

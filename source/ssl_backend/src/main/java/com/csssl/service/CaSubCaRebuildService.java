@@ -22,6 +22,7 @@ import com.csssl.vo.CaSubCaApprovalVO;
 import com.csssl.vo.CaSubCaHolderVO;
 import com.csssl.vo.CaSubCaTicketVO;
 import com.csssl.vo.KeyShareMineVO;
+import com.csssl.workflow.WorkflowEngineService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +54,8 @@ public class CaSubCaRebuildService {
 
     private static final DateTimeFormatter OP_NO_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final SecureRandom RANDOM = new SecureRandom();
+    /** 工作流定义编码：提交即起流程，保管人票签由流程节点比例配置决定 */
+    private static final String FLOW_CODE = "subcaRebuildFlow";
 
     private final CaSubCaTicketMapper ticketMapper;
     private final CaSubCaApprovalMapper approvalMapper;
@@ -63,6 +66,7 @@ public class CaSubCaRebuildService {
     private final MessageService messageService;
     private final ApplicationTrailService trailService;
     private final ObjectMapper objectMapper;
+    private final WorkflowEngineService engine;
 
     /**
      * 发起二级CA 重建申请：校验公司已指定 5 名保管人、无同类待审单；创建 PENDING 单并通知全部保管人。
@@ -102,6 +106,8 @@ public class CaSubCaRebuildService {
         ticket.setRejectedCount(0);
         ticket.setCreatedAt(LocalDateTime.now());
         ticketMapper.insert(ticket);
+        // 提交即起流程：保管人票签节点按流程定义的比例配置推进（与业务门限同一份证据）
+        engine.startForBusiness(FLOW_CODE, ticket.getOpNo());
 
         // 通知全部保管人（把申请"打到"这 5 个人）
         for (CompanyKeyShare h : holders) {
@@ -217,6 +223,8 @@ public class CaSubCaRebuildService {
         approvalMapper.insert(approval);
 
         recountAndTransition(ticket);
+        // 保管人投票已由业务侧校验（本人份额 + 保管人身份），这里同步推进流程票签节点
+        engine.passOnBehalf(ticket.getOpNo(), loginUser, "保管人同意二级CA重建");
         auditService.record(loginUser, "SUBCA_REBUILD_APPROVE", ticket.getOpNo(),
                 "同意二级CA重建申请：" + company.getCompanyName() + "（" + ticket.getCompanyUscc() + "）", ip, ticket.getCompanyUscc());
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "VOTE",
@@ -271,6 +279,8 @@ public class CaSubCaRebuildService {
         approvalMapper.insert(approval);
 
         recountAndTransition(ticket);
+        // 任一驳回即整体否决，流程同步终止
+        engine.rejectOnBehalf(ticket.getOpNo(), loginUser, "保管人驳回：" + comment);
         auditService.record(loginUser, "SUBCA_REBUILD_REJECT", ticket.getOpNo(),
                 "驳回二级CA重建申请：" + company.getCompanyName() + "（" + ticket.getCompanyUscc() + "，意见：" + comment + "）",
                 ip, ticket.getCompanyUscc());
@@ -294,6 +304,7 @@ public class CaSubCaRebuildService {
                 .eq(CaSubCaTicket::getId, id)
                 .eq(CaSubCaTicket::getStatus, TicketRebuildStatusEnum.PENDING.getCode())
                 .set(CaSubCaTicket::getStatus, TicketRebuildStatusEnum.CANCELLED.getCode()));
+        engine.withdrawByBusiness(ticket.getOpNo(), loginUser);
         auditService.record(loginUser, "SUBCA_REBUILD_CANCEL", ticket.getOpNo(),
                 "撤回二级CA重建申请：" + ticket.getCompanyName() + "（" + ticket.getCompanyUscc() + "）", ip, ticket.getCompanyUscc());
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "CANCEL",
@@ -331,6 +342,8 @@ public class CaSubCaRebuildService {
                 .eq(CaSubCaTicket::getStatus, TicketRebuildStatusEnum.APPROVED.getCode())
                 .set(CaSubCaTicket::getStatus, TicketRebuildStatusEnum.EXECUTED.getCode())
                 .set(CaSubCaTicket::getExecutedAt, LocalDateTime.now()));
+        // 重建执行完成，流程收尾
+        engine.finish(ticket.getOpNo(), actor, "用根 CA 重签二级CA完成");
         auditService.record(actor, "SUBCA_REBUILD_EXECUTE", ticket.getOpNo(),
                 "执行二级CA重建：" + company.getCompanyName() + "（" + ticket.getCompanyUscc() + "，已用根重新签发）",
                 ip, ticket.getCompanyUscc());

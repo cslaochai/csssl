@@ -45,13 +45,6 @@ public class OcspService {
     private final CssslProperties props;
 
     /**
-     * 响应 OCSP 请求（DER 输入 → DER 输出，兼容入口=default 公司域）
-     */
-    public byte[] respond(byte[] requestDer) {
-        return respond(CaCompany.PRIMARY_COMPANY_USCC, requestDer);
-    }
-
-    /**
      * 公司域 responder：按 companyUscc 定位公司域查询吊销状态，用该公司 SUB_CA 密钥签响应
      */
     public byte[] respond(String companyUscc, byte[] requestDer) {

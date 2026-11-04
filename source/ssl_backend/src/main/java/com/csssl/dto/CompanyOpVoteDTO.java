@@ -10,6 +10,11 @@ import lombok.Data;
 public class CompanyOpVoteDTO {
 
     /**
+     * 目标变更单 ID（来自 body，替换原来的 @PathVariable）
+     */
+    private Long id;
+
+    /**
      * true-同意 false-驳回
      */
     private Boolean agree;

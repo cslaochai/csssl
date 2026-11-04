@@ -2,45 +2,33 @@
   <div class="wf-designer">
     <!-- 顶部工具栏 -->
     <div class="wf-toolbar">
-      <el-select
-        v-model="currentCode"
-        placeholder="选择已有流程"
-        size="small"
-        style="width:220px"
-        filterable
-        clearable
-        @change="loadDef"
-      >
-        <el-option v-for="d in defs" :key="d.id" :label="`${d.flowName}（${d.flowCode}）`" :value="d.flowCode" />
-      </el-select>
-      <el-button size="small" style="margin-left:8px" @click="newDef">＋ 新建</el-button>
+      <el-button size="small" @click="backToList">
+        <el-icon style="margin-right:4px"><ArrowLeft /></el-icon>返回流程列表
+      </el-button>
 
       <el-divider direction="vertical" />
 
-      <el-input v-model="def.flowName" placeholder="流程名称" style="width:170px" size="small" />
+      <el-tag v-if="loadingDef">载入中…</el-tag>
+      <el-input v-model="def.flowName" placeholder="流程名称" style="width:170px" size="small" :disabled="loadingDef" />
       <el-input
         v-model="def.flowCode"
         placeholder="流程编码(唯一)"
         style="width:170px;margin-left:8px"
         size="small"
-        :disabled="!!def.id"
+        :disabled="!!def.id || loadingDef"
       />
-      <el-input v-model="def.category" placeholder="分类" style="width:120px;margin-left:8px" size="small" />
+      <el-input v-model="def.category" placeholder="分类" style="width:120px;margin-left:8px" size="small" :disabled="loadingDef" />
 
       <el-tag v-if="def.isPublish === 1" type="success" style="margin-left:16px">已发布</el-tag>
       <el-tag v-else-if="def.id" type="warning" style="margin-left:16px">草稿</el-tag>
       <el-tag v-else type="info" style="margin-left:16px">新建</el-tag>
 
       <div style="margin-left:auto;display:flex;gap:8px">
+        <el-button v-if="nodes.length > 1" size="small" @click="autoLayout">
+          <el-icon style="margin-right:4px"><MagicStick /></el-icon>一键美化
+        </el-button>
         <el-button size="small" @click="saveDraft" :loading="saving">保存草稿</el-button>
-        <el-button
-          size="small"
-          type="success"
-          :disabled="!def.id || def.isPublish === 1"
-          :loading="publishing"
-          @click="publish"
-        >发布</el-button>
-        <el-button size="small" type="danger" :disabled="!def.id" @click="remove">删除</el-button>
+        <el-button size="small" type="success" :loading="publishing" @click="publish">发布</el-button>
       </div>
     </div>
 
@@ -55,7 +43,7 @@
           draggable="true"
           @dragstart="onDragStart($event, n)"
         >
-          <span class="palette-icon">{{ n.icon }}</span>
+          <span class="palette-icon" :style="{ color: n.color }">{{ n.icon }}</span>
           <span class="palette-label">{{ n.label }}</span>
         </div>
 
@@ -68,35 +56,33 @@
       </div>
 
       <!-- 中间画布 -->
-      <div class="wf-canvas" @drop="onDrop" @dragover.prevent>
-        <VueFlow
-          v-model:nodes="nodes"
-          v-model:edges="edges"
-          :default-edge-options="{ type: 'smoothstep' }"
-          :connect-on-click="false"
-          :delete-key-code="null"
-          :min-zoom="0.2"
-          :max-zoom="2"
-          fit-view-on-init
-          @node-click="onNodeClick"
-          @pane-click="onPaneClick"
-          @edge-click="onEdgeClick"
-          @connect="onConnect"
+      <div class="wf-canvas">
+        <div
+          class="wf-drop-zone"
+          @drop.stop.prevent="onDrop"
+          @dragover.prevent
         >
-          <Background :gap="16" pattern-color="#e2e8f0" />
-          <Controls position="bottom-left" />
-          <MiniMap position="bottom-right" />
-
-          <template #node-start="nodeProps">
-            <CustomNode v-bind="nodeProps" />
-          </template>
-          <template #node-middle="nodeProps">
-            <CustomNode v-bind="nodeProps" />
-          </template>
-          <template #node-end="nodeProps">
-            <CustomNode v-bind="nodeProps" />
-          </template>
-        </VueFlow>
+          <VueFlow
+            v-model:nodes="nodes"
+            v-model:edges="edges"
+            :node-types="nodeTypes"
+            :default-edge-options="{ type: 'smoothstep' }"
+            :connect-on-click="false"
+            :delete-key-code="null"
+            :min-zoom="0.2"
+            :max-zoom="2"
+            fit-view-on-init
+            @node-click="onNodeClick"
+            @pane-click="onPaneClick"
+            @edge-click="onEdgeClick"
+            @connect="onConnect"
+            @error="onFlowError"
+          >
+            <Background :gap="16" pattern-color="#e2e8f0" />
+            <Controls position="bottom-left" />
+            <MiniMap position="bottom-right" />
+          </VueFlow>
+        </div>
 
         <div v-if="!nodes.length" class="canvas-empty">
           从左侧拖入节点开始设计流程
@@ -111,14 +97,31 @@
             <label>节点名称</label>
             <el-input v-model="selectedNode.data.label" size="small" />
           </div>
-          <div class="form-row">
-            <label>权限标识</label>
-            <el-input
-              v-model="selectedNode.data.permission"
-              size="small"
-              placeholder="role:APPROVER@@role:RA_ADMIN"
-            />
-            <div class="form-hint">多个用 <code>@@</code> 分隔，如 role:APPROVER@@role:RA_ADMIN</div>
+          <div v-if="selectedNode.data.nodeType === 1" class="form-row">
+            <label>办理人方式</label>
+            <el-radio-group v-model="assigneeType" size="small" @change="onAssigneeTypeChange">
+              <el-radio-button value="role">按角色</el-radio-button>
+              <el-radio-button value="user">固定人员</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div v-if="selectedNode.data.nodeType === 1 && assigneeType === 'role'" class="form-row">
+            <label>办理角色</label>
+            <el-select v-model="assigneeValues" multiple size="small" style="width:100%" placeholder="选择角色">
+              <el-option v-for="r in rolePalette" :key="r.code" :label="r.name" :value="r.code" />
+            </el-select>
+            <div class="form-hint">角色下所有启用用户都可办理，人员变动自动生效</div>
+          </div>
+          <div v-if="selectedNode.data.nodeType === 1 && assigneeType === 'user'" class="form-row">
+            <label>固定人员</label>
+            <el-select v-model="assigneeValues" multiple filterable size="small" style="width:100%" placeholder="搜索并选择具体人员">
+              <el-option
+                v-for="u in assignableUsers"
+                :key="u.username"
+                :label="u.realName + '（' + u.username + '）'"
+                :value="u.username"
+              />
+            </el-select>
+            <div class="form-hint">流程固定由所选人员办理，人员停用后发布会被拦截</div>
           </div>
           <div class="form-row">
             <label>签核方式</label>
@@ -167,14 +170,16 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, markRaw, watch, onMounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { ArrowLeft, MagicStick } from '@element-plus/icons-vue'
 import CustomNode from './CustomNode.vue'
-import { listDefs, queryDesign, saveDef, publishDef, deleteDef } from '@/api/workflow'
+import { queryDesign, saveDef, saveAndPublishDef, listAssignableUsers } from '@/api/workflow'
 
 // Vue Flow 必需样式，缺失会导致节点无法定位/拖动
 import '@vue-flow/core/dist/style.css'
@@ -182,12 +187,25 @@ import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 
-const { screenToFlowPosition } = useVueFlow()
+// 显式注册节点类型，避免 slot 解析在某些 Vue Flow 版本下失效；markRaw 防止 Vue 深层代理组件对象
+const nodeTypes = {
+  start: markRaw(CustomNode),
+  middle: markRaw(CustomNode),
+  end: markRaw(CustomNode)
+}
+
+// @vue-flow/core 1.x 暴露的是 screenToFlowCoordinate；screenToFlowPosition 是 React Flow 的叫法，此处取到 undefined
+const { screenToFlowCoordinate, fitView } = useVueFlow()
+
+// 必须 v-model 双向绑定：只传 :nodes 时拖动坐标仅落在 VueFlow 内部副本，父数组一变就回退原位
+function onFlowError(err) {
+  console.error('[VueFlow error]', err)
+}
 
 const nodePalette = [
-  { type: 'start', label: '开始节点', icon: '▶', nodeType: 0, permission: '', ratio: '0.000' },
-  { type: 'middle', label: '审批节点', icon: '✎', nodeType: 1, permission: 'role:APPROVER', ratio: '0.000' },
-  { type: 'end', label: '结束节点', icon: '■', nodeType: 2, permission: '', ratio: '0.000' }
+  { type: 'start', label: '开始节点', icon: '●', color: '#10b981', nodeType: 0, permission: '', ratio: '0.000' },
+  { type: 'middle', label: '审批节点', icon: '✎', color: '#3b82f6', nodeType: 1, permission: 'role:APPROVER', ratio: '0.000' },
+  { type: 'end', label: '结束节点', icon: '○', color: '#6b7280', nodeType: 2, permission: '', ratio: '0.000' }
 ]
 
 const rolePalette = [
@@ -201,14 +219,21 @@ const rolePalette = [
   { code: 'SECURITY_ADMIN', name: '安全管理员' }
 ]
 
-const defs = ref([])
-const currentCode = ref('')
+const route = useRoute()
+const router = useRouter()
+
 const def = ref({ flowCode: '', flowName: '', category: '', version: '1', id: null, isPublish: 0 })
 const nodes = ref([])
 const edges = ref([])
 const selectedNode = ref(null)
 const saving = ref(false)
 const publishing = ref(false)
+const loadingDef = ref(false)
+// 办理人配置：role 按角色 / user 固定人员；两者最终都落到节点的 permission 字符串
+const assigneeType = ref('role')
+const assigneeValues = ref([])
+const assignableUsers = ref([])
+let syncingAssignee = false
 
 const edgeDialogVisible = ref(false)
 const editingEdge = ref({})
@@ -224,27 +249,74 @@ function onDragStart(e, item) {
 
 function onDrop(e) {
   if (!dragged) return
-  const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+  const flowPos = screenToFlowCoordinate({ x: e.clientX, y: e.clientY })
   const existing = new Set(nodes.value.map(n => n.id))
   let code = String(Date.now() % 100000)
   while (existing.has(code)) code = String(Number(code) + 1)
 
-  nodes.value.push({
+  const newNode = {
     id: code,
     type: dragged.type,
-    position,
+    position: flowPos,
     data: {
       label: dragged.nodeType === 0 ? '开始' : dragged.nodeType === 2 ? '结束' : '审批节点',
       nodeType: dragged.nodeType,
       permission: dragged.permission,
       ratio: dragged.ratio
     }
-  })
+  }
+  nodes.value = [...nodes.value, newNode]
   dragged = null
 }
 
 function onNodeClick({ node }) {
   selectedNode.value = node
+  syncAssigneeFromNode(node)
+}
+
+/** permission 字符串 → 办理人方式与取值 */
+function syncAssigneeFromNode(node) {
+  syncingAssignee = true
+  const flags = String(node?.data?.permission || '')
+    .split('@@')
+    .map(s => s.trim())
+    .filter(Boolean)
+  const isUser = flags.some(f => f.startsWith('user:'))
+  const values = flags.map(f => {
+    if (f.startsWith('role:')) return f.slice(5)
+    if (f.startsWith('user:')) return f.slice(5)
+    return f
+  })
+  assigneeType.value = isUser ? 'user' : 'role'
+  assigneeValues.value = values
+  nextTick(() => {
+    syncingAssignee = false
+  })
+}
+
+function onAssigneeTypeChange() {
+  // 切换方式后旧取值不通用，清空重选
+  assigneeValues.value = []
+}
+
+watch(
+  [assigneeType, assigneeValues],
+  () => {
+    if (syncingAssignee || !selectedNode.value) return
+    if (selectedNode.value.data.nodeType !== 1) return
+    const prefix = assigneeType.value === 'role' ? 'role:' : 'user:'
+    selectedNode.value.data.permission = assigneeValues.value.map(v => prefix + v).join('@@')
+  },
+  { deep: true, flush: 'sync' }
+)
+
+async function loadAssignableUsers() {
+  try {
+    const res = await listAssignableUsers()
+    assignableUsers.value = res?.data || []
+  } catch (e) {
+    assignableUsers.value = []
+  }
 }
 
 function onPaneClick() {
@@ -275,10 +347,6 @@ function onConnect(params) {
 function onEdgeClick({ edge }) {
   editingEdge.value = edge
   edgeDialogVisible.value = true
-  nextTick(() => {
-    // 同步下拉/输入框绑定到 edge 本身
-    editingEdge.value = edge
-  })
 }
 
 function deleteEditingEdge() {
@@ -294,55 +362,89 @@ function deleteSelectedNode() {
   selectedNode.value = null
 }
 
-// ===== 载入 / 新建 =====
-async function refreshDefs() {
-  const res = await listDefs()
-  defs.value = Array.isArray(res?.data) ? res.data : []
+// ===== 载入 / 返回 =====
+function backToList() {
+  router.push({ name: 'workflow-management' })
 }
 
-async function loadDef(flowCode) {
-  if (!flowCode) return
-  const found = defs.value.find(d => d.flowCode === flowCode)
-  if (!found) return
-  const res = await queryDesign(found.id)
-  const design = res?.data
-  applyDesign(design, found)
-  ElMessage.success(`已载入 ${found.flowName}`)
+function resetBlank() {
+  def.value = { flowCode: '', flowName: '', category: '', version: '1', id: null, isPublish: 0 }
+  nodes.value = []
+  edges.value = []
+  selectedNode.value = null
 }
 
-function applyDesign(design, meta) {
-  def.value = {
-    flowCode: design?.flowCode || meta.flowCode,
-    flowName: design?.flowName || meta.flowName,
-    category: design?.category || meta.category || '',
-    version: design?.version || meta.version || '1',
-    id: design?.id || meta.id,
-    isPublish: meta.isPublish ?? design?.isPublish ?? 0
-  }
-  const nodeList = design?.nodeList || []
-  const autoPos = buildAutoLayout(nodeList)
-  nodes.value = nodeList.map(n => ({
-    id: n.nodeCode,
-    type: n.nodeType === 0 ? 'start' : n.nodeType === 2 ? 'end' : 'middle',
-    position: parseCoordinate(n.coordinate) || autoPos[n.nodeCode],
-    data: {
-      label: n.nodeName,
-      nodeType: n.nodeType,
-      permission: n.permissionFlag || '',
-      ratio: n.nodeRatio || '0.000'
+async function loadDefById(id) {
+  loadingDef.value = true
+  try {
+    const res = await queryDesign(id)
+    const design = res?.data
+    if (!design) {
+      ElMessage.error('流程定义不存在')
+      backToList()
+      return
     }
-  }))
-  edges.value = nodeList.flatMap(n =>
-    (n.skipList || []).map(s => ({
-      id: `e-${s.nowNodeCode}-${s.nextNodeCode}-${s.skipType || 'PASS'}`,
-      source: s.nowNodeCode,
-      target: s.nextNodeCode,
-      label: s.skipName || (s.skipType === 'REJECT' ? '驳回' : '通过'),
-      skipType: s.skipType || 'PASS',
-      data: { skipType: s.skipType || 'PASS' }
+    def.value = {
+      flowCode: design.flowCode || '',
+      flowName: design.flowName || '',
+      category: design.category || '',
+      version: design.version || '1',
+      id: design.id == null ? null : String(design.id),
+      isPublish: design.isPublish ?? 0
+    }
+    const nodeList = design.nodeList || []
+    const autoPos = buildAutoLayout(nodeList)
+    nodes.value = nodeList.map(n => ({
+      id: String(n.nodeCode),
+      type: n.nodeType === 0 ? 'start' : n.nodeType === 2 ? 'end' : 'middle',
+      position: parseCoordinate(n.coordinate) || autoPos[n.nodeCode],
+      data: {
+        label: n.nodeName,
+        nodeType: n.nodeType,
+        permission: n.permissionFlag || '',
+        ratio: n.nodeRatio || '0.000'
+      }
     }))
-  )
+    edges.value = nodeList.flatMap(n =>
+      (n.skipList || []).map(s => ({
+        id: `e-${s.nowNodeCode}-${s.nextNodeCode}-${s.skipType || 'PASS'}`,
+        source: s.nowNodeCode,
+        target: s.nextNodeCode,
+        label: s.skipName || (s.skipType === 'REJECT' ? '驳回' : '通过'),
+        skipType: s.skipType || 'PASS',
+        data: { skipType: s.skipType || 'PASS' }
+      }))
+    )
+  } catch (e) {
+    ElMessage.error(e?.message || '载入失败')
+    backToList()
+  } finally {
+    loadingDef.value = false
+  }
 }
+
+function setupFromRoute() {
+  const id = route.params.id
+  if (id && id !== 'undefined') {
+    loadDefById(id)
+  } else {
+    resetBlank()
+  }
+}
+
+watch(() => route.params.id, (id, old) => {
+  if (id === old) return
+  if (id && id !== 'undefined') {
+    loadDefById(id)
+  } else {
+    resetBlank()
+  }
+})
+
+onMounted(() => {
+  setupFromRoute()
+  loadAssignableUsers()
+})
 
 function buildAutoLayout(nodeList) {
   const map = {}
@@ -362,12 +464,55 @@ function parseCoordinate(coord) {
   return { x, y }
 }
 
-function newDef() {
-  currentCode.value = ''
-  def.value = { flowCode: '', flowName: '', category: '', version: '1', id: null, isPublish: 0 }
-  nodes.value = []
-  edges.value = []
-  selectedNode.value = null
+// ===== 一键美化：按流转拓扑分层，从左到右逐列排开 =====
+const LAYOUT_GAP_X = 72
+const LAYOUT_GAP_Y = 48
+const NODE_FALLBACK_W = 180
+const NODE_FALLBACK_H = 90
+
+function autoLayout() {
+  if (nodes.value.length < 2) return
+  const outgoing = new Map()
+  edges.value.forEach(e => {
+    if (!outgoing.has(e.source)) outgoing.set(e.source, [])
+    outgoing.get(e.source).push(e.target)
+  })
+  const hasIncoming = new Set(edges.value.map(e => e.target))
+
+  const depth = new Map()
+  let frontier = nodes.value
+    .filter(n => n.data.nodeType === 0 || !hasIncoming.has(n.id))
+    .map(n => { depth.set(n.id, 0); return n.id })
+  if (!frontier.length) frontier = [nodes.value[0].id]
+  while (frontier.length) {
+    const id = frontier.shift()
+    const d = depth.get(id)
+    ;(outgoing.get(id) || []).forEach(t => {
+      if (depth.has(t)) return
+      depth.set(t, d + 1)
+      frontier.push(t)
+    })
+  }
+
+  const columns = new Map()
+  nodes.value.forEach(n => {
+    if (!depth.has(n.id)) depth.set(n.id, 0)
+    const d = depth.get(n.id)
+    if (!columns.has(d)) columns.set(d, [])
+    columns.get(d).push(n)
+  })
+
+  let x = 60
+  ;[...columns.keys()].sort((a, b) => a - b).forEach(d => {
+    const col = columns.get(d).sort((a, b) => a.position.y - b.position.y)
+    let y = 60
+    col.forEach(n => {
+      n.position = { x, y }
+      y += (n.dimensions?.height || NODE_FALLBACK_H) + LAYOUT_GAP_Y
+    })
+    x += Math.max(...col.map(n => n.dimensions?.width || NODE_FALLBACK_W)) + LAYOUT_GAP_X
+  })
+  nextTick(() => fitView({ padding: 0.2 }))
 }
 
 // ===== 保存 / 发布 / 删除 =====
@@ -401,57 +546,66 @@ function toDefJson() {
   }
 }
 
-async function saveDraft() {
+function validateForSave() {
   if (!def.value.flowCode || !def.value.flowName) {
     ElMessage.warning('请填写流程编码和名称')
-    return
+    return false
   }
   if (!nodes.value.length) {
     ElMessage.warning('流程至少需要一个节点')
-    return
+    return false
   }
+  return true
+}
+
+/** 保存当前画布内容，返回流程 id；调用前需先通过 validateForSave */
+async function persistDraft() {
+  const wasNew = !def.value.id
+  const res = await saveDef(toDefJson())
+  const id = res?.data
+  if (!id) return null
+  // 雪花 ID 必须按字符串保存，否则超过 JS 安全整数范围会精度丢失
+  def.value.id = String(id)
+  // 新建流程保存后，更新 URL 带上 id，避免刷新丢失
+  if (wasNew) {
+    router.replace({ name: 'workflow-designer', params: { id: def.value.id } })
+  }
+  return def.value.id
+}
+
+async function saveDraft() {
+  if (!validateForSave()) return
   saving.value = true
   try {
-    const res = await saveDef(toDefJson())
-    const id = res?.data
-    if (id) def.value.id = id
-    await refreshDefs()
-    ElMessage.success('草稿已保存')
+    if (await persistDraft()) ElMessage.success('草稿已保存')
+  } catch (e) {
+    // 接口层已弹出后端返回的原因，这里只吞掉 rejection
   } finally {
     saving.value = false
   }
 }
 
 async function publish() {
-  if (!def.value.id) {
-    ElMessage.warning('请先保存草稿')
-    return
-  }
+  if (!validateForSave()) return
   publishing.value = true
   try {
-    await publishDef(def.value.id)
+    // 后端在同一事务里先保存当前画布、再发布：保存失败则不发布，发布失败则保存回滚
+    const res = await saveAndPublishDef(toDefJson())
+    const id = res?.data
+    if (!id) throw new Error('发布失败')
+    const wasNew = !def.value.id
+    def.value.id = String(id)
+    if (wasNew) {
+      router.replace({ name: 'workflow-designer', params: { id: def.value.id } })
+    }
     def.value.isPublish = 1
-    await refreshDefs()
-    ElMessage.success('已发布，新提交的单据将使用此流程')
+    ElMessage.success('已保存并发布，新提交的单据将使用此流程')
+  } catch (e) {
+    // 接口层已弹出后端校验原因（开始/结束节点数量、审批节点缺通过流转线等）
   } finally {
     publishing.value = false
   }
 }
-
-async function remove() {
-  if (!def.value.id) return
-  try {
-    await ElMessageBox.confirm('确定删除该流程定义？将级联删除节点、流转、实例与历史记录', '删除确认', { type: 'warning' })
-  } catch {
-    return
-  }
-  await deleteDef(def.value.id)
-  ElMessage.success('已删除')
-  newDef()
-  await refreshDefs()
-}
-
-refreshDefs()
 </script>
 
 <style scoped>
@@ -526,6 +680,15 @@ refreshDefs()
   flex: 1;
   position: relative;
   min-width: 0;
+}
+.wf-drop-zone {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.wf-drop-zone :deep(.vue-flow) {
+  width: 100%;
+  height: 100%;
 }
 .canvas-empty {
   position: absolute;

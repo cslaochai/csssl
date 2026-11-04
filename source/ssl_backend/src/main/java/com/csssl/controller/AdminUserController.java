@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.common.Result;
+import com.csssl.dto.CompanyUsccDTO;
 import com.csssl.dto.UserCreateDTO;
 import com.csssl.dto.UserPageQueryDTO;
 import com.csssl.dto.UserUpdateDTO;
@@ -25,12 +26,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -48,7 +46,7 @@ import java.util.List;
  * <ul>
  *   <li>建号：全局 ADMIN 可传 companyUscc 建公司用户（含公司 ADMIN，公司主由全局任命）或不传=全局用户；
  *       公司 ADMIN 只能建本公司用户，且不可建/改 ADMIN 角色，不可建全局用户；越域请求 403。</li>
- *   <li>列表：公司用户只见本公司；全局用户可按 ?companyUscc= 过滤，不传=全部
+ *   <li>列表：公司用户只见本公司；全局用户可按 body.companyUscc 过滤，不传=全部
  *       ——这是唯一允许的跨公司"读"口（全局 ADMIN 总览），不构成写旁路。</li>
  *   <li>改角色/停用/重置口令：目标用户必须落在操作者数据域（公司 ADMIN 改别公司/全局用户→403）；
  *       审计记录带目标用户公司。</li>
@@ -64,10 +62,12 @@ public class AdminUserController {
     private final AuditService auditService;
     private final CompanyService companyService;
 
-    /** 用户列表（分页 + 角色/公司筛选；公司用户强制本公司，全局用户 companyUscc 缺省=跨公司总览只读） */
+    /**
+     * 用户列表（分页 + 角色/公司筛选；公司用户强制本公司，全局用户 companyUscc 缺省=跨公司总览只读）
+     */
     @PreAuthorize("hasAuthority('user:list')")
-    @GetMapping
-    public Result<Page<SysUser>> page(@Valid UserPageQueryDTO query, HttpServletRequest request) {
+    @PostMapping("/page")
+    public Result<Page<SysUser>> page(@Valid @RequestBody UserPageQueryDTO query, HttpServletRequest request) {
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         if (query.getRoleCode() != null && !query.getRoleCode().isBlank()) {
             qw.eq(SysUser::getRoleCode, query.getRoleCode());
@@ -84,7 +84,7 @@ public class AdminUserController {
      * 不可建 ADMIN（公司主由全局 ADMIN 任命）、不可建全局用户；越域 403。
      */
     @PreAuthorize("hasAuthority('user:create')")
-    @PostMapping
+    @PostMapping("/create")
     public Result<SysUser> create(@Valid @RequestBody UserCreateDTO body, HttpServletRequest request) {
         String username = body.getUsername();
         if (username == null || username.isBlank()) {
@@ -117,7 +117,7 @@ public class AdminUserController {
         userMapper.insert(user);
         auditService.record(loginUser, "USER_CREATE", String.valueOf(user.getId()),
                 "创建账号：" + user.getUsername() + "，角色=" + role + "，姓名=" + user.getRealName(),
-                clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
+                clientIp(request), "default");
         user.setPassword(null);
         return Result.success("创建成功", user);
     }
@@ -128,8 +128,8 @@ public class AdminUserController {
      * 与（传了 companyUscc 时）该公司本域的密钥管理员；不返回其他公司的员工。</p>
      */
     @PreAuthorize("hasAnyAuthority('company:create','ca:share:assign')")
-    @GetMapping("/simple")
-    public Result<List<UserSimpleVO>> simple(@RequestParam(required = false) String companyUscc) {
+    @PostMapping("/simple")
+    public Result<List<UserSimpleVO>> simple(@RequestBody(required = false) CompanyUsccDTO body) {
         LambdaQueryWrapper<SysUser> qw = new LambdaQueryWrapper<>();
         qw.eq(SysUser::getRoleCode, RoleCodeEnum.KEY_ADMIN.name());
         qw.orderByAsc(SysUser::getId);
@@ -139,7 +139,7 @@ public class AdminUserController {
             v.setUsername(u.getUsername());
             v.setRealName(u.getRealName());
             v.setRoleCode(u.getRoleCode());
-            v.setCompanyUscc(CaCompany.PRIMARY_COMPANY_USCC);
+            v.setCompanyUscc(null);
             v.setStatus(u.getStatus());
             return v;
         }).collect(java.util.stream.Collectors.toList());
@@ -152,9 +152,13 @@ public class AdminUserController {
      * 公司 ADMIN 不可把角色改为 ADMIN（公司主任命权保留在全局 ADMIN）。
      */
     @PreAuthorize("hasAuthority('user:update')")
-    @PostMapping("/{id}")
-    public Result<SysUser> update(@PathVariable Long id, @Valid @RequestBody UserUpdateDTO body,
+    @PostMapping("/update")
+    public Result<SysUser> update(@Valid @RequestBody UserUpdateDTO body,
                                   HttpServletRequest request) {
+        Long id = body.getId();
+        if (id == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
         SysUser user = userMapper.selectById(id);
         if (user == null) {
             throw new IllegalArgumentException("用户不存在（id=" + id + "）");
@@ -217,8 +221,8 @@ public class AdminUserController {
         if (touched) {
             userMapper.update(null, uw);
         }
-        // 单租户化后统一按平台主公司留痕
-        String auditCompany = CaCompany.PRIMARY_COMPANY_USCC;
+        // 账号操作属于平台级，审计归 default
+        String auditCompany = "default";
         if (!changes.isEmpty()) {
             auditService.record(loginUser, "USER_UPDATE", String.valueOf(id),
                     "更新账号 " + user.getUsername() + "：" + String.join("；", changes), ip, auditCompany);
@@ -244,7 +248,9 @@ public class AdminUserController {
                 .eq(SysRole::getRoleCode, r)) > 0;
     }
 
-    /** 建号/改角色时校验：角色档案存在且已启用（角色配置页停用后不得再分配） */
+    /**
+     * 建号/改角色时校验：角色档案存在且已启用（角色配置页停用后不得再分配）
+     */
     private SysRole requireAssignableRole(String roleCode) {
         SysRole role = roleMapper.selectOne(new LambdaQueryWrapper<SysRole>()
                 .eq(SysRole::getRoleCode, roleCode));

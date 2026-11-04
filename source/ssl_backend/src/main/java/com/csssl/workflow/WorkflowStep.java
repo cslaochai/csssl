@@ -1,5 +1,7 @@
 package com.csssl.workflow;
 
+import com.csssl.enums.AssignStrategyEnum;
+
 import java.util.List;
 
 /**
@@ -8,29 +10,41 @@ import java.util.List;
  */
 public class WorkflowStep {
 
-    /** 步骤编码（与状态机/轨迹 step 对齐，如 SUBMIT/REVIEW/ISSUE） */
+    /**
+     * 步骤编码（与状态机/轨迹 step 对齐，如 SUBMIT/REVIEW/ISSUE）
+     */
     private String code;
-    /** 步骤展示名（如「审核审批」） */
+    /**
+     * 步骤展示名（如「审核审批」）
+     */
     private String name;
-    /** 处理人展示标签（如「审核员 / RA管理员」），用于流程图与下一审批人提示 */
+    /**
+     * 处理人展示标签（如「审核员 / RA管理员」），用于流程图与下一审批人提示
+     */
     private String actorLabel;
-    /** 可处理该步的角色编码（引擎分派/准入时使用，展示用 actorLabel） */
+    /**
+     * 可处理该步的角色编码（引擎分派/准入时使用，展示用 actorLabel）
+     */
     private List<String> roleCodes;
-    /** 分派策略 */
-    private AssignStrategy assignStrategy;
-    /** 是否为终态步骤 */
+    /**
+     * 分派策略
+     */
+    private AssignStrategyEnum assignStrategyEnum;
+    /**
+     * 是否为终态步骤
+     */
     private boolean terminal;
 
     public WorkflowStep() {
     }
 
     public WorkflowStep(String code, String name, String actorLabel, List<String> roleCodes,
-                        AssignStrategy assignStrategy, boolean terminal) {
+                        AssignStrategyEnum assignStrategyEnum, boolean terminal) {
         this.code = code;
         this.name = name;
         this.actorLabel = actorLabel;
         this.roleCodes = roleCodes;
-        this.assignStrategy = assignStrategy;
+        this.assignStrategyEnum = assignStrategyEnum;
         this.terminal = terminal;
     }
 
@@ -66,12 +80,12 @@ public class WorkflowStep {
         this.roleCodes = roleCodes;
     }
 
-    public AssignStrategy getAssignStrategy() {
-        return assignStrategy;
+    public AssignStrategyEnum getAssignStrategy() {
+        return assignStrategyEnum;
     }
 
-    public void setAssignStrategy(AssignStrategy assignStrategy) {
-        this.assignStrategy = assignStrategy;
+    public void setAssignStrategy(AssignStrategyEnum assignStrategyEnum) {
+        this.assignStrategyEnum = assignStrategyEnum;
     }
 
     public boolean isTerminal() {

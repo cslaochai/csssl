@@ -18,7 +18,7 @@ public interface CrlStateMapper extends BaseMapper<CrlState> {
      * 行锁读取主公司发布状态（兼容入口）
      */
     default CrlState selectForUpdate() {
-        return selectForUpdate(CaCompany.PRIMARY_COMPANY_USCC);
+        return selectForUpdate("default");
     }
 
     /**

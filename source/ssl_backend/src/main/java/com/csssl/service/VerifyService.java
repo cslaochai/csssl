@@ -97,13 +97,6 @@ import java.util.Locale;
     }
 
     /**
-     * 校验（兼容入口=default 公司域）
-     */
-    public VerifyResultVO verify(VerifyQueryDTO req) {
-        return verify(req, CaCompany.PRIMARY_COMPANY_USCC);
-    }
-
-    /**
      * 校验（公司域版）：沿该公司 根CA ← SUB_CA ← 叶子 链验证
      */
     public VerifyResultVO verify(VerifyQueryDTO req, String companyUscc) {

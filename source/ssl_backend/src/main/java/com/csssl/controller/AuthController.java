@@ -35,7 +35,9 @@ public class AuthController {
     private final AuditService auditService;
     private final JwtUtil jwtUtil;
 
-    /** 登录口令加密公钥（SM2 未压缩公钥点十六进制，04 前缀） */
+    /**
+     * 登录口令加密公钥（SM2 未压缩公钥点十六进制，04 前缀）
+     */
     @GetMapping("/publicKey")
     public Result<PublicKeyVO> publicKey() {
         PublicKeyVO data = new PublicKeyVO();
@@ -44,7 +46,9 @@ public class AuthController {
         return Result.success("获取公钥成功", data);
     }
 
-    /** 账号口令登录：口令密文为 SM2 C1C3C2 十六进制 */
+    /**
+     * 账号口令登录：口令密文为 SM2 C1C3C2 十六进制
+     */
     @PostMapping("/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginDTO req, HttpServletRequest request) {
         LoginVO data = authService.login(req, clientIp(request));
@@ -72,7 +76,9 @@ public class AuthController {
         return ResponseEntity.ok(Result.success("口令修改成功，请使用新口令重新登录", null));
     }
 
-    /** 退出登录（/auth/** 不经过拦截器，从 Authorization 头解析用户名） */
+    /**
+     * 退出登录（/auth/** 不经过拦截器，从 Authorization 头解析用户名）
+     */
     @PostMapping("/logout")
     public Result<Void> logout(HttpServletRequest request) {
         String token = request.getHeader("Authorization");
@@ -83,7 +89,9 @@ public class AuthController {
         return Result.success("已退出登录", null);
     }
 
-    /** 取客户端真实IP（支持前置代理 X-Forwarded-For） */
+    /**
+     * 取客户端真实IP（支持前置代理 X-Forwarded-For）
+     */
     private String clientIp(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {

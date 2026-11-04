@@ -147,8 +147,8 @@
     </el-tabs>
 
     <!-- 吊销记录详情（行点击） -->
-    <el-dialog v-model="detailVisible" title="吊销记录详情" width="560px">
-      <el-descriptions :column="1" border>
+    <el-dialog v-model="detailVisible" title="吊销记录详情" width="900px">
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="序列号"><span class="mono-wrap">{{ detail?.serialHex }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="主体CN">{{ detail?.subjectCn }}</el-descriptions-item>
@@ -162,7 +162,7 @@
           }}
         </el-descriptions-item>
         <el-descriptions-item label="吊销时间">{{ detail?.revokedAt || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="用途说明">{{ detail?.description || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="用途说明" :span="2">{{ detail?.description || '-' }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
   </div>

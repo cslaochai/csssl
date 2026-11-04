@@ -6,9 +6,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
- * 公司详情视图对象：公司档案 + 嵌套根CA状态摘要（详情接口与新建公司回执共用）。
+ * 公司详情视图对象：公司档案 + 嵌套根CA状态摘要 + 保管人名单（不含份额明文）。
  */
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -64,6 +65,11 @@ public class CompanyDetailVO {
      * 根CA/SUB_CA 状态摘要
      */
     private CompanyVO rootStatus;
+
+    /**
+     * 5 名密钥保管人名单（按份额编号升序；仅份额编号 + 真实姓名，不含份额明文、不含登录账号）
+     */
+    private List<CaSubCaHolderVO> holders;
 
     /**
      * 公司档案部分（rootStatus 由服务层填充）

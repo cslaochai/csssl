@@ -7,6 +7,7 @@ import com.csssl.dto.AuditPageQueryDTODTO;
 import com.csssl.dto.AuditVerifyDTO;
 import com.csssl.vo.AuditVerifyVO;
 import com.csssl.dto.ChainVerifyQueryDTO;
+import com.csssl.dto.CompanyUsccDTO;
 import com.csssl.vo.ChainVerifyVO;
 import com.csssl.entity.AuditLog;
 import com.csssl.entity.CaCompany;
@@ -17,11 +18,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -31,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 系统管理员/操作员不得读审计（防"做事的人删自己的痕迹"）。</p>
  *
  * <p>路线A数据域口径：公司审计员强制本公司过滤（显式传别公司 403）；
- * 全局审计员可按 ?companyUscc= 逐公司查看，不传=跨公司全量——审计域本就属监督职能，
+ * 全局审计员可按 body.companyUscc= 逐公司查看，不传=跨公司全量——审计域本就属监督职能，
  * 全局只读总览为合规设计，不构成写旁路。</p>
  */
 @RestController
@@ -41,10 +40,12 @@ public class AuditController {
 
     private final AuditService auditService;
 
-    /** 审计日志分页查询（仅审计员；公司用户强制本公司，全局用户 companyUscc 缺省=全量只读） */
+    /**
+     * 审计日志分页查询（仅审计员；公司用户强制本公司，全局用户 companyUscc 缺省=全量只读）
+     */
     @PreAuthorize("hasAuthority('audit:view')")
-    @GetMapping
-    public Result<Page<AuditLog>> page(@Valid AuditPageQueryDTODTO query, HttpServletRequest request) {
+    @PostMapping("/page")
+    public Result<Page<AuditLog>> page(@Valid @RequestBody AuditPageQueryDTODTO query, HttpServletRequest request) {
         return Result.success("查询成功", auditService.page(query.getPageNo(), query.getPageSize(), query.getAction(),
                 CompanyScope.readCompanyScope(query.getCompanyUscc())));
     }
@@ -60,7 +61,6 @@ public class AuditController {
         if (id == null) {
             throw new IllegalArgumentException("参数 id 不能为空");
         }
-        AuditLog row = auditService.load(id);
 
         return Result.success("验签完成", auditService.verifyLog(id));
     }
@@ -70,9 +70,10 @@ public class AuditController {
      * 公司用户强制导出本公司；全局用户 companyUscc 缺省=跨公司全量导出（只读放行，合规设计）。
      */
     @PreAuthorize("hasAuthority('audit:export')")
-    @GetMapping("/export")
-    public Result<AuditExportVO> export(@RequestParam(required = false) String companyUscc,
+    @PostMapping("/export")
+    public Result<AuditExportVO> export(@RequestBody(required = false) CompanyUsccDTO body,
                                         HttpServletRequest request) {
+        String companyUscc = body == null ? null : body.getCompanyUscc();
         return Result.success("导出完成", auditService.exportCsv(CompanyScope.readCompanyScope(companyUscc)));
     }
 
@@ -85,8 +86,8 @@ public class AuditController {
      * 公司数据域过滤只作用于"查"（分页/验签/导出），对账结果仅暴露断链 id 与原因，不含记录内容。</p>
      */
     @PreAuthorize("hasAuthority('audit:chain')")
-    @GetMapping("/chain-verify")
-    public Result<ChainVerifyVO> chainVerify(@Valid ChainVerifyQueryDTO query,
+    @PostMapping("/chain-verify")
+    public Result<ChainVerifyVO> chainVerify(@Valid @RequestBody ChainVerifyQueryDTO query,
                                              HttpServletRequest request) {
         return Result.success("链对账完成", auditService.verifyChain(query.getFromId(), query.getToId()));
     }

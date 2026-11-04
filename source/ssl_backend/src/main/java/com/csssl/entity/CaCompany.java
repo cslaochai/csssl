@@ -11,8 +11,6 @@ import lombok.EqualsAndHashCode;
 /**
  * CA 公司注册表：每家医院=一套独立根CA域（根CA+SUB_CA+签发目录+主密钥+门限份额），公司间互不信任。
  * 统一社会信用代码即公司标识（路径/接口/落盘目录同名），不另设内部标识字段。
- * 平台只有一家在营公司时，它即主公司（{@link #PRIMARY_COMPANY_USCC}）；存量单根的落盘路径命名空间
- * 仍是 {@link #LEGACY_NAMESPACE}，两者刻意分开，避免主公司切换后找不到旧密钥目录。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -20,14 +18,9 @@ import lombok.EqualsAndHashCode;
 public class CaCompany extends AuditColumns {
 
     /**
-     * 存量单根的密钥目录/DN 命名空间（路径兼容判断专用，不随主公司变化）
+     * 存量单根的密钥目录/DN 命名空间（路径兼容判断专用，历史语义空=默认域）
      */
     public static final String LEGACY_NAMESPACE = "default";
-    /**
-     * 平台主公司标识：所有不带公司参数的兼容入口都落到它。
-     * 缺省 default（存量单根部署）；启动时由 CompanyScope 校准为唯一在营公司。
-     */
-    public static volatile String PRIMARY_COMPANY_USCC = "default";
 
 
     @TableId(type = IdType.ASSIGN_ID)

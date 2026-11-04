@@ -25,6 +25,12 @@ public class CompanyOpSubmitDTO {
     private String reason;
 
     /**
+     * 提交时指定的审批人（用户ID，单选）：必须来自流程首个审批节点权限标识筛选出的候选人。
+     * REASSIGN_HOLDERS 不走流程，忽略本字段。
+     */
+    private Long assigneeUserId;
+
+    /**
      * 新密钥保管人账号（仅 REASSIGN_HOLDERS 重新指派保管人专用，须恰好 5 名、互不相同、均为启用的密钥管理员）。
      * 其他变更类型忽略本字段。
      */

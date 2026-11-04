@@ -2,7 +2,8 @@ package com.csssl.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.csssl.config.CssslProperties;
-import com.csssl.config.KeyVaultConfig;
+import com.csssl.config.CompanyVaultResolver;
+import com.csssl.util.UsccValidator;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaCompany;
 import com.csssl.entity.KeyVaultEntry;
@@ -23,8 +24,6 @@ import com.csssl.vo.RootSharesVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,7 +58,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  *
  * <p>路线A多公司（按公司独立根CA）：本类维护 {@code companyUscc → CompanyCaState} 根池，
- * 每公司独立的锁、门限解封内存缓存、目录路径与保险库（{@link KeyVaultConfig.CompanyVaultResolver}）。
+ * 每公司独立的锁、门限解封内存缓存、目录路径与保险库（{@link CompanyVaultResolver}）。
  * 目录规则：default（存量单根，兼容铁律）沿用 store-dir/{root,subca,issued} 与 root/shares、master.key；
  * 新公司为 store-dir/companies/{companyUscc}/{root,subca,issued,shares} 与 companies/{companyUscc}/master.key。
  * 所有原无参公开方法委托 default 公司，行为与单根时代完全一致；新代码一律使用带 companyUscc 的版本。</p>
@@ -67,7 +66,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class CaService implements ApplicationRunner {
+public class CaService {
 
     public static final String TYPE_ROOT = "ROOT";
     public static final String TYPE_SUB_CA = "SUB_CA";
@@ -99,7 +98,7 @@ public class CaService implements ApplicationRunner {
     /**
      * 公司保险库解析器：default → 上述单例；其他公司 → store-dir/companies/{companyUscc} 独立保险库
      */
-    private final KeyVaultConfig.CompanyVaultResolver companyVaults;
+    private final CompanyVaultResolver companyVaults;
     private final CompanyMapper companyMapper;
     private final SysUserMapper sysUserMapper;
     private final CompanyKeyShareMapper keyShareMapper;
@@ -112,7 +111,7 @@ public class CaService implements ApplicationRunner {
     private final Map<String, CompanyCaState> companyStates = new ConcurrentHashMap<>();
 
     private CompanyCaState stateOf(String companyUscc) {
-        KeyVaultConfig.CompanyVaultResolver.checkCompanyUscc(companyUscc);
+        UsccValidator.checkCompanyUscc(companyUscc);
         return companyStates.computeIfAbsent(companyUscc, k -> new CompanyCaState());
     }
 
@@ -152,7 +151,7 @@ public class CaService implements ApplicationRunner {
      * 签发证书落盘目录（issued/{serial}，兼容入口=default 公司）
      */
     public Path issuedDir(String serialHex) {
-        return issuedDir(CaCompany.PRIMARY_COMPANY_USCC, serialHex);
+        return issuedDir("default", serialHex);
     }
 
     /**
@@ -305,35 +304,11 @@ public class CaService implements ApplicationRunner {
         return company;
     }
 
-    @Override
-    public void run(ApplicationArguments args) {
-        // 启动仅确保主公司（CompanyScope 已校准）；未登记时不代建，交由公司管理页开公司
-        String primary = CaCompany.PRIMARY_COMPANY_USCC;
-        if (companyMapper.selectOne(new LambdaQueryWrapper<CaCompany>()
-                .eq(CaCompany::getUscc, primary)) == null) {
-            log.info("[CA] 主公司 {} 尚未登记，跳过启动初始化（请在公司管理创建公司）", primary);
-            return;
-        }
-        try {
-            CaCert root = ensureRoot(primary);
-            ensureSubCa(primary);
-            // 门限化以「份额目录是否已有完整 5 份份额文件」为唯一判据（ensureRootShares 幂等）：
-            // 新根生成或中断后重启都会安全重试，不依赖任何内存标志；已封存/已门限态自动跳过
-            if (ROOT_KEY_ONLINE.equals(rootKeyState(primary))) {
-                ensureRootShares(primary);
-            }
-            log.info("[CA] 启动完成（主公司 {}）：root={}({}), subCa 签发就绪，rootKeyState={}",
-                    primary, root.getSubjectCn(), root.getAlgorithm(), rootKeyState(primary));
-        } catch (Exception e) {
-            log.error("[CA] 启动初始化失败，请检查 store-dir 权限、主密钥与数据库连接: {}", e.getMessage());
-        }
-    }
-
     /**
      * 确保根CA存在（幂等，兼容入口=主公司）
      */
     public CaCert ensureRoot() {
-        return ensureRoot(CaCompany.PRIMARY_COMPANY_USCC);
+        return ensureRoot("default");
     }
 
     // ==================== 根CA ====================
@@ -457,14 +432,14 @@ public class CaService implements ApplicationRunner {
      * 查询根CA记录（兼容入口=default 公司）
      */
     public CaCert findRoot() {
-        return findRoot(CaCompany.PRIMARY_COMPANY_USCC);
+        return findRoot("default");
     }
 
     /**
      * 查询指定公司根CA记录（serial 全局唯一，公司维度过滤取最新）
      */
     public CaCert findRoot(String companyUscc) {
-        KeyVaultConfig.CompanyVaultResolver.checkCompanyUscc(companyUscc);
+        UsccValidator.checkCompanyUscc(companyUscc);
         return doFindRoot(companyUscc);
     }
 
@@ -480,7 +455,7 @@ public class CaService implements ApplicationRunner {
      * 加载根证书（兼容入口=default 公司）
      */
     public X509Certificate loadRootCert() {
-        return loadRootCert(CaCompany.PRIMARY_COMPANY_USCC);
+        return loadRootCert("default");
     }
 
     /**
@@ -498,7 +473,7 @@ public class CaService implements ApplicationRunner {
      * 加载根CA私钥（兼容入口=default 公司）
      */
     public PrivateKey loadRootKey() {
-        return loadRootKey(CaCompany.PRIMARY_COMPANY_USCC);
+        return loadRootKey("default");
     }
 
     /**
@@ -546,7 +521,7 @@ public class CaService implements ApplicationRunner {
      * 根私钥状态（兼容入口=default 公司）
      */
     public String rootKeyState() {
-        return rootKeyState(CaCompany.PRIMARY_COMPANY_USCC);
+        return rootKeyState("default");
     }
 
     /**
@@ -570,7 +545,7 @@ public class CaService implements ApplicationRunner {
      * 封存根私钥（兼容入口=default 公司）
      */
     public void sealRootKey() {
-        sealRootKey(CaCompany.PRIMARY_COMPANY_USCC);
+        sealRootKey("default");
     }
 
     /**
@@ -598,7 +573,7 @@ public class CaService implements ApplicationRunner {
      * 解封根私钥（兼容入口=default 公司）
      */
     public void unsealRootKey() {
-        unsealRootKey(CaCompany.PRIMARY_COMPANY_USCC);
+        unsealRootKey("default");
     }
 
     /**
@@ -626,7 +601,7 @@ public class CaService implements ApplicationRunner {
      * 读取单份门限份额 JSON 文本（兼容入口=default 公司）
      */
     public String readShareJson(int index) {
-        return readShareJson(CaCompany.PRIMARY_COMPANY_USCC, index);
+        return readShareJson("default", index);
     }
 
     // ==================== Shamir(3,5) 门限分持 ====================
@@ -650,7 +625,7 @@ public class CaService implements ApplicationRunner {
      * 5 份份额是否全部生成（兼容入口=default 公司）
      */
     public boolean sharesExist() {
-        return sharesExist(CaCompany.PRIMARY_COMPANY_USCC);
+        return sharesExist("default");
     }
 
     /**
@@ -766,14 +741,14 @@ public class CaService implements ApplicationRunner {
      * 份额状态（兼容入口=default 公司）
      */
     public RootSharesVO shareState() {
-        return shareState(CaCompany.PRIMARY_COMPANY_USCC);
+        return shareState("default");
     }
 
     /**
      * 公司份额状态（管理端展示：5 份各自存在性 + 阈值）
      */
     public RootSharesVO shareState(String companyUscc) {
-        KeyVaultConfig.CompanyVaultResolver.checkCompanyUscc(companyUscc);
+        UsccValidator.checkCompanyUscc(companyUscc);
         List<RootSharesVO.ShareItem> shares = new ArrayList<>();
         for (int i = 1; i <= SHARE_TOTAL; i++) {
             RootSharesVO.ShareItem item = new RootSharesVO.ShareItem();
@@ -793,7 +768,7 @@ public class CaService implements ApplicationRunner {
      * 根私钥门限化（兼容入口=default 公司）
      */
     public void ensureRootShares() {
-        ensureRootShares(CaCompany.PRIMARY_COMPANY_USCC);
+        ensureRootShares("default");
     }
 
     /**
@@ -847,7 +822,7 @@ public class CaService implements ApplicationRunner {
      * 旧环境迁移（兼容入口=default 公司）
      */
     public RootSharesVO migrateRootShares() {
-        return migrateRootShares(CaCompany.PRIMARY_COMPANY_USCC);
+        return migrateRootShares("default");
     }
 
     /**
@@ -869,7 +844,7 @@ public class CaService implements ApplicationRunner {
      * 份额解封（兼容入口=default 公司）
      */
     public void unsealRootKeyWithShares(List<String> shareJsons) {
-        unsealRootKeyWithShares(CaCompany.PRIMARY_COMPANY_USCC, shareJsons);
+        unsealRootKeyWithShares("default", shareJsons);
     }
 
     /**
@@ -937,7 +912,7 @@ public class CaService implements ApplicationRunner {
      * 管理端主动初始化（兼容入口=default 公司）
      */
     public CaStatusVO initRoot() {
-        return initRoot(CaCompany.PRIMARY_COMPANY_USCC);
+        return initRoot("default");
     }
 
     /**
@@ -1050,7 +1025,7 @@ public class CaService implements ApplicationRunner {
      * 确保 SUB_CA 存在（兼容入口=default 公司）
      */
     public CaCert ensureSubCa() {
-        return ensureSubCa(CaCompany.PRIMARY_COMPANY_USCC);
+        return ensureSubCa("default");
     }
 
     // ==================== SUB_CA（服务签发二级CA） ====================
@@ -1161,14 +1136,14 @@ public class CaService implements ApplicationRunner {
      * 查询当前有效 SUB_CA（兼容入口=default 公司）
      */
     public CaCert findValidSubCa() {
-        return findValidSubCa(CaCompany.PRIMARY_COMPANY_USCC);
+        return findValidSubCa("default");
     }
 
     /**
      * 查询公司当前有效 SUB_CA（未过期且距到期 > renewBeforeDays）
      */
     public CaCert findValidSubCa(String companyUscc) {
-        KeyVaultConfig.CompanyVaultResolver.checkCompanyUscc(companyUscc);
+        UsccValidator.checkCompanyUscc(companyUscc);
         return doFindValidSubCa(companyUscc);
     }
 
@@ -1198,11 +1173,11 @@ public class CaService implements ApplicationRunner {
     @Scheduled(cron = "${csssl.subca-precheck-cron:0 30 3 * * ?}")
     public void dailyPrecheck() {
         List<String> keys = new ArrayList<>();
-        keys.add(CaCompany.PRIMARY_COMPANY_USCC);
+        keys.add("default");
         try {
             List<CaCompany> companies = companyMapper.selectList(new LambdaQueryWrapper<CaCompany>()
                     .eq(CaCompany::getStatus, CompanyStatusEnum.ACTIVE.getCode())
-                    .ne(CaCompany::getUscc, CaCompany.PRIMARY_COMPANY_USCC));
+                    .ne(CaCompany::getUscc, "default"));
             for (CaCompany company : companies) {
                 keys.add(company.getUscc());
             }
@@ -1249,7 +1224,7 @@ public class CaService implements ApplicationRunner {
      * 当前签发CA（兼容入口=default 公司）
      */
     public X509Certificate signingCert() {
-        return signingCert(CaCompany.PRIMARY_COMPANY_USCC);
+        return signingCert("default");
     }
 
     /**
@@ -1260,7 +1235,7 @@ public class CaService implements ApplicationRunner {
     }
 
     public PrivateKey signingKey() {
-        return signingKey(CaCompany.PRIMARY_COMPANY_USCC);
+        return signingKey("default");
     }
 
     public PrivateKey signingKey(String companyUscc) {
@@ -1273,7 +1248,7 @@ public class CaService implements ApplicationRunner {
     }
 
     private CaCert doRequireValidSubCa(String companyUscc) {
-        KeyVaultConfig.CompanyVaultResolver.checkCompanyUscc(companyUscc);
+        UsccValidator.checkCompanyUscc(companyUscc);
         CaCert sub = doFindValidSubCa(companyUscc);
         if (sub == null) {
             // 区分两种成因便于运维定位：域内从未建成 SUB_CA（裸根）vs 建成但已过期/被吊销
@@ -1288,14 +1263,14 @@ public class CaService implements ApplicationRunner {
      * 当前有效 SUB_CA 记录（兼容入口=default 公司）
      */
     public CaCert currentSubCa() {
-        return currentSubCa(CaCompany.PRIMARY_COMPANY_USCC);
+        return currentSubCa("default");
     }
 
     /**
      * 公司当前有效 SUB_CA 记录（供链组装/OCSP 使用；无则返回该公司最近一张；均无则 null）
      */
     public CaCert currentSubCa(String companyUscc) {
-        KeyVaultConfig.CompanyVaultResolver.checkCompanyUscc(companyUscc);
+        UsccValidator.checkCompanyUscc(companyUscc);
         return doCurrentSubCa(companyUscc);
     }
 
@@ -1312,7 +1287,7 @@ public class CaService implements ApplicationRunner {
      * 根CA状态（兼容入口=default 公司）
      */
     public CaStatusVO status() {
-        return status(CaCompany.PRIMARY_COMPANY_USCC);
+        return status("default");
     }
 
     // ==================== 状态/导出/签发密钥存取 ====================
@@ -1369,7 +1344,7 @@ public class CaService implements ApplicationRunner {
      * 根证书 PEM（兼容入口=default 公司）
      */
     public String exportRootPem() {
-        return exportRootPem(CaCompany.PRIMARY_COMPANY_USCC);
+        return exportRootPem("default");
     }
 
     /**
@@ -1387,7 +1362,7 @@ public class CaService implements ApplicationRunner {
      * 当前 SUB_CA 证书 PEM（兼容入口=default 公司）
      */
     public String exportSubCaPem() {
-        return exportSubCaPem(CaCompany.PRIMARY_COMPANY_USCC);
+        return exportSubCaPem("default");
     }
 
     /**
@@ -1405,7 +1380,7 @@ public class CaService implements ApplicationRunner {
      * 签发证书私钥加密落盘（兼容入口=default 公司）
      */
     public void storeIssuedKey(String serialHex, String keyPem) {
-        storeIssuedKey(CaCompany.PRIMARY_COMPANY_USCC, serialHex, keyPem);
+        storeIssuedKey("default", serialHex, keyPem);
     }
 
     /**
@@ -1419,7 +1394,7 @@ public class CaService implements ApplicationRunner {
      * 读取签发证书私钥（兼容入口=default 公司）
      */
     public String loadIssuedKey(String serialHex) {
-        return loadIssuedKey(CaCompany.PRIMARY_COMPANY_USCC, serialHex);
+        return loadIssuedKey("default", serialHex);
     }
 
     /**
@@ -1430,7 +1405,7 @@ public class CaService implements ApplicationRunner {
     }
 
     public boolean issuedKeyExists(String serialHex) {
-        return issuedKeyExists(CaCompany.PRIMARY_COMPANY_USCC, serialHex);
+        return issuedKeyExists("default", serialHex);
     }
 
     public boolean issuedKeyExists(String companyUscc, String serialHex) {

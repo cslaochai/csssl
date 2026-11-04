@@ -119,12 +119,12 @@
           title="密钥仅展示一次，关闭后无法再次查看；请立即复制到 HIS 等外部系统的配置中。"
           type="warning"
       />
-      <el-descriptions v-if="cred" :column="1" border class="cred-desc">
-        <el-descriptions-item label="接入ID（App ID）">
+      <el-descriptions v-if="cred" :column="2" border class="cred-desc">
+        <el-descriptions-item label="接入ID（App ID）" :span="2">
           <span class="cell-mono">{{ cred.appId }}</span>
           <el-button link size="small" type="primary" @click="onCopy(cred.appId)">复制</el-button>
         </el-descriptions-item>
-        <el-descriptions-item label="接入密钥">
+        <el-descriptions-item label="接入密钥" :span="2">
           <span class="cell-mono">{{ cred.secret }}</span>
           <el-button link size="small" type="primary" @click="onCopy(cred.secret)">复制</el-button>
         </el-descriptions-item>
@@ -166,24 +166,24 @@
     </el-dialog>
 
     <!-- 公司变更单详情（流程图 + 审批轨迹 + 催办） -->
-    <el-dialog v-model="opDetailVisible" :close-on-click-modal="false" title="公司变更单详情" width="640px">
+    <el-dialog v-model="opDetailVisible" :close-on-click-modal="false" title="公司变更单详情" width="900px">
       <el-alert v-if="opDetail && opDetail.status === 'PENDING'" :closable="false" :title="opNextApproverTitle" show-icon
                 style="margin-bottom: 12px" type="warning"/>
       <WorkflowDiagram :diagram="opDiagram" style="margin-bottom: 16px"/>
-      <el-descriptions :column="1" border>
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="变更单号">{{ opDetail?.opNo }}</el-descriptions-item>
         <el-descriptions-item label="变更类型">{{ opDetail ? opTypeText(opDetail.opType) : '' }}</el-descriptions-item>
         <el-descriptions-item label="目标公司">{{
             (opDetail?.companyUscc || '-') + (opDetail?.companyName ? ' ' + opDetail.companyName : '')
           }}
         </el-descriptions-item>
-        <el-descriptions-item label="变更事由">{{ opDetail?.reason || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="变更事由" :span="2">{{ opDetail?.reason || '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ opDetail ? statusText(opDetail.status) : '' }}</el-descriptions-item>
         <el-descriptions-item label="发起人/时间">{{ opDetail?.requestedByName || '-' }}
           / {{ opDetail?.requestedAt }}
         </el-descriptions-item>
         <template v-if="opDetail && opDetail.opType === 'REASSIGN_HOLDERS'">
-          <el-descriptions-item label="重新指派方式">原 5 名密钥保管人投票（同意 &gt;3 即执行，不经过公司审批员）</el-descriptions-item>
+          <el-descriptions-item label="重新指派方式" :span="2">原 5 名密钥保管人投票（同意 &gt;3 即执行，不经过公司审批员）</el-descriptions-item>
         </template>
         <template v-else>
           <el-descriptions-item label="被指派审批人">{{
@@ -194,7 +194,7 @@
         <el-descriptions-item label="审批人/时间">{{ opDetail?.reviewedByName || '-' }}
           / {{ opDetail?.reviewedAt || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="审批意见">{{ opDetail?.reviewComment || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="审批意见" :span="2">{{ opDetail?.reviewComment || '-' }}</el-descriptions-item>
       </el-descriptions>
       <div class="trail-title">审批轨迹</div>
       <el-timeline v-if="opTrail.length" class="trail">

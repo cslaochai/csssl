@@ -37,7 +37,7 @@
 
       <template v-if="result">
         <el-result :icon="verdict.icon" :sub-title="verdict.subTitle" :title="verdict.title"/>
-        <el-descriptions :column="1" border size="small" style="max-width: 720px">
+        <el-descriptions :column="2" border size="small" style="max-width: 900px">
           <el-descriptions-item v-for="(v, k) in resultFields" :key="k" :label="fieldLabel(k)">
             <div class="mono-wrap">{{ formatVal(v) }}</div>
           </el-descriptions-item>

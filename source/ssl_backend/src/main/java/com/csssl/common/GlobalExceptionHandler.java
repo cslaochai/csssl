@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    /** DTO 校验注解不通过（@Valid）：取第一条字段错误回显，与 IllegalArgumentException 同为 400 */
+    /**
+     * DTO 校验注解不通过（@Valid）：取第一条字段错误回显，与 IllegalArgumentException 同为 400
+     */
     @ExceptionHandler(org.springframework.validation.BindException.class)
     public ResponseEntity<Result<Void>> handleBind(org.springframework.validation.BindException e) {
         String message = e.getBindingResult().getFieldErrors().stream()
@@ -38,7 +40,9 @@ public class GlobalExceptionHandler {
                 .body(Result.error(e.getStatus(), e.getMessage()));
     }
 
-    /** 参数校验/业务规则不满足（面向入参，消息本身即校验口径，可回显） */
+    /**
+     * 参数校验/业务规则不满足（面向入参，消息本身即校验口径，可回显）
+     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Result<Void>> handleIllegalArgument(IllegalArgumentException e) {
         log.warn("[参数错误] {}", e.getMessage());
@@ -46,7 +50,9 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.BAD_REQUEST.value(), e.getMessage()));
     }
 
-    /** 运行期错误（根CA未初始化、私钥缺失、签发失败等）：原始消息只进日志 */
+    /**
+     * 运行期错误（根CA未初始化、私钥缺失、签发失败等）：原始消息只进日志
+     */
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<Result<Void>> handleIllegalState(IllegalStateException e) {
         log.error("[系统错误] {}", e.getMessage(), e);
@@ -54,7 +60,9 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.INTERNAL_SERVER_ERROR.value(), "系统繁忙，操作未能完成"));
     }
 
-    /** 权限不足（GM/T 0034 多角色分权）：所需/当前角色由 RoleCode 写日志，响应不echo */
+    /**
+     * 权限不足（GM/T 0034 多角色分权）：所需/当前角色由 RoleCode 写日志，响应不echo
+     */
     @ExceptionHandler(SecurityException.class)
     public ResponseEntity<Result<Void>> handleSecurity(SecurityException e) {
         log.warn("[权限拦截] {}", e.getMessage());
@@ -73,7 +81,9 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.FORBIDDEN.value(), "权限不足"));
     }
 
-    /** 路径不存在（如已拆除的直接执行接口）：按 404 返回，不落入兜底 500 */
+    /**
+     * 路径不存在（如已拆除的直接执行接口）：按 404 返回，不落入兜底 500
+     */
     @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
     public ResponseEntity<Result<Void>> handleNoResource(org.springframework.web.servlet.resource.NoResourceFoundException e) {
         log.warn("[路径不存在] {} {}", e.getHttpMethod(), e.getResourcePath());
@@ -81,7 +91,9 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.NOT_FOUND.value(), "接口不存在"));
     }
 
-    /** 路径存在但方法不匹配（如对只读资源发 POST）：按 405 返回 */
+    /**
+     * 路径存在但方法不匹配（如对只读资源发 POST）：按 405 返回
+     */
     @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<Result<Void>> handleMethodNotSupported(org.springframework.web.HttpRequestMethodNotSupportedException e) {
         log.warn("[方法不支持] {}", e.getMessage());
@@ -89,7 +101,9 @@ public class GlobalExceptionHandler {
                 .body(Result.error(HttpStatus.METHOD_NOT_ALLOWED.value(), "请求方法不支持"));
     }
 
-    /** 兜底异常 */
+    /**
+     * 兜底异常
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleException(Exception e) {
         log.error("[系统异常]", e);

@@ -74,8 +74,8 @@
     </el-card>
 
     <!-- 审计详情（行点击） -->
-    <el-dialog v-model="detailVisible" title="审计记录详情" width="640px">
-      <el-descriptions :column="1" border>
+    <el-dialog v-model="detailVisible" title="审计记录详情" width="900px">
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="时间">{{ detail?.createdAt }}</el-descriptions-item>
         <el-descriptions-item label="操作人">{{ detail?.realName || '无' }}</el-descriptions-item>
         <el-descriptions-item label="公司">{{
@@ -85,7 +85,7 @@
         <el-descriptions-item label="操作类型">{{ detail ? actionText(detail.action) : '' }}</el-descriptions-item>
         <el-descriptions-item label="对象">{{ detail?.target || '-' }}</el-descriptions-item>
         <el-descriptions-item label="来源IP">{{ detail?.ip || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="详情">
+        <el-descriptions-item label="详情" :span="2">
           <div class="mono-wrap">{{ detail?.detail || '-' }}</div>
         </el-descriptions-item>
         <el-descriptions-item label="防篡改签名">
@@ -102,20 +102,20 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="verifyVisible" title="审计验签（GM/T 0034 §10.1/§10.5 防篡改校验）" width="640px">
+    <el-dialog v-model="verifyVisible" title="审计验签（GM/T 0034 §10.1/§10.5 防篡改校验）" width="900px">
       <el-result v-if="verify?.valid" icon="success" sub-title="记录未被篡改，由审计签名密钥签发，哈希链指向的记录签名一致"
                  title="签名有效"/>
       <el-result v-else-if="verify" icon="error" sub-title="记录内容已被改动或签名缺失" title="签名校验失败"/>
       <div v-else style="padding: 20px; text-align: center; color: #909399;">验签中…</div>
-      <el-descriptions v-if="verify" :column="1" border>
+      <el-descriptions v-if="verify" :column="2" border>
         <el-descriptions-item label="记录ID">{{ verify.id }}</el-descriptions-item>
-        <el-descriptions-item label="规范化串（canonical）">
+        <el-descriptions-item label="规范化串（canonical）" :span="2">
           <div class="mono-wrap">{{ verify.canonical }}</div>
         </el-descriptions-item>
-        <el-descriptions-item label="签名值（SM3withSM2 hex）">
+        <el-descriptions-item label="签名值（SM3withSM2 hex）" :span="2">
           <div class="mono-wrap">{{ verify.sign }}</div>
         </el-descriptions-item>
-        <el-descriptions-item label="哈希链上一签名">
+        <el-descriptions-item label="哈希链上一签名" :span="2">
           <div class="mono-wrap">{{ verify.prevSign || '（无，首条/历史记录）' }}</div>
         </el-descriptions-item>
       </el-descriptions>

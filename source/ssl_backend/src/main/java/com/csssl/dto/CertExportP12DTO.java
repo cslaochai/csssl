@@ -9,6 +9,11 @@ import lombok.Data;
 public class CertExportP12DTO {
 
     /**
+     * 目标证书 ID（来自 body，替换原来的 @PathVariable）
+     */
+    private Long id;
+
+    /**
      * P12 口令（缺省服务端生成）
      */
     private String password;

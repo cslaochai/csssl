@@ -153,8 +153,8 @@
     </el-dialog>
 
     <!-- 模板详情（行点击） -->
-    <el-dialog v-model="detailVisible" :title="`模板详情：${detail?.templateName || ''}`" width="560px">
-      <el-descriptions :column="1" border>
+    <el-dialog v-model="detailVisible" :title="`模板详情：${detail?.templateName || ''}`" width="900px">
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="编码">{{ detail?.templateCode }}</el-descriptions-item>
         <el-descriptions-item label="名称">{{ detail?.templateName }}</el-descriptions-item>
         <el-descriptions-item label="归属">{{
@@ -168,7 +168,7 @@
         <el-descriptions-item label="扩展用途（EKU）">{{ detail?.extKeyUsage || '-' }}</el-descriptions-item>
         <el-descriptions-item label="策略OID">{{ detail?.policyOid || '-' }}</el-descriptions-item>
         <el-descriptions-item label="内置模板">{{ detail?.builtin === 1 ? '是' : '否' }}</el-descriptions-item>
-        <el-descriptions-item label="说明">{{ detail?.description || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="说明" :span="2">{{ detail?.description || '-' }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>

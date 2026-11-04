@@ -34,7 +34,7 @@ import org.springframework.web.bind.annotation.*;
  *
  * <p>路线A数据域（服务端强制，effectiveCompany 口径）：
  * <ul>
- *   <li>列表：公司用户强制本公司过滤；全局用户可按 ?companyUscc= 过滤，不传=跨公司全量只读（唯一读口，无写旁路）。</li>
+ *   <li>列表：公司用户强制本公司过滤；全局用户可按 body.companyUscc= 过滤，不传=跨公司全量只读（唯一读口，无写旁路）。</li>
  *   <li>行级读（detail/cert.pem/key.pem/p12）：公司用户仅本公司证书行（越域 403）；全局用户跨公司只读放行。</li>
  *   <li>行级写：更新/重签不走直接端点（防单人执行，管理员也绕不过）：统一提交证书操作单
  *       （CertOpTicketController /admin/cert-ops），由持 cert:op:approve 的他人审批后执行。
@@ -53,8 +53,8 @@ public class CertController {
      * 证书列表（分页 + 类型/状态/关键字/公司筛选；需 操作员/管理员/密钥管理员）
      */
     @PreAuthorize("hasAuthority('cert:list')")
-    @GetMapping("/certs")
-    public Result<Page<CertVO>> page(@Valid CertPageQueryDTODTO query, HttpServletRequest request) {
+    @PostMapping("/certs/page")
+    public Result<Page<CertVO>> page(@Valid @RequestBody CertPageQueryDTODTO query, HttpServletRequest request) {
         // 公司用户锁本公司（显式传别公司 403）；全局用户不传=null=跨公司全量只读
         String scope = CompanyScope.readCompanyScope(query.getCompanyUscc());
         return Result.success("查询成功", certService.page(query.getPageNo(), query.getPageSize(),
@@ -64,21 +64,27 @@ public class CertController {
     /**
      * 证书详情（公司用户仅本公司证书行，越域 403；全局用户跨公司只读放行）
      */
-    @GetMapping("/certs/{id}")
-    public Result<CertVO> detail(@PathVariable Long id, HttpServletRequest request) {
-        return Result.success("查询成功", certService.detailVisible(id, CaCompany.PRIMARY_COMPANY_USCC));
+    @PostMapping("/certs/detail")
+    public Result<CertVO> detail(@RequestBody IdDTO body, HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
+        return Result.success("查询成功", certService.detailVisible(body.getId(), null));
     }
 
     /**
      * 下载证书 PEM（公钥证书；需 操作员/管理员，落审计；行级读按数据域收敛）
      */
     @PreAuthorize("hasAuthority('cert:download')")
-    @GetMapping("/certs/{id}/cert.pem")
-    public String downloadCert(@PathVariable Long id, HttpServletRequest request) {
-        CaCert row = certService.findById(id);
-        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(id),
+    @PostMapping("/certs/cert-pem")
+    public String downloadCert(@RequestBody IdDTO body, HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
+        CaCert row = certService.findById(body.getId());
+        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
                 "下载证书：" + row.getSubjectCn(), clientIp(request), CompanyScope.companyOfRow(row.getCompanyUscc()));
-        return certService.certPem(id);
+        return certService.certPem(body.getId());
     }
 
     /**
@@ -88,11 +94,14 @@ public class CertController {
      * 私钥不出 CA，包内仅公钥证书链。
      */
     @PreAuthorize("hasAuthority('cert:download')")
-    @GetMapping("/certs/{id}/export/zip")
-    public ResponseEntity<byte[]> exportCertZip(@PathVariable Long id, HttpServletRequest request) {
-        CaCert row = certService.findById(id);
-        byte[] zip = certService.certZipBytes(id);
-        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(id),
+    @PostMapping("/certs/export-zip")
+    public ResponseEntity<byte[]> exportCertZip(@RequestBody IdDTO body, HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
+        CaCert row = certService.findById(body.getId());
+        byte[] zip = certService.certZipBytes(body.getId());
+        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
                 "导出证书压缩包(ZIP)：" + row.getSubjectCn(), clientIp(request),
                 CompanyScope.companyOfRow(row.getCompanyUscc()));
         return ResponseEntity.ok()
@@ -106,12 +115,15 @@ public class CertController {
      * 下载私钥 PEM（需 管理员/密钥管理员；受 allow-private-key-download 开关控制，落审计；行级读按数据域收敛）
      */
     @PreAuthorize("hasAuthority('cert:key:download')")
-    @GetMapping("/certs/{id}/key.pem")
-    public String downloadKey(@PathVariable Long id, HttpServletRequest request) {
-        CaCert row = certService.findById(id);
-        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(id),
+    @PostMapping("/certs/key-pem")
+    public String downloadKey(@RequestBody IdDTO body, HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
+        CaCert row = certService.findById(body.getId());
+        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
                 "下载私钥：" + row.getSubjectCn(), clientIp(request), CompanyScope.companyOfRow(row.getCompanyUscc()));
-        return certService.keyPem(id);
+        return certService.keyPem(body.getId());
     }
 
     /**
@@ -120,28 +132,31 @@ public class CertController {
      * 数据域：公司用户仅本公司证书；全局用户跨公司导出放行（密钥介质导出属读取行为，行级归属留审计）。
      */
     @PreAuthorize("hasAuthority('cert:export')")
-    @PostMapping("/certs/{id}/export/p12")
-    public ResponseEntity<byte[]> exportP12(@PathVariable Long id,
-                                            @Valid @RequestBody(required = false) CertExportP12DTO body,
+    @PostMapping("/certs/export-p12")
+    public ResponseEntity<byte[]> exportP12(@RequestBody CertExportP12DTO body,
                                             HttpServletRequest request) {
-        CaCert row = certService.findById(id);
-        String password = body == null ? null : body.getPassword();
-        byte[] p12 = certService.exportP12(id, password);
-        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(id),
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
+        CaCert row = certService.findById(body.getId());
+        String password = body.getPassword();
+        byte[] p12 = certService.exportP12(body.getId(), password);
+        auditService.record(UserUtils.requireLoginUser(), "CERT_DOWNLOAD", String.valueOf(body.getId()),
                 "导出PKCS#12（口令加密）：" + row.getSubjectCn(), clientIp(request),
                 CompanyScope.companyOfRow(row.getCompanyUscc()));
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("application/x-pkcs12"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + id + ".p12\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + body.getId() + ".p12\"")
                 .body(p12);
     }
 
     /**
      * 概览统计（仪表盘；按当前公司域过滤，公司用户锁本公司）
      */
-    @GetMapping("/overview")
-    public Result<CertOverviewVO> overview(@RequestParam(required = false) String companyUscc,
+    @PostMapping("/overview")
+    public Result<CertOverviewVO> overview(@RequestBody(required = false) CompanyUsccDTO body,
                                            HttpServletRequest request) {
+        String companyUscc = body == null ? null : body.getCompanyUscc();
         return Result.success("查询成功", certService.overview(CompanyScope.effectiveCompany(companyUscc)));
     }
 

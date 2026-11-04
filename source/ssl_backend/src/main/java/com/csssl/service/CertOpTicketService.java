@@ -17,6 +17,7 @@ import com.csssl.service.ApplicationTrailService;
 import com.csssl.service.MessageService;
 import com.csssl.util.CompanyScope;
 import com.csssl.util.PermissionCatalog;
+import com.csssl.workflow.WorkflowEngineService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,8 @@ public class CertOpTicketService {
 
     private static final DateTimeFormatter OP_NO_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final SecureRandom RANDOM = new SecureRandom();
+    /** 工作流定义编码：提交即起流程，审批人由流程节点配置决定 */
+    private static final String FLOW_CODE = "certOpTicketFlow";
 
     /**
      * 未指派 / 指派人已停用：回落审批员池共同处理（与列表可见范围、checkAssignee 同一口径）
@@ -64,6 +67,7 @@ public class CertOpTicketService {
     private final SysUserMapper userMapper;
     private final ApplicationTrailService trailService;
     private final MessageService messageService;
+    private final WorkflowEngineService engine;
 
     /**
      * 分页查询：数据域（companyScope）+ 角色可见范围（applyViewerScope）双重重收口，服务端强制。
@@ -123,7 +127,8 @@ public class CertOpTicketService {
         qw.and(w -> w.eq(CaCertOpTicket::getAssigneeUserId, me)
                 .or().eq(CaCertOpTicket::getRequestedByUserId, me)
                 .or().eq(CaCertOpTicket::getReviewedByUserId, me)
-                .or(x -> x.eq(CaCertOpTicket::getStatus, TicketStatusEnum.PENDING.getCode()).apply(UNCLAIMED_ASSIGNEE_SQL)));
+                // 流程驱动后审批人由节点配置决定：待审单对持审批权的账号放开可见，按钮显隐按节点办理人回算
+                .or().eq(CaCertOpTicket::getStatus, TicketStatusEnum.PENDING.getCode()));
     }
 
     /**
@@ -139,8 +144,11 @@ public class CertOpTicketService {
         Set<Long> enabled = canReview ? enabledApproverIds() : Set.of();
         for (CaCertOpTicket row : rows) {
             boolean pending = TicketStatusEnum.PENDING.is(row.getStatus());
+            boolean flowActive = row.getOpNo() != null && engine.hasInstance(row.getOpNo());
             row.setReviewable(canReview && pending
-                    && isAssigneeTakable(row.getAssigneeUserId(), me, enabled));
+                    && (flowActive
+                            ? engine.canHandle(row.getOpNo(), viewer)
+                            : isAssigneeTakable(row.getAssigneeUserId(), me, enabled)));
             row.setUrgeable(pending && row.getAssigneeUserId() != null);
             row.setRevocable(pending && Objects.equals(row.getRequestedByUserId(), me));
         }
@@ -175,8 +183,9 @@ public class CertOpTicketService {
      * 校验：操作类型合法、目标证书存在且在本公司域、状态与操作类型匹配、无同证书同类型待审批单、
      * 根CA/二级CA不走操作单（平台级处置）、吊销/挂起必填原因、更新/重签必填新有效期。
      */
+    @Transactional(rollbackFor = Exception.class)
     public CaCertOpTicket submit(String opTypeCode, Long certId, String reason, Integer validityDays,
-                                 LoginUser loginUser, String ip, String effCompany) {
+                                 Long assigneeUserId, LoginUser loginUser, String ip, String effCompany) {
         CertOpTypeEnum opType = CertOpTypeEnum.fromCode(opTypeCode);
         if (opType == null) {
             throw new IllegalArgumentException("操作类型仅支持 REVOKE-吊销 / SUSPEND-挂起 / UNSUSPEND-解除挂起 / RENEW-证书更新 / REKEY-密钥更新");
@@ -223,25 +232,33 @@ public class CertOpTicketService {
         ticket.setRequestedAt(LocalDateTime.now());
         ticket.setCreatedAt(LocalDateTime.now());
 
-        // 单必归属到人：提交时按角色（APPROVER）+ 待审积压最少自动分派；排除发起人本人（分权制衡）
-        SysUser approver = leastPendingApprover(loginUser == null ? null : loginUser.getUserId());
-        ticket.setAssigneeUserId(approver.getId());
-        ticket.setAssigneeRealName(approver.getRealName());
-
+        // 审批人不再由业务侧自动分派：提交即起流程，当前环节办理人由流程节点配置决定
         ticketMapper.insert(ticket);
+        engine.startForBusiness(FLOW_CODE, ticket.getOpNo(), assigneeUserId);
+        List<SysUser> assignees = engine.pendingAssignees(ticket.getOpNo());
+        if (!assignees.isEmpty()) {
+            ticket.setAssigneeUserId(assignees.get(0).getId());
+            ticket.setAssigneeRealName(assignees.get(0).getRealName());
+            ticketMapper.updateById(ticket);
+        }
         auditService.record(loginUser, "CO_SUBMIT", ticket.getOpNo(),
                 "发起证书操作单：" + opType.getLabel() + " " + cert.getSubjectCn()
                         + (needDays ? "（新有效期 " + validityDays + " 天）" : needReason ? "（原因：" + reason + "）" : ""),
                 ip, companyOf(cert));
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "SUBMIT",
                 loginUser, null, ticket.getStatus(), null);
-        trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "ASSIGN",
-                loginUser, null, ticket.getStatus(),
-                "指定审批人：" + ticket.getAssigneeRealName());
-        messageService.send(ticket.getCompanyUscc(), ticket.getAssigneeUserId(), ticket.getAssigneeRealName(),
-                loginUser, "CERT_OP_SUBMITTED", "您有一条新的证书操作单待审批",
-                "操作单 " + ticket.getOpNo() + " 待您审批（提交人：" + ticket.getRequestedByName() + "）",
-                "CERT_OP", String.valueOf(ticket.getId()));
+        if (!assignees.isEmpty()) {
+            trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "ASSIGN",
+                    loginUser, null, ticket.getStatus(),
+                    "流程节点办理人：" + assignees.stream().map(SysUser::getRealName).distinct()
+                            .collect(java.util.stream.Collectors.joining("、")));
+        }
+        for (SysUser assignee : assignees) {
+            messageService.send(ticket.getCompanyUscc(), assignee.getId(), assignee.getRealName(),
+                    loginUser, "CERT_OP_SUBMITTED", "您有一条新的证书操作单待审批",
+                    "操作单 " + ticket.getOpNo() + " 待您审批（提交人：" + ticket.getRequestedByName() + "）",
+                    "CERT_OP", String.valueOf(ticket.getId()));
+        }
         log.info("[证书操作单][{}] 发起 {} id={} cn={} 指派审批人={}", ticket.getOpNo(), opType.getCode(),
                 certId, cert.getSubjectCn(), ticket.getAssigneeRealName());
         return ticket;
@@ -299,7 +316,7 @@ public class CertOpTicketService {
         CaCertOpTicket ticket = checkPending(id);
         requireCompanyMatch(ticket.getCompanyUscc(), effCompany);
         checkReviewerDiff(ticket, loginUser);
-        checkAssignee(ticket, loginUser);
+        approveInFlow(ticket, loginUser, comment);
         CertOpTypeEnum opType = CertOpTypeEnum.fromCode(ticket.getOpType());
         if (opType == null) {
             throw new IllegalArgumentException("未知操作类型：" + ticket.getOpType());
@@ -327,6 +344,8 @@ public class CertOpTicketService {
                         + "（发起人 " + ticket.getRequestedByName() + "）", ip, ticket.getCompanyUscc());
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "APPROVE",
                 loginUser, "PENDING", "EXECUTED", blankToNull(comment));
+        // 审批即执行的业务动作已完成，流程收尾
+        engine.finish(ticket.getOpNo(), loginUser, "批准并执行证书操作单：" + opType.getLabel());
         messageService.send(ticket.getCompanyUscc(), ticket.getRequestedByUserId(), ticket.getRequestedByName(),
                 loginUser, "CERT_OP_APPROVED", "证书操作单已批准并执行",
                 "您的操作单 " + ticket.getOpNo() + " 已批准并执行（" + opType.getLabel() + "）",
@@ -339,11 +358,12 @@ public class CertOpTicketService {
     /**
      * 审批驳回（不得与发起人同一人；意见必填；单据落 REJECTED，证书状态不变）
      */
+    @Transactional(rollbackFor = Exception.class)
     public CaCertOpTicket reject(Long id, String comment, LoginUser loginUser, String ip, String effCompany) {
         CaCertOpTicket ticket = checkPending(id);
         requireCompanyMatch(ticket.getCompanyUscc(), effCompany);
         checkReviewerDiff(ticket, loginUser);
-        checkAssignee(ticket, loginUser);
+        rejectInFlow(ticket, loginUser, comment);
         if (comment == null || comment.isBlank()) {
             throw new IllegalArgumentException("驳回必须填写审批意见");
         }
@@ -382,6 +402,7 @@ public class CertOpTicketService {
         }
         ticket.setStatus(TicketStatusEnum.CANCELLED.getCode());
         ticketMapper.updateById(ticket);
+        engine.withdrawByBusiness(ticket.getOpNo(), loginUser);
         auditService.record(loginUser, "CO_CANCEL", ticket.getOpNo(),
                 "撤销证书操作单：" + opText(ticket.getOpType()) + " " + ticket.getCertSubjectCn(), ip, ticket.getCompanyUscc());
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "CANCEL",
@@ -432,7 +453,27 @@ public class CertOpTicketService {
     }
 
     /**
-     * 审批准入：本单只能由被指派的审批人处理。未指派（历史单）或指派人已停用/已被删时，
+     * 审批准入：流程实例存在时以「流程节点办理人配置」为唯一口径；
+     * 历史存量单没有实例，回落到旧的被指派人校验。
+     */
+    private void approveInFlow(CaCertOpTicket ticket, LoginUser loginUser, String comment) {
+        if (engine.hasInstance(ticket.getOpNo())) {
+            engine.approveByBusiness(ticket.getOpNo(), loginUser, comment);
+        } else {
+            checkAssignee(ticket, loginUser);
+        }
+    }
+
+    private void rejectInFlow(CaCertOpTicket ticket, LoginUser loginUser, String comment) {
+        if (engine.hasInstance(ticket.getOpNo())) {
+            engine.rejectByBusiness(ticket.getOpNo(), loginUser, comment);
+        } else {
+            checkAssignee(ticket, loginUser);
+        }
+    }
+
+    /**
+     * 审批准入（历史单兜底）：本单只能由被指派的审批人处理。未指派（历史单）或指派人已停用/已被删时，
      * 回落到审核员池共同处理——与列表可见范围 {@link #applyViewerScope} 同一口径。
      */
     private void checkAssignee(CaCertOpTicket ticket, LoginUser loginUser) {
@@ -479,7 +520,7 @@ public class CertOpTicketService {
     }
 
     private void requireCompanyMatch(String rowCompany, String effCompany) {
-        String expected = rowCompany == null || rowCompany.isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : rowCompany;
+        String expected = rowCompany == null || rowCompany.isBlank() ? "default" : rowCompany;
         if (!expected.equals(effCompany)) {
             throw new SecurityException("权限不足：操作单归属公司 " + expected + "，与当前操作域 " + effCompany + " 不一致");
         }

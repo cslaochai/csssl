@@ -118,6 +118,12 @@
             <el-option label="设备临时停用" value="CESSATION_OF_OPERATION"/>
           </el-select>
         </el-form-item>
+        <el-form-item label="审批人" required>
+          <el-select v-model="opAssignee" placeholder="从流程节点筛选出的审批人中选择" style="width: 100%">
+            <el-option v-for="u in opAssigneeOptions" :key="u.id"
+                       :label="`${u.realName}（${u.roleName || u.roleCode || '—'}）`" :value="u.id"/>
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -142,6 +148,12 @@
       <el-form label-width="110px">
         <el-form-item label="新有效期(天)">
           <el-input-number v-model="renewDays" :max="36500" :min="1"/>
+        </el-form-item>
+        <el-form-item label="审批人" required>
+          <el-select v-model="opAssignee" placeholder="从流程节点筛选出的审批人中选择" style="width: 100%">
+            <el-option v-for="u in opAssigneeOptions" :key="u.id"
+                       :label="`${u.realName}（${u.roleName || u.roleCode || '—'}）`" :value="u.id"/>
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -191,11 +203,40 @@
             <el-option label="未指定" value="UNSPECIFIED"/>
           </el-select>
         </el-form-item>
+        <el-form-item label="审批人" required>
+          <el-select v-model="opAssignee" placeholder="从流程节点筛选出的审批人中选择" style="width: 100%">
+            <el-option v-for="u in opAssigneeOptions" :key="u.id"
+                       :label="`${u.realName}（${u.roleName || u.roleCode || '—'}）`" :value="u.id"/>
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="revokeVisible = false">取消</el-button>
           <el-button :loading="submitting" type="danger" @click="onRevokeConfirm">提交审批</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 解除挂起（发起操作单，待他人审批后执行） -->
+    <el-dialog v-model="unsuspendVisible" :close-on-click-modal="false" title="发起解除挂起操作单"
+               width="460px">
+      <p style="margin-bottom: 12px">
+        为证书 <b>{{ unsuspendTarget?.subjectCn }}</b> 发起解除挂起申请。提交后生成待审批操作单，
+        由持审批权限的其他人员批准后才实际恢复为有效状态（并从 CRL 移除挂起条目）。
+      </p>
+      <el-form label-width="90px">
+        <el-form-item label="审批人" required>
+          <el-select v-model="opAssignee" placeholder="从流程节点筛选出的审批人中选择" style="width: 100%">
+            <el-option v-for="u in opAssigneeOptions" :key="u.id"
+                       :label="`${u.realName}（${u.roleName || u.roleCode || '—'}）`" :value="u.id"/>
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="unsuspendVisible = false">取消</el-button>
+          <el-button :loading="submitting" type="primary" @click="onUnsuspendConfirm">提交审批</el-button>
         </div>
       </template>
     </el-dialog>
@@ -256,18 +297,18 @@
     </el-dialog>
 
     <!-- 证书详情（行点击） -->
-    <el-dialog v-model="detailVisible" title="证书详情" width="600px">
-      <el-descriptions :column="1" border>
+    <el-dialog v-model="detailVisible" title="证书详情" width="900px">
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="序列号"><span class="mono-wrap">{{ detail?.serialHex }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="主体CN">{{ detail?.subjectCn }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{ detail ? typeText(detail.certType) : '' }}</el-descriptions-item>
         <el-descriptions-item label="算法">{{ detail?.algorithm }}</el-descriptions-item>
         <el-descriptions-item label="颁发CA">{{ detail?.issuerCn }}</el-descriptions-item>
-        <el-descriptions-item label="主体别名（SAN）">{{ detail?.san || '无' }}</el-descriptions-item>
-        <el-descriptions-item label="有效期">{{ detail?.validFrom }} ~ {{ detail?.validTo }}</el-descriptions-item>
+        <el-descriptions-item label="主体别名（SAN）" :span="2">{{ detail?.san || '无' }}</el-descriptions-item>
+        <el-descriptions-item label="有效期" :span="2">{{ detail?.validFrom }} ~ {{ detail?.validTo }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
-        <el-descriptions-item v-if="detail?.revokedAt" label="吊销时间/原因">{{
+        <el-descriptions-item v-if="detail?.revokedAt" :span="2" label="吊销时间/原因">{{
             detail?.revokedAt
           }}（{{ detail?.revokeReason }}）
         </el-descriptions-item>
@@ -279,7 +320,7 @@
             detail?.createdByName || '无'
           }}
         </el-descriptions-item>
-        <el-descriptions-item label="用途说明">{{ detail?.description || '无' }}</el-descriptions-item>
+        <el-descriptions-item label="用途说明" :span="2">{{ detail?.description || '无' }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
   </div>
@@ -295,6 +336,7 @@ import {
   downloadKeyPem,
   exportCertP12,
   listCompaniesCached,
+  listFlowCandidates,
   pageCerts,
   submitCertOp
 } from '@/api/system'
@@ -331,6 +373,11 @@ const renewVisible = ref(false)
 const renewAction = ref('renew')
 const renewTarget = ref(null)
 const renewDays = ref(365)
+const unsuspendVisible = ref(false)
+const unsuspendTarget = ref(null)
+// 操作单提交时的审批人（流程首个审批节点候选，单选）
+const opAssignee = ref(null)
+const opAssigneeOptions = ref([])
 const p12Visible = ref(false)
 const p12Target = ref(null)
 const p12Password = ref('')
@@ -486,20 +533,45 @@ function handleCurrentChange(val) {
 function onRevoke(row) {
   revokeTarget.value = row
   revokeReason.value = 'KEY_COMPROMISE'
+  loadOpCandidates()
   revokeVisible.value = true
 }
 
 function openSuspend(row) {
   suspendTarget.value = row
   suspendReason.value = 'CERTIFICATE_HOLD'
+  loadOpCandidates()
   suspendVisible.value = true
 }
 
+// 操作单提交的审批人候选：由流程「证书操作单」首个审批节点的权限标识解析
+function loadOpCandidates() {
+  opAssignee.value = null
+  opAssigneeOptions.value = []
+  listFlowCandidates('certOpTicketFlow').then(res => {
+    opAssigneeOptions.value = res.data || []
+  }).catch(() => {
+  })
+}
+
+function requireOpAssignee() {
+  if (!opAssignee.value) {
+    ElMessage.warning('请选择审批人（候选范围由流程节点配置决定）')
+    return false
+  }
+  return true
+}
+
 async function onSuspendConfirm() {
+  if (!requireOpAssignee()) return
   submitting.value = true
   try {
-    const res = await submitCertOp({opType: 'SUSPEND', certId: suspendTarget.value.id, reason: suspendReason.value},
-        suspendTarget.value.companyUscc)
+    const res = await submitCertOp({
+      opType: 'SUSPEND',
+      certId: suspendTarget.value.id,
+      reason: suspendReason.value,
+      assigneeUserId: opAssignee.value
+    }, suspendTarget.value.companyUscc)
     ElMessage.success(`挂起操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     suspendVisible.value = false
   } finally {
@@ -507,12 +579,23 @@ async function onSuspendConfirm() {
   }
 }
 
-async function onUnsuspend(row) {
-  await ElMessageBox.confirm(`为证书 ${row.subjectCn} 发起解除挂起申请？提交后由持审批权限的其他人员批准后执行。`, '发起操作单', {type: 'warning'})
+function onUnsuspend(row) {
+  unsuspendTarget.value = row
+  loadOpCandidates()
+  unsuspendVisible.value = true
+}
+
+async function onUnsuspendConfirm() {
+  if (!requireOpAssignee()) return
   submitting.value = true
   try {
-    const res = await submitCertOp({opType: 'UNSUSPEND', certId: row.id}, row.companyUscc)
+    const res = await submitCertOp({
+      opType: 'UNSUSPEND',
+      certId: unsuspendTarget.value.id,
+      assigneeUserId: opAssignee.value
+    }, unsuspendTarget.value.companyUscc)
     ElMessage.success(`解除挂起操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
+    unsuspendVisible.value = false
   } finally {
     submitting.value = false
   }
@@ -522,15 +605,21 @@ function openRenew(row, action) {
   renewTarget.value = row
   renewAction.value = action
   renewDays.value = Math.max(1, Math.round((new Date(row.validTo) - new Date(row.validFrom)) / 86400000)) || 365
+  loadOpCandidates()
   renewVisible.value = true
 }
 
 async function onRenewConfirm() {
+  if (!requireOpAssignee()) return
   submitting.value = true
   try {
     const opType = renewAction.value === 'renew' ? 'RENEW' : 'REKEY'
-    const res = await submitCertOp({opType, certId: renewTarget.value.id, validityDays: renewDays.value},
-        renewTarget.value.companyUscc)
+    const res = await submitCertOp({
+      opType,
+      certId: renewTarget.value.id,
+      validityDays: renewDays.value,
+      assigneeUserId: opAssignee.value
+    }, renewTarget.value.companyUscc)
     ElMessage.success(`${opType === 'RENEW' ? '证书更新' : '密钥更新'}操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     renewVisible.value = false
   } finally {
@@ -568,10 +657,15 @@ async function onExportP12() {
 }
 
 async function onRevokeConfirm() {
+  if (!requireOpAssignee()) return
   submitting.value = true
   try {
-    const res = await submitCertOp({opType: 'REVOKE', certId: revokeTarget.value.id, reason: revokeReason.value},
-        revokeTarget.value.companyUscc)
+    const res = await submitCertOp({
+      opType: 'REVOKE',
+      certId: revokeTarget.value.id,
+      reason: revokeReason.value,
+      assigneeUserId: opAssignee.value
+    }, revokeTarget.value.companyUscc)
     ElMessage.success(`吊销操作单已提交（单号 ${res.data.opNo}），等待他人审批后执行`)
     revokeVisible.value = false
   } finally {

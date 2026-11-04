@@ -3,7 +3,7 @@ package com.csssl.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
-import com.csssl.config.KeyVaultConfig;
+import com.csssl.config.CompanyVaultResolver;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaCompany;
 import com.csssl.entity.CrlState;
@@ -80,7 +80,7 @@ public class CrlService {
     /**
      * 公司目录解析：default → store-dir；其他 → store-dir/companies/{companyUscc}（与 CaService 约定同源）
      */
-    private final KeyVaultConfig.CompanyVaultResolver companyVaults;
+    private final CompanyVaultResolver companyVaults;
 
     /**
      * 判重指纹：序列集合（去重升序）SHA-256。只取序列不含原因码——原因变更随到期续发自然带出
@@ -101,13 +101,6 @@ public class CrlService {
 
     private static LocalDateTime toLocal(Date date) {
         return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
-    }
-
-    /**
-     * 应纳入主公司 CRL 的证书（兼容入口）
-     */
-    public List<CaCert> revokedList() {
-        return revokedList(CaCompany.PRIMARY_COMPANY_USCC);
     }
 
     /**
@@ -147,18 +140,6 @@ public class CrlService {
     }
 
     /**
-     * 判重发布入口（兼容入口=default 公司）：
-     * <ol>
-     *   <li>算当前「吊销+挂起」序列集合指纹；</li>
-     *   <li>行锁读该公司 ssl_crl_state 行：指纹未变且 nextUpdate 未入续期窗口 → 回读 current.pem 复用编号，不重签不递增；</li>
-     *   <li>否则 crl_number+1、重签、原子覆盖 current.pem、更新状态行。</li>
-     * </ol>
-     */
-    public CrlInfo publishIfNeeded() {
-        return publishIfNeeded(CaCompany.PRIMARY_COMPANY_USCC);
-    }
-
-    /**
      * 判重发布入口（公司版）：以该公司 SUB_CA（signingCert(companyUscc)）签名，落到该公司 CRL 域
      */
     public synchronized CrlInfo publishIfNeeded(String companyUscc) {
@@ -188,29 +169,21 @@ public class CrlService {
     }
 
     /**
-     * 定时发布目标：default 恒含 + 公司表全部 ACTIVE 公司（存量单根环境仅有 default，行为与旧版一致）
+     * 定时发布目标：遍历全部 ACTIVE 公司逐一主动续发/补发；
+     * SUSPENDED/CLOSED 公司不进定时续发名单（其 CRL 由公开 GET 按需判重复用/续签，历史证书仍可验证）。
      */
     private List<String> refreshTargets() {
         List<String> keys = new ArrayList<>();
-        keys.add(CaCompany.PRIMARY_COMPANY_USCC);
         try {
             for (CaCompany company : companyService.list()) {
-                if (CompanyStatusEnum.ACTIVE.is(company.getStatus())
-                        && !CaCompany.PRIMARY_COMPANY_USCC.equals(company.getUscc())) {
+                if (CompanyStatusEnum.ACTIVE.is(company.getStatus())) {
                     keys.add(company.getUscc());
                 }
             }
         } catch (Exception e) {
-            log.warn("[CRL] 公司清单读取失败，本轮仅发布 default 域: {}", e.getMessage());
+            log.warn("[CRL] 公司清单读取失败，本轮跳过定时发布: {}", e.getMessage());
         }
         return keys;
-    }
-
-    /**
-     * 生成增量 CRL（dCRL，兼容入口=default 公司）
-     */
-    public DeltaCrlInfo buildDeltaCrl() {
-        return buildDeltaCrl(CaCompany.PRIMARY_COMPANY_USCC);
     }
 
     /**

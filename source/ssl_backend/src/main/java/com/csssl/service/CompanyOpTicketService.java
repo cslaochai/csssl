@@ -23,6 +23,7 @@ import com.csssl.service.MessageService;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.vo.ApiClientSecretVO;
 import com.csssl.vo.CompanyOpReceiptVO;
+import com.csssl.workflow.WorkflowEngineService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -64,6 +65,8 @@ public class CompanyOpTicketService {
 
     private static final DateTimeFormatter OP_NO_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final SecureRandom RANDOM = new SecureRandom();
+    /** 工作流定义编码：提交即起流程，审批人由流程节点配置决定 */
+    private static final String FLOW_CODE = "companyOpTicketFlow";
 
     /** 重新指派保管人：新保管人数（一人一份，固定 5 人） */
     private static final int HOLDERS_TOTAL = 5;
@@ -88,6 +91,7 @@ public class CompanyOpTicketService {
     private final SysUserMapper userMapper;
     private final ApplicationTrailService trailService;
     private final MessageService messageService;
+    private final WorkflowEngineService engine;
 
     /**
      * 分页查询（status/opType 精确、keyword 命中 单号/信用代码/公司名称）；
@@ -153,8 +157,9 @@ public class CompanyOpTicketService {
         qw.and(w -> w.eq(CompanyOpTicket::getAssigneeUserId, me)
                 .or().eq(CompanyOpTicket::getRequestedByUserId, me)
                 .or().eq(CompanyOpTicket::getReviewedByUserId, me)
+                // 流程驱动后审批人由节点配置决定：待审单对持审批权的账号放开可见
+                // 「重新指派保管人」仍走原保管人投票通道，不在此放开
                 .or(x -> x.eq(CompanyOpTicket::getStatus, TicketStatusEnum.PENDING.getCode())
-                        .apply(UNCLAIMED_ASSIGNEE_SQL)
                         .ne(CompanyOpTicket::getOpType, "REASSIGN_HOLDERS")));
     }
 
@@ -173,8 +178,11 @@ public class CompanyOpTicketService {
         Long me = viewer.getUserId();
         Set<Long> enabled = canReview ? enabledCompanyApproverIds() : Set.of();
         boolean pending = TicketStatusEnum.PENDING.is(ticket.getStatus());
+        boolean flowActive = ticket.getOpNo() != null && engine.hasInstance(ticket.getOpNo());
         ticket.setReviewable(canReview && pending
-                && isAssigneeTakable(ticket.getAssigneeUserId(), me, enabled));
+                && (flowActive
+                        ? engine.canHandle(ticket.getOpNo(), viewer)
+                        : isAssigneeTakable(ticket.getAssigneeUserId(), me, enabled)));
         ticket.setUrgeable(pending && ticket.getAssigneeUserId() != null);
     }
 
@@ -206,6 +214,7 @@ public class CompanyOpTicketService {
      * 发起变更单（不执行，仅落 PENDING 待审批）。提交时先做一次参数预检（快速失败），执行时由 CompanyService/ApiClientService 再验一次（以执行时为准）。
      * 除「重新指派保管人」外，提交时按角色（COMPANY_APPROVER）+ 待审积压最少自动分派具体审批人。
      */
+    @Transactional(rollbackFor = Exception.class)
     public CompanyOpTicket submit(CompanyOpSubmitDTO dto, LoginUser loginUser, String ip) {
         CompanyOpTypeEnum opType = CompanyOpTypeEnum.fromCode(dto.getOpType());
         if (opType == CompanyOpTypeEnum.CREATE) {
@@ -245,13 +254,19 @@ public class CompanyOpTicketService {
         ticket.setCreatedAt(LocalDateTime.now());
         if (opType == CompanyOpTypeEnum.REASSIGN_HOLDERS) {
             fillReassignHolders(ticket, dto.getNewHolders(), loginUser);
-        } else {
-            // 单必归属到人：提交时按角色（COMPANY_APPROVER）+ 待审积压最少自动分派；排除发起人本人（分权制衡）
-            SysUser approver = leastPendingApprover(actorUserId);
-            ticket.setAssigneeUserId(approver.getId());
-            ticket.setAssigneeRealName(approver.getRealName());
         }
         ticketMapper.insert(ticket);
+        List<SysUser> assignees = List.of();
+        if (opType != CompanyOpTypeEnum.REASSIGN_HOLDERS) {
+            // 审批人不再由业务侧自动分派：提交即起流程，当前环节办理人由流程节点配置决定
+            engine.startForBusiness(FLOW_CODE, ticket.getOpNo(), dto.getAssigneeUserId());
+            assignees = engine.pendingAssignees(ticket.getOpNo());
+            if (!assignees.isEmpty()) {
+                ticket.setAssigneeUserId(assignees.get(0).getId());
+                ticket.setAssigneeRealName(assignees.get(0).getRealName());
+                ticketMapper.updateById(ticket);
+            }
+        }
 
         auditService.record(loginUser, "COMPANY_OP_SUBMIT", ticket.getOpNo(),
                 "发起公司变更单：" + opType.getLabel() + " " + targetText(ticket) + "（事由：" + reason + "）",
@@ -259,13 +274,18 @@ public class CompanyOpTicketService {
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "SUBMIT",
                 loginUser, null, ticket.getStatus(), null);
         if (opType != CompanyOpTypeEnum.REASSIGN_HOLDERS) {
-            trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "ASSIGN",
-                    loginUser, null, ticket.getStatus(),
-                    "指定审批人：" + ticket.getAssigneeRealName());
-            messageService.send(ticket.getCompanyUscc(), ticket.getAssigneeUserId(), ticket.getAssigneeRealName(),
-                    loginUser, "COMPANY_OP_SUBMITTED", "您有一条新的公司变更单待审批",
-                    "变更单 " + ticket.getOpNo() + " 待您审批（提交人：" + ticket.getRequestedByName() + "）",
-                    "COMPANY_OP", String.valueOf(ticket.getId()));
+            if (!assignees.isEmpty()) {
+                trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "ASSIGN",
+                        loginUser, null, ticket.getStatus(),
+                        "流程节点办理人：" + assignees.stream().map(SysUser::getRealName).distinct()
+                                .collect(java.util.stream.Collectors.joining("、")));
+            }
+            for (SysUser assignee : assignees) {
+                messageService.send(ticket.getCompanyUscc(), assignee.getId(), assignee.getRealName(),
+                        loginUser, "COMPANY_OP_SUBMITTED", "您有一条新的公司变更单待审批",
+                        "变更单 " + ticket.getOpNo() + " 待您审批（提交人：" + ticket.getRequestedByName() + "）",
+                        "COMPANY_OP", String.valueOf(ticket.getId()));
+            }
         }
         log.info("[公司变更单][{}] 发起 {} 目标={} 发起人={} 指派审批人={}", ticket.getOpNo(), opType.getCode(),
                 uscc, actorRealName, ticket.getAssigneeRealName());
@@ -326,10 +346,10 @@ public class CompanyOpTicketService {
             throw new IllegalArgumentException("未知变更类型：" + ticket.getOpType());
         }
         checkReviewerDiff(ticket, viewer);
-        checkAssignee(ticket, viewer);
         if (opType == CompanyOpTypeEnum.REASSIGN_HOLDERS) {
             throw new IllegalArgumentException("「重新指派保管人」由原 5 名密钥保管人投票决定（同意数超过 3 即执行），不支持公司审批员批准");
         }
+        approveInFlow(ticket, viewer, comment);
         String reviewerName = viewer.getRealName();
         LocalDateTime now = LocalDateTime.now();
 
@@ -380,6 +400,8 @@ public class CompanyOpTicketService {
                         + "（发起人 " + ticket.getRequestedByName() + "）", ip, ticket.getCompanyUscc());
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "APPROVE",
                 viewer, "PENDING", "EXECUTED", blankToNull(comment));
+        // 审批即执行的业务动作已完成，流程收尾
+        engine.finish(ticket.getOpNo(), viewer, "批准并执行公司变更单：" + opType.getLabel());
         messageService.send(ticket.getCompanyUscc(), ticket.getRequestedByUserId(), ticket.getRequestedByName(),
                 viewer, "COMPANY_OP_APPROVED", "公司变更单已批准并执行",
                 "您的变更单 " + ticket.getOpNo() + " 已批准并执行（" + opType.getLabel() + "）",
@@ -399,7 +421,7 @@ public class CompanyOpTicketService {
             throw new IllegalArgumentException("「重新指派保管人」由原 5 名密钥保管人投票决定（同意数超过 3 即执行），不支持公司审批员驳回；如原保管人不同意，请他们在本页投票驳回");
         }
         checkReviewerDiff(ticket, viewer);
-        checkAssignee(ticket, viewer);
+        rejectInFlow(ticket, viewer, comment);
         String remark = blankToNull(comment);
         if (remark == null) {
             throw new IllegalArgumentException("驳回必须填写审批意见");
@@ -443,6 +465,7 @@ public class CompanyOpTicketService {
         if (updated == 0) {
             throw new IllegalArgumentException("该变更单已被处理，请刷新后重试");
         }
+        engine.withdrawByBusiness(ticket.getOpNo(), viewer);
         auditService.record(viewer, "COMPANY_OP_CANCEL", ticket.getOpNo(),
                 "撤回公司变更单：" + opText(ticket.getOpType()) + " " + targetText(ticket), ip, ticket.getCompanyUscc());
         trailService.record(ticket.getCompanyUscc(), ticket.getId(), ticket.getOpNo(), "CANCEL",
@@ -793,7 +816,27 @@ public class CompanyOpTicketService {
     }
 
     /**
-     * 审批准入：本单只能由被指派的审批人处理。未指派（历史单）或指派人已停用/已被删时，
+     * 审批准入：流程实例存在时以「流程节点办理人配置」为唯一口径；
+     * 历史存量单没有实例，回落到旧的被指派人校验。
+     */
+    private void approveInFlow(CompanyOpTicket ticket, LoginUser loginUser, String comment) {
+        if (engine.hasInstance(ticket.getOpNo())) {
+            engine.approveByBusiness(ticket.getOpNo(), loginUser, comment);
+        } else {
+            checkAssignee(ticket, loginUser);
+        }
+    }
+
+    private void rejectInFlow(CompanyOpTicket ticket, LoginUser loginUser, String comment) {
+        if (engine.hasInstance(ticket.getOpNo())) {
+            engine.rejectByBusiness(ticket.getOpNo(), loginUser, comment);
+        } else {
+            checkAssignee(ticket, loginUser);
+        }
+    }
+
+    /**
+     * 审批准入（历史单兜底）：本单只能由被指派的审批人处理。未指派（历史单）或指派人已停用/已被删时，
      * 回落到审批员池共同处理——与列表可见范围 {@link #applyViewerScope} 同一口径。
      */
     private void checkAssignee(CompanyOpTicket ticket, LoginUser loginUser) {

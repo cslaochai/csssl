@@ -22,8 +22,11 @@ const isEpSubMenuSlotWarn = (msg, trace) =>
   trace.includes('el-sub-menu')
 app.config.warnHandler = (msg, instance, trace) => {
   if (isEpSubMenuSlotWarn(msg, trace)) return
-  // 其余告警照常打印（开发期便于排查）
   console.warn(`[Vue warn]: ${msg}${trace ? '\n' + trace : ''}`)
+}
+// 把 Unhandled error during execution of native event handler 的真实堆栈打出来
+app.config.errorHandler = (err, instance, info) => {
+  console.error('[Vue ERROR]', err?.stack || err, '\ninfo:', info)
 }
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {

@@ -9,6 +9,11 @@ import lombok.Data;
 public class TemplateUpdateDTO {
 
     /**
+     * 目标模板 ID（来自 body，替换原来的 @PathVariable）
+     */
+    private Long id;
+
+    /**
      * 模板名称（null=不改）
      */
     private String templateName;

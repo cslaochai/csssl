@@ -56,8 +56,13 @@ public class ApplicationSubmitDTO {
     private String description;
 
     /**
-     * 提交时指定的审批人账号（必填；须为启用状态的审核员/RA管理员，且与提交人不同人。
-     * 对外 API 通道不传，由服务端按待审积压最少自动分派）
+     * 提交时指定的审批人（用户ID，单选）：必须来自流程首个审批节点权限标识筛选出的候选人，
+     * 由前端下拉选择；不传则按节点配置自动分派。
+     */
+    private Long assigneeUserId;
+
+    /**
+     * 提交时指定的审批人账号（历史字段，保留兼容；新前端改用 assigneeUserId）
      */
     private String assigneeUsername;
 

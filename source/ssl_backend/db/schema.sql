@@ -541,6 +541,17 @@ SET @idx_ext := (SELECT COUNT(*) FROM information_schema.STATISTICS
 SET @s_ext8 := IF(@idx_ext = 0, 'ALTER TABLE ssl_cert_application ADD UNIQUE KEY uk_ext_request (company_uscc, external_system, external_request_id)', 'SELECT 1');
 PREPARE s_ext8 FROM @s_ext8; EXECUTE s_ext8; DEALLOCATE PREPARE s_ext8;
 
+-- 幂等加列：员工编号（主体DN的 OU，WEB/API 通道必填；同一公司内作唯一识别，与 HIS 员工编号对齐）
+SET @c_ext9 := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND COLUMN_NAME = 'employee_no');
+SET @s_ext9 := IF(@c_ext9 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN employee_no VARCHAR(64) NULL COMMENT ''员工编号（主体DN的OU，同公司内唯一识别）'' AFTER external_dept_name', 'SELECT 1');
+PREPARE s_ext9 FROM @s_ext9; EXECUTE s_ext9; DEALLOCATE PREPARE s_ext9;
+
+SET @idx_emp := (SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ssl_cert_application' AND INDEX_NAME = 'idx_company_employee');
+SET @s_emp_idx := IF(@idx_emp = 0, 'ALTER TABLE ssl_cert_application ADD KEY idx_company_employee (company_uscc, employee_no, status)', 'SELECT 1');
+PREPARE s_emp_idx FROM @s_emp_idx; EXECUTE s_emp_idx; DEALLOCATE PREPARE s_emp_idx;
+
 -- 公司变更单（暂停/恢复/关闭/重置接入密钥走单双人复核：发起→他人审批→批准即执行；
 -- 新建公司已改为直接执行（POST /admin/companies），本表 CREATE 仅存历史单。接入密钥明文不落库，发起人凭一次性回执从保险库领取）
 CREATE TABLE IF NOT EXISTS ssl_company_op_ticket (

@@ -29,6 +29,11 @@ public class CertOpSubmitDTO {
     private Integer validityDays;
 
     /**
+     * 提交时指定的审批人（用户ID，单选）：必须来自流程首个审批节点权限标识筛选出的候选人。
+     */
+    private Long assigneeUserId;
+
+    /**
      * 公司数据域（全局用户显式传入）
      */
     private String companyUscc;

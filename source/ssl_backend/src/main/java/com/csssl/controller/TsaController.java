@@ -20,7 +20,9 @@ public class TsaController {
 
     private final TsaService tsaService;
 
-    /** 盖一枚时间戳令牌：入参为被盖时间戳的摘要（64 位十六进制） */
+    /**
+     * 盖一枚时间戳令牌：入参为被盖时间戳的摘要（64 位十六进制）
+     */
     @PostMapping("/stamp")
     public Result<StampVO> stamp(@RequestBody TsaStampDTO req, HttpServletRequest request) {
         TsaService.Stamp stamp = tsaService.stamp(req.getDigestHex());
@@ -34,8 +36,10 @@ public class TsaController {
         return Result.success("时间戳盖章成功", vo);
     }
 
-    /** TSA 公钥（PEM + SM3 指纹），供业务系统验签令牌 */
-    @GetMapping("/publicKey")
+    /**
+     * TSA 公钥（PEM + SM3 指纹），供业务系统验签令牌
+     */
+    @PostMapping("/public-key")
     public Result<TsaPublicKeyVO> publicKey() {
         return Result.success("获取成功", tsaService.status());
     }

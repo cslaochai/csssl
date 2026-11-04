@@ -185,13 +185,19 @@
                 title="批准执行后旧接入密钥立即失效，外部系统需换成新密钥；新密钥由发起人一次性领取。" type="warning"/>
       <el-alert v-else :closable="false" class="dialog-tip" show-icon
                 title="提交后需公司审批员批准才执行。" type="info"/>
-      <el-descriptions :column="1" border class="op-desc">
-        <el-descriptions-item label="目标公司">{{ opTarget?.companyName || '-' }}</el-descriptions-item>
+      <el-descriptions :column="2" border class="op-desc">
+        <el-descriptions-item label="目标公司" :span="2">{{ opTarget?.companyName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="统一社会信用代码"><span class="cell-mono">{{ opTarget?.uscc || '-' }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="当前状态">{{ opTarget ? statusText(opTarget.status) : '-' }}</el-descriptions-item>
       </el-descriptions>
       <el-form class="op-form" label-width="90px">
+        <el-form-item label="审批人" required>
+          <el-select v-model="opAssignee" placeholder="从流程节点筛选出的审批人中选择" style="width: 100%">
+            <el-option v-for="u in opAssigneeOptions" :key="u.id"
+                       :label="`${u.realName}（${u.roleName || u.roleCode || '—'}）`" :value="u.id"/>
+          </el-select>
+        </el-form-item>
         <el-form-item label="变更事由" required>
           <el-input v-model="opReason" :rows="3" maxlength="255" placeholder="业务依据（审批人据此核对），必填" show-word-limit
                     type="textarea"/>
@@ -206,8 +212,8 @@
     </el-dialog>
 
     <!-- 公司详情（行点击） -->
-    <el-dialog v-model="detailVisible" :title="`公司详情：${detail?.companyName || ''}`" width="560px">
-      <el-descriptions :column="1" border>
+    <el-dialog v-model="detailVisible" :title="`公司详情：${detail?.companyName || ''}`" width="900px">
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="统一社会信用代码">{{ detail?.uscc || '-' }}</el-descriptions-item>
         <el-descriptions-item label="公司名称">{{ detail?.companyName }}</el-descriptions-item>
         <el-descriptions-item label="主体O">{{ detail?.subjectO || '-' }}</el-descriptions-item>
@@ -217,11 +223,11 @@
             detail?.rootKeyState ? rootKeyText(detail.rootKeyState) : '-'
           }}
         </el-descriptions-item>
-        <el-descriptions-item label="根CA有效期">{{
+        <el-descriptions-item label="根CA有效期" :span="2">{{
             detail ? validity(detail.rootValidFrom, detail.rootValidTo) : ''
           }}
         </el-descriptions-item>
-        <el-descriptions-item label="二级CA有效期（SUB_CA）">
+        <el-descriptions-item label="二级CA有效期（SUB_CA）" :span="2">
           {{ detail ? validity(detail.subCaValidFrom, detail.subCaValidTo) : '' }}
         </el-descriptions-item>
         <el-descriptions-item label="联系人">{{ detail?.contact || '-' }}</el-descriptions-item>
@@ -233,24 +239,17 @@
         <el-descriptions-item label="接入状态">
           {{ detail?.apiAppId ? (detail.apiClientStatus === 1 ? '启用' : '停用') : '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="说明">{{ detail?.description || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="说明" :span="2">{{ detail?.description || '-' }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="密钥保管人">
-          <span v-if="holdersList.length">{{ holderNames }}</span>
+        <el-descriptions-item label="密钥保管人" :span="2">
+          <template v-if="detail?.holders?.length">
+            <el-tag v-for="h in detail.holders" :key="h.shareIndex" size="small" style="margin-right: 6px">
+              第{{ h.shareIndex }}份 · {{ h.holderRealName }}
+            </el-tag>
+          </template>
           <span v-else>尚未指定</span>
         </el-descriptions-item>
       </el-descriptions>
-
-      <template v-if="myShareData">
-        <el-divider content-position="left">我的密钥份额（仅本人可见）</el-divider>
-        <el-alert :closable="false" class="dialog-tip" show-icon title="这是你本人持有的根私钥门限份额，请离线保管；重建二级CA 时需粘贴 ≥3 份份额加载根私钥。"
-                  type="warning"/>
-        <el-input :model-value="myShareData.shareJson" :rows="6" class="share-view" readonly type="textarea"/>
-        <div style="margin-top: 8px; display: flex; gap: 8px">
-          <el-button size="small" type="primary" @click="onCopy(myShareData.shareJson)">复制我的份额</el-button>
-          <el-button size="small" @click="onDownloadMyShare">下载我的份额(JSON)</el-button>
-        </div>
-      </template>
     </el-dialog>
 
     <!-- 重新指派密钥保管人（发起变更单：原 5 名保管人投票 >3 同意后执行，不直接绑定） -->
@@ -258,8 +257,8 @@
       <el-alert :closable="false" class="dialog-tip" show-icon
                 title="提交后由该公司原 5 名密钥保管人在「公司变更审批」页逐人投票，同意数超过 3（≥4）自动执行重绑；发起人本人不可作为新保管人。"
                 type="warning"/>
-      <el-descriptions :column="1" border class="op-desc">
-        <el-descriptions-item label="目标公司">{{ reassignTarget?.companyName || '-' }}</el-descriptions-item>
+      <el-descriptions :column="2" border class="op-desc">
+        <el-descriptions-item label="目标公司" :span="2">{{ reassignTarget?.companyName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="统一社会信用代码"><span class="cell-mono">{{ reassignTarget?.uscc || '-' }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="当前状态">{{ reassignTarget ? statusText(reassignTarget.status) : '-' }}</el-descriptions-item>
@@ -297,12 +296,12 @@
           title="密钥仅展示一次，关闭后无法再次查看；请立即复制到 HIS 等外部系统的配置中。"
           type="warning"
       />
-      <el-descriptions v-if="cred" :column="1" border class="cred-desc">
-        <el-descriptions-item label="接入ID（App ID）" label-width="150px">
+      <el-descriptions v-if="cred" :column="2" border class="cred-desc">
+        <el-descriptions-item label="接入ID（App ID）" :span="2" label-width="150px">
           <span class="cell-mono">{{ cred.appId }}</span>
           <el-button link size="small" type="primary" @click="onCopy(cred.appId)">复制</el-button>
         </el-descriptions-item>
-        <el-descriptions-item label="接入密钥">
+        <el-descriptions-item label="接入密钥" :span="2">
           <span class="cell-mono">{{ cred.secret }}</span>
           <el-button link size="small" type="primary" @click="onCopy(cred.secret)">复制</el-button>
         </el-descriptions-item>
@@ -324,8 +323,8 @@ import {ElMessage} from 'element-plus'
 import {Plus, Refresh, Search} from '@element-plus/icons-vue'
 import {
   createCompany,
-  getShareOverview,
   listCompaniesCached,
+  listFlowCandidates,
   listSimpleUsers,
   pageCompanies,
   submitCompanyOp
@@ -334,7 +333,6 @@ import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
 import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 import {hasPerm} from '@/lib/perm'
 import {copyText} from '@/lib/clipboard'
-import {downloadText} from '@/lib/download'
 
 const OP_TYPE_LABELS = {
   SUSPEND: '暂停公司',
@@ -355,15 +353,14 @@ const {queryCardRef, footerRef, tableMaxHeight} = useTableMaxHeight()
 const createVisible = ref(false)
 const opVisible = ref(false)
 const opType = ref('')
+// 变更单提交时的审批人（流程首个审批节点候选，单选）
+const opAssignee = ref(null)
+const opAssigneeOptions = ref([])
 const opTarget = ref(null)
 const opReason = ref('')
 const submitting = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
-const holdersList = ref([])
-const myShareData = ref(null)
-// 详情只展示保管人姓名，账号不下发也不展示（可登录凭据的一半）
-const holderNames = computed(() => holdersList.value.map(h => h.holderRealName).filter(Boolean).join('，'))
 const credVisible = ref(false)
 const cred = ref(null)
 const formRef = ref()
@@ -461,27 +458,6 @@ function validity(from, to) {
 function onRowDetail(row) {
   detail.value = row
   detailVisible.value = true
-  loadDetailShares(row.uscc)
-}
-
-// 详情：拉取该公司密钥份额总览（一次调用返回保管人名单 + 当前登录人自身份额）
-async function loadDetailShares(uscc) {
-  holdersList.value = []
-  myShareData.value = null
-  try {
-    const res = await getShareOverview(uscc)
-    const d = res.data || {}
-    holdersList.value = d.holders || []
-    myShareData.value = d.mine || null
-  } catch (e) {
-    // 错误提示已由拦截器统一处理
-  }
-}
-
-function onDownloadMyShare() {
-  if (!myShareData.value) return
-  downloadText(myShareData.value.shareJson, `csssl-root-share-${detail.value?.uscc || 'mine'}-${myShareData.value.index}.json`)
-  ElMessage.success('我的份额已导出，请离线保管')
 }
 
 // 重新指派保管人（发起变更单：原 5 名保管人投票 >3 同意后执行；不再直接 assignShares）
@@ -656,11 +632,21 @@ function openOp(type, row) {
   opType.value = type
   opTarget.value = row
   opReason.value = ''
+  opAssignee.value = null
+  opAssigneeOptions.value = []
+  listFlowCandidates('companyOpTicketFlow').then(res => {
+    opAssigneeOptions.value = res.data || []
+  }).catch(() => {
+  })
   opVisible.value = true
 }
 
 async function onSubmitOp() {
   const reason = opReason.value.trim()
+  if (!opAssignee.value) {
+    ElMessage.warning('请选择审批人（候选范围由流程节点配置决定）')
+    return
+  }
   if (!reason) {
     ElMessage.warning('请填写变更事由')
     return
@@ -670,7 +656,8 @@ async function onSubmitOp() {
     await submitCompanyOp({
       opType: opType.value,
       uscc: opTarget.value.uscc,
-      reason
+      reason,
+      assigneeUserId: opAssignee.value
     })
     ElMessage.success(`${opTitle.value}变更单已提交，等待公司审批员批准`)
     opVisible.value = false
@@ -733,12 +720,5 @@ async function loadSimpleUsers(companyUscc) {
 
 .form-tip-alert {
   margin-top: 8px;
-}
-
-.share-view :deep(.el-textarea__inner) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  color: #1e293b;
-  background: #f7f9fc;
 }
 </style>

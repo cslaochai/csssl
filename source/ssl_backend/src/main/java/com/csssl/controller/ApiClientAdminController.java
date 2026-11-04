@@ -2,6 +2,8 @@ package com.csssl.controller;
 
 import com.csssl.common.Result;
 import com.csssl.dto.ApiClientCreateDTO;
+import com.csssl.dto.BoolIdDTO;
+import com.csssl.dto.IdDTO;
 import com.csssl.entity.LoginUser;
 import com.csssl.service.ApiClientService;
 import com.csssl.util.UserUtils;
@@ -11,7 +13,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
@@ -32,7 +37,7 @@ public class ApiClientAdminController {
     /**
      * 客户端列表（不返回 secret）
      */
-    @GetMapping
+    @PostMapping("/list")
     public Result<List<ApiClientVO>> list() {
         requireGlobalAdmin();
         return Result.success("查询成功", clientService.list());
@@ -41,7 +46,7 @@ public class ApiClientAdminController {
     /**
      * 登记客户端：返回一次性 secret，调用方须立即妥善保存
      */
-    @PostMapping
+    @PostMapping("/create")
     public Result<ApiClientSecretVO> create(@Valid @RequestBody ApiClientCreateDTO body,
                                             HttpServletRequest request) {
         LoginUser user = requireGlobalAdmin();
@@ -53,22 +58,31 @@ public class ApiClientAdminController {
     /**
      * 轮换 secret：旧 secret 立即失效
      */
-    @PostMapping("/{id}/rotate")
-    public Result<ApiClientSecretVO> rotate(@PathVariable Long id, HttpServletRequest request) {
+    @PostMapping("/rotate")
+    public Result<ApiClientSecretVO> rotate(@RequestBody IdDTO body, HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
         LoginUser user = requireGlobalAdmin();
         return Result.success("已轮换，请立即保存新 secret（仅展示一次）",
-                clientService.rotate(id, user, clientIp(request)));
+                clientService.rotate(body.getId(), user, clientIp(request)));
     }
 
     /**
      * 启停客户端
      */
-    @PostMapping("/{id}/status")
-    public Result<ApiClientVO> status(@PathVariable Long id, @RequestParam boolean enabled,
+    @PostMapping("/status")
+    public Result<ApiClientVO> status(@Valid @RequestBody BoolIdDTO body,
                                       HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
+        if (body.getEnabled() == null) {
+            throw new IllegalArgumentException("参数 enabled 不能为空");
+        }
         LoginUser user = requireGlobalAdmin();
-        return Result.success(enabled ? "已启用" : "已停用",
-                clientService.setStatus(id, enabled, user, clientIp(request)));
+        return Result.success(body.getEnabled() ? "已启用" : "已停用",
+                clientService.setStatus(body.getId(), body.getEnabled(), user, clientIp(request)));
     }
 
     private LoginUser requireGlobalAdmin() {

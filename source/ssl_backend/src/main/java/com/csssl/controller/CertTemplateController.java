@@ -5,6 +5,7 @@ import com.csssl.common.Result;
 import com.csssl.dto.TemplateCreateDTO;
 import com.csssl.dto.TemplatePageQueryDTO;
 import com.csssl.dto.TemplateUpdateDTO;
+import com.csssl.dto.IdDTO;
 import com.csssl.entity.CaCompany;
 import com.csssl.entity.CertTemplate;
 import com.csssl.entity.LoginUser;
@@ -15,8 +16,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>路线A数据域：列表/详情按可见集过滤（全局模板 company_uscc NULL + 本公司模板）；
  * 公司 SECURITY_ADMIN 创建/修改/删除仅限本公司模板；全局 ADMIN/SECURITY_ADMIN 可管全局模板
- * 与各公司模板——模板域用 ?companyUscc=（或 body.companyUscc）指定，建全局模板 companyUscc 传空=全局；
+ * 与各公司模板——模板域用 body.companyUscc=（或 body.companyUscc）指定，建全局模板 companyUscc 传空=全局；
  * 公司用户显式请求别公司域=403（effectiveCompany 口径）。</p>
  */
 @RestController
@@ -38,18 +37,25 @@ public class CertTemplateController {
 
     private final CertTemplateService templateService;
 
-    /** 模板列表（分页 + 关键字；公司用户=全局+本公司可见集，全局用户 companyUscc 缺省=全量总览） */
-    @GetMapping
-    public Result<Page<CertTemplate>> page(@Valid TemplatePageQueryDTO query,
+    /**
+     * 模板列表（分页 + 关键字；公司用户=全局+本公司可见集，全局用户 companyUscc 缺省=全量总览）
+     */
+    @PostMapping("/page")
+    public Result<Page<CertTemplate>> page(@Valid @RequestBody TemplatePageQueryDTO query,
                                            HttpServletRequest request) {
         return Result.success("查询成功", templateService.page(query.getPageNo(), query.getPageSize(), query.getKeyword(),
                 CompanyScope.readCompanyScope(query.getCompanyUscc())));
     }
 
-    /** 模板详情（按可见集过滤：公司用户访问他公司模板按不存在处理） */
-    @GetMapping("/{id}")
-    public Result<CertTemplate> detail(@PathVariable Long id, HttpServletRequest request) {
-        return Result.success("查询成功", templateService.detailVisible(id, null));
+    /**
+     * 模板详情（按可见集过滤：公司用户访问他公司模板按不存在处理）
+     */
+    @PostMapping("/detail")
+    public Result<CertTemplate> detail(@RequestBody IdDTO body, HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
+        return Result.success("查询成功", templateService.detailVisible(body.getId(), null));
     }
 
     /**
@@ -57,7 +63,7 @@ public class CertTemplateController {
      * 全局操作者：body.companyUscc 空=建全局模板，非空=为指定公司建模板；公司操作者：锁本公司，越域 403。
      */
     @PreAuthorize("hasAuthority('template:create')")
-    @PostMapping
+    @PostMapping("/create")
     public Result<CertTemplate> create(@Valid @RequestBody TemplateCreateDTO body, HttpServletRequest request) {
         LoginUser loginUser = UserUtils.requireLoginUser();
         String myCompany = null;
@@ -67,24 +73,32 @@ public class CertTemplateController {
                 templateService.create(body, loginUser, clientIp(request), tplCompany, myCompany));
     }
 
-    /** 更新模板（仅安全管理员/系统管理员；变更落审计；公司操作者仅限本公司模板） */
+    /**
+     * 更新模板（仅安全管理员/系统管理员；变更落审计；公司操作者仅限本公司模板）
+     */
     @PreAuthorize("hasAuthority('template:update')")
-    @PostMapping("/{id}")
-    public Result<CertTemplate> update(@PathVariable Long id, @Valid @RequestBody TemplateUpdateDTO body,
+    @PostMapping("/update")
+    public Result<CertTemplate> update(@Valid @RequestBody TemplateUpdateDTO body,
                                        HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
         LoginUser loginUser = UserUtils.requireLoginUser();
         return Result.success("模板更新成功",
-                templateService.update(id, body, loginUser, clientIp(request),
-                        CaCompany.PRIMARY_COMPANY_USCC));
+                templateService.update(body.getId(), body, loginUser, clientIp(request), null));
     }
 
-    /** 删除模板（仅安全管理员/系统管理员；内置模板不可删；变更落审计；公司操作者仅限本公司模板） */
+    /**
+     * 删除模板（仅安全管理员/系统管理员；内置模板不可删；变更落审计；公司操作者仅限本公司模板）
+     */
     @PreAuthorize("hasAuthority('template:delete')")
-    @PostMapping("/{id}/delete")
-    public Result<Void> delete(@PathVariable Long id, HttpServletRequest request) {
+    @PostMapping("/delete")
+    public Result<Void> delete(@RequestBody IdDTO body, HttpServletRequest request) {
+        if (body.getId() == null) {
+            throw new IllegalArgumentException("参数 id 不能为空");
+        }
         LoginUser loginUser = UserUtils.requireLoginUser();
-        templateService.delete(id, loginUser, clientIp(request),
-                CaCompany.PRIMARY_COMPANY_USCC);
+        templateService.delete(body.getId(), loginUser, clientIp(request), null);
         return Result.success("模板已删除", null);
     }
 

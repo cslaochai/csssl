@@ -11,6 +11,11 @@ import java.util.List;
 public class ShareUnsealDTO {
 
     /**
+     * 公司域（全局用户必须显式传入，公司用户服务端锁本公司）
+     */
+    private String companyUscc;
+
+    /**
      * 份额 JSON 列表（至少 3 份，编号不同）
      */
     private List<String> shares;

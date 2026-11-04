@@ -53,7 +53,7 @@ public class CertTemplateService {
      * 模板行归属公司兜底（NULL=全局模板，审计归位用）
      */
     private static String rowCompany(CertTemplate tpl) {
-        return tpl.getCompanyUscc() == null || tpl.getCompanyUscc().isBlank() ? CaCompany.PRIMARY_COMPANY_USCC : tpl.getCompanyUscc();
+        return tpl.getCompanyUscc() == null || tpl.getCompanyUscc().isBlank() ? "default" : tpl.getCompanyUscc();
     }
 
     /**

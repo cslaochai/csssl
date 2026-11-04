@@ -9,6 +9,11 @@ import lombok.Data;
 public class SubCaRebuildDecisionDTO {
 
     /**
+     * 目标重建申请单 ID（来自 body，替换原来的 @PathVariable）
+     */
+    private Long id;
+
+    /**
      * 审批意见（驳回必填）
      */
     private String comment;

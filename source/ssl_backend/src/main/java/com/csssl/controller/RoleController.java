@@ -9,6 +9,7 @@ import com.csssl.dto.RoleCreateDTO;
 import com.csssl.vo.RolePermsVO;
 import com.csssl.vo.RoleSavePermsVO;
 import com.csssl.dto.RoleUpdateDTO;
+import com.csssl.dto.CodeDTO;
 import com.csssl.vo.RoleDetailVO;
 import com.csssl.vo.RoleVO;
 import com.csssl.entity.CaCompany;
@@ -28,12 +29,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -66,8 +64,10 @@ public class RoleController {
     private final PermissionService permissionService;
     private final AuditService auditService;
 
-    /** 角色列表（含账号数、已授权数；供角色配置页与账号页角色下拉） */
-    @GetMapping
+    /**
+     * 角色列表（含账号数、已授权数；供角色配置页与账号页角色下拉）
+     */
+    @PostMapping("/list")
     public Result<List<RoleVO>> list() {
         List<SysRole> roles = roleMapper.selectList(new LambdaQueryWrapper<SysRole>()
                 .orderByAsc(SysRole::getSortOrder).orderByAsc(SysRole::getId));
@@ -98,7 +98,7 @@ public class RoleController {
      * 仅全局管理员可操作；角色编码须与预置角色不冲突、库内唯一。
      */
     @PreAuthorize("hasAuthority('role:update')")
-    @PostMapping
+    @PostMapping("/create")
     public Result<RoleDetailVO> create(@Valid @RequestBody RoleCreateDTO req, HttpServletRequest request) {
         requireGlobalActor();
         String code = req.getRoleCode();
@@ -130,7 +130,7 @@ public class RoleController {
         role.setUpdatedAt(LocalDateTime.now());
         roleMapper.insert(role);
         auditService.record(UserUtils.requireLoginUser(), "ROLE_CREATE", code,
-                "创建自定义角色：" + code, clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
+                "创建自定义角色：" + code, clientIp(request), "default");
         RoleDetailVO vo = new RoleDetailVO();
         vo.setRoleCode(role.getRoleCode());
         vo.setRoleName(role.getRoleName());
@@ -143,8 +143,12 @@ public class RoleController {
      * 预置角色（builtin=1）不可删除（守住分权制衡的法定骨架）。
      */
     @PreAuthorize("hasAuthority('role:update')")
-    @DeleteMapping("/{roleCode}")
-    public Result<Void> delete(@PathVariable String roleCode, HttpServletRequest request) {
+    @PostMapping("/delete")
+    public Result<Void> delete(@RequestBody CodeDTO body, HttpServletRequest request) {
+        String roleCode = body.any();
+        if (roleCode == null || roleCode.isBlank()) {
+            throw new IllegalArgumentException("参数 roleCode 不能为空");
+        }
         requireGlobalActor();
         SysRole role = requireRole(roleCode);
         if (role.getBuiltin() != null && role.getBuiltin() == 1) {
@@ -159,12 +163,14 @@ public class RoleController {
         roleMapper.deleteById(role.getId());
         permissionService.invalidate(role.getRoleCode());
         auditService.record(UserUtils.requireLoginUser(), "ROLE_DELETE", role.getRoleCode(),
-                "删除自定义角色：" + role.getRoleCode(), clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
+                "删除自定义角色：" + role.getRoleCode(), clientIp(request), "default");
         return Result.success("角色已删除", null);
     }
 
-    /** 当前登录人角色与生效权限（登录后自刷新用；前端据此重建侧栏与按钮） */
-    @GetMapping("/my-perms")
+    /**
+     * 当前登录人角色与生效权限（登录后自刷新用；前端据此重建侧栏与按钮）
+     */
+    @PostMapping("/my-perms")
     public Result<MyPermsVO> myPerms(HttpServletRequest request) {
         LoginUser user = UserUtils.requireLoginUser();
         String roleCode = user.getRoleCode();
@@ -183,8 +189,12 @@ public class RoleController {
      * 供角色配置页权限树回显与置灰渲染，一次请求拿全，避免前端再拼目录。
      */
     @PreAuthorize("hasAuthority('role:perm')")
-    @GetMapping("/{roleCode}/perms")
-    public Result<RolePermsVO> rolePerms(@PathVariable String roleCode, HttpServletRequest request) {
+    @PostMapping("/role-perms")
+    public Result<RolePermsVO> rolePerms(@RequestBody CodeDTO body, HttpServletRequest request) {
+        String roleCode = body.any();
+        if (roleCode == null || roleCode.isBlank()) {
+            throw new IllegalArgumentException("参数 roleCode 不能为空");
+        }
         requireGlobalActor();
         SysRole role = requireRole(roleCode);
         List<PermItemVO> catalog = new ArrayList<>();
@@ -213,10 +223,13 @@ public class RoleController {
      * 启停变更后失效权限缓存，停用角色账号下次请求即被拦截器拒绝登录。
      */
     @PreAuthorize("hasAuthority('role:update')")
-    @PostMapping("/{roleCode}")
-    public Result<RoleDetailVO> update(@PathVariable String roleCode,
-                                       @Valid @RequestBody RoleUpdateDTO body,
+    @PostMapping("/update")
+    public Result<RoleDetailVO> update(@Valid @RequestBody RoleUpdateDTO body,
                                        HttpServletRequest request) {
+        String roleCode = body.getRoleCode();
+        if (roleCode == null || roleCode.isBlank()) {
+            throw new IllegalArgumentException("参数 roleCode 不能为空");
+        }
         requireGlobalActor();
         SysRole role = requireRole(roleCode);
 
@@ -271,7 +284,7 @@ public class RoleController {
         if (!changes.isEmpty()) {
             auditService.record(UserUtils.requireLoginUser(), "ROLE_UPDATE", role.getRoleCode(),
                     "更新角色 " + role.getRoleCode() + "：" + String.join("；", changes),
-                    clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
+                    clientIp(request), "default");
         }
         RoleDetailVO vo = new RoleDetailVO();
         vo.setRoleCode(role.getRoleCode());
@@ -282,30 +295,37 @@ public class RoleController {
 
     /**
      * 保存角色权限（菜单+按钮，整表替换）：逐项校验是否存在、是否在法定边界内，变更落审计。
-     * body {"perms":["menu:certs","cert:revoke", ...]}
+     * body {"roleCode":"ADMIN", "perms":["menu:certs","cert:revoke", ...]}
      */
     @PreAuthorize("hasAuthority('role:perm')")
-    @PostMapping("/{roleCode}/perms")
-    public Result<RoleSavePermsVO> savePerms(@PathVariable String roleCode,
-                                             @Valid @RequestBody RolePermsSaveDTO saveDTO,
+    @PostMapping("/save-perms")
+    public Result<RoleSavePermsVO> savePerms(@Valid @RequestBody RolePermsSaveDTO saveDTO,
                                              HttpServletRequest request) {
+        String roleCode = saveDTO.getRoleCode();
+        if (roleCode == null || roleCode.isBlank()) {
+            throw new IllegalArgumentException("参数 roleCode 不能为空");
+        }
         requireGlobalActor();
         SysRole role = requireRole(roleCode);
         permissionService.save(role.getRoleCode(), saveDTO.getPerms(),
-                UserUtils.requireLoginUser(), clientIp(request), CaCompany.PRIMARY_COMPANY_USCC);
+                UserUtils.requireLoginUser(), clientIp(request), "default");
         RoleSavePermsVO vo = new RoleSavePermsVO();
         vo.setRoleCode(role.getRoleCode());
         vo.setPerms(permissionService.effectiveList(role.getRoleCode()));
         return Result.success("权限已保存，即时生效", vo);
     }
 
-    /** 角色配置属全局管理动作：公司管理员（company_uscc 非空）一律拒绝，防止单公司改动影响全院分权口径 */
+    /**
+     * 角色配置属全局管理动作：公司管理员（company_uscc 非空）一律拒绝，防止单公司改动影响全院分权口径
+     */
     private void requireGlobalActor() {
         // 单租户化后账号不再携带公司域，所有持权管理员均视为全局管理员
         UserUtils.requireLoginUser();
     }
 
-    /** 角色必须存在（预置或自定义角色，未知编码按参数错误处理） */
+    /**
+     * 角色必须存在（预置或自定义角色，未知编码按参数错误处理）
+     */
     private SysRole requireRole(String roleCode) {
         SysRole role = findByCode(roleCode);
         if (role == null) {

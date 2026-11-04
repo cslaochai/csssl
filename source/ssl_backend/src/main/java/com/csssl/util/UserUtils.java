@@ -14,7 +14,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
  */
 public class UserUtils {
 
-    /** 当前登录人完整身份；未登录 / 上下文未绑定返回 null */
+    /**
+     * 当前登录人完整身份；未登录 / 上下文未绑定返回 null
+     */
     public static LoginUser getLoginUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof LoginUser u) {
@@ -23,7 +25,9 @@ public class UserUtils {
         return null;
     }
 
-    /** 当前登录人；未登录直接抛出（控制器/服务入口统一判空口径） */
+    /**
+     * 当前登录人；未登录直接抛出（控制器/服务入口统一判空口径）
+     */
     public static LoginUser requireLoginUser() {
         LoginUser u = getLoginUser();
         if (u == null) {

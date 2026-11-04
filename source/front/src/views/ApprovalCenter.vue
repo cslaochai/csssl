@@ -121,18 +121,18 @@
     <!-- 审批弹框：同意须提交本人持有的根私钥份额 -->
     <el-dialog v-model="approveVisible" :close-on-click-modal="false" title="审批二级CA重建申请" width="720px">
       <template v-if="approveTicket">
-        <el-descriptions :column="1" border size="small">
+        <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="单号">
             <span class="cell-mono">{{ approveTicket.opNo }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="公司">
             {{ approveTicket.companyName || approveTicket.companyUscc }}（{{ approveTicket.companyUscc }}）
           </el-descriptions-item>
-          <el-descriptions-item label="重建事由">{{ approveTicket.reason }}</el-descriptions-item>
+          <el-descriptions-item label="重建事由" :span="2">{{ approveTicket.reason }}</el-descriptions-item>
           <el-descriptions-item label="发起人">
             {{ approveTicket.requestedByName }} · {{ approveTicket.requestedAt }}
           </el-descriptions-item>
-          <el-descriptions-item label="审批进度">
+          <el-descriptions-item label="审批进度" :span="2">
             {{ approveTicket.approvedCount }}/{{ approveTicket.threshold }} 同意
             <template v-if="approveTicket.rejectedCount">，{{ approveTicket.rejectedCount }} 驳回</template>
             · 已收集份额 {{ approveTicket.collectedShareCount }}/{{ approveTicket.threshold }}
@@ -180,14 +180,14 @@
     <!-- 执行弹框：优先使用审批阶段已收集的份额 -->
     <el-dialog v-model="executeVisible" :close-on-click-modal="false" title="提交份额解封并重建二级CA" width="680px">
       <template v-if="executeTicket">
-        <el-descriptions :column="1" border size="small">
+        <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="单号">
             <span class="cell-mono">{{ executeTicket.opNo }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="公司">
             {{ executeTicket.companyName || executeTicket.companyUscc }}（{{ executeTicket.companyUscc }}）
           </el-descriptions-item>
-          <el-descriptions-item label="审批结果">
+          <el-descriptions-item label="审批结果" :span="2">
             {{ executeTicket.approvedCount }}/{{ executeTicket.threshold }} 名保管人同意
           </el-descriptions-item>
         </el-descriptions>
@@ -237,21 +237,21 @@
     </el-dialog>
 
     <!-- 详情弹框 -->
-    <el-dialog v-model="detailVisible" :title="`申请单详情：${detail?.opNo || ''}`" width="760px">
+    <el-dialog v-model="detailVisible" :title="`申请单详情：${detail?.opNo || ''}`" width="900px">
       <template v-if="detail">
         <WorkflowDiagram :diagram="diagram" style="margin-bottom: 16px"/>
-        <el-descriptions :column="1" border size="small">
+        <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="公司">
             {{ detail.companyName || detail.companyUscc }}（{{ detail.companyUscc }}）
           </el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="statusTag(detail.status)" size="small">{{ statusText(detail.status) }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="重建事由">{{ detail.reason }}</el-descriptions-item>
+          <el-descriptions-item label="重建事由" :span="2">{{ detail.reason }}</el-descriptions-item>
           <el-descriptions-item label="发起人">
             {{ detail.requestedByName }} · {{ detail.requestedAt }}
           </el-descriptions-item>
-          <el-descriptions-item label="审批进度">
+          <el-descriptions-item label="审批进度" :span="2">
             {{ detail.approvedCount }}/{{ detail.threshold }} 同意
             <template v-if="detail.rejectedCount">，{{ detail.rejectedCount }} 驳回</template>
             · 已收集份额 {{ detail.collectedShareCount }}/{{ detail.threshold }}

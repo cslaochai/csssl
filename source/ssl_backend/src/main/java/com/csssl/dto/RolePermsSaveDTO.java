@@ -11,6 +11,11 @@ import java.util.List;
 public class RolePermsSaveDTO {
 
     /**
+     * 目标角色编码（来自 body，替换原来的 @PathVariable）
+     */
+    private String roleCode;
+
+    /**
      * 权限点列表（如 ["menu:certs","cert:revoke"]）
      */
     private List<String> perms;

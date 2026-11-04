@@ -11,6 +11,11 @@ import java.util.List;
 public class SubCaRebuildExecuteDTO {
 
     /**
+     * 目标重建申请单 ID（来自 body，替换原来的 @PathVariable）
+     */
+    private Long id;
+
+    /**
      * 根私钥份额 JSON 列表（至少 3 份，编号不同）。
      * 当 useCollectedShares=true 时本字段可省略，改为使用审批阶段已收集的保管人份额。
      */

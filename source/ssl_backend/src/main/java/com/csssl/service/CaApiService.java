@@ -144,7 +144,8 @@ public class CaApiService {
                 && !CertApplicationStatusEnum.APPROVED.is(app.getStatus())) {
             throw new ApiException(409, "申请单当前状态为 " + applicationStatusText(app.getStatus()) + "，不可撤销");
         }
-        CertApplication cancelled = applicationService.cancel(app.getId(), apiUsername(client), null, ip,
+        LoginUser apiActor = new LoginUser(1L, "管理员", null, false, null);
+        CertApplication cancelled = applicationService.cancel(app.getId(), apiActor, ip,
                 client.getCompanyUscc(), reason);
         return toVo(cancelled, false);
     }
@@ -172,7 +173,7 @@ public class CaApiService {
         CertApplication app = requireOwnIssuedApplication(client, cert);
         requireEmployeeMatch(client, app, body);
         String reason = body.getReason().trim();
-        LoginUser apiActor = new LoginUser(null, apiUsername(client), null, false, null);
+        LoginUser apiActor = new LoginUser(1L, "管理员", null, false, null);
         certService.revoke(cert.getId(), reason, apiActor, ip);
         ApiCertStatusVO vo = statusVo(certService.findById(cert.getId()));
         log.info("[对外API][{}] 吊销证书 appId={}, serial={}, applyNo={}, employee={}, reason={}",

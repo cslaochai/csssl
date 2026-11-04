@@ -9,11 +9,15 @@ import lombok.Data;
 @Data
 public class PageParam {
 
-    /** 页码（从 1 起） */
+    /**
+     * 页码（从 1 起）
+     */
     @Min(value = 1, message = "页码最小为 1")
     private long pageNo = 1;
 
-    /** 每页条数 */
+    /**
+     * 每页条数
+     */
     @Min(value = 1, message = "每页条数最小为 1")
     private long pageSize = 10;
 }

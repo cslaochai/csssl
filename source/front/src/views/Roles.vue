@@ -192,11 +192,11 @@
     </el-dialog>
 
     <!-- 角色详情（行点击） -->
-    <el-dialog v-model="detailVisible" :title="`角色详情：${detail?.roleName || ''}`" width="520px">
-      <el-descriptions :column="1" border>
+    <el-dialog v-model="detailVisible" :title="`角色详情：${detail?.roleName || ''}`" width="900px">
+      <el-descriptions :column="2" border>
         <el-descriptions-item label="角色编码">{{ detail?.roleCode }}</el-descriptions-item>
         <el-descriptions-item label="角色名称">{{ detail?.roleName }}</el-descriptions-item>
-        <el-descriptions-item label="职责说明">{{ detail?.roleDesc || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="职责说明" :span="2">{{ detail?.roleDesc || '-' }}</el-descriptions-item>
         <el-descriptions-item label="账号数">{{ detail?.userCount ?? 0 }}</el-descriptions-item>
         <el-descriptions-item label="权限授权">{{
             detail ? `${detail.permCount} / ${detail.maxPermCount}` : ''
