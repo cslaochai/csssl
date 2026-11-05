@@ -21,6 +21,12 @@ public class CrlViewVO {
     private String companyUscc;
 
     /**
+     * 系统维度（证书主体 O；仅非 default 域输出）
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String systemName;
+
+    /**
      * 吊销记录列表
      */
     private List<CertVO> revoked;

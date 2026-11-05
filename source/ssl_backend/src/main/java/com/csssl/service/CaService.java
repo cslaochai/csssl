@@ -6,12 +6,14 @@ import com.csssl.config.CompanyVaultResolver;
 import com.csssl.util.UsccValidator;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CaCompany;
+import com.csssl.entity.CaSystem;
 import com.csssl.entity.KeyVaultEntry;
 import com.csssl.entity.SysUser;
 import com.csssl.entity.CompanyKeyShare;
 import com.csssl.enums.RoleCodeEnum;
 import com.csssl.enums.CompanyStatusEnum;
 import com.csssl.mapper.CaCertMapper;
+import com.csssl.mapper.CaSystemMapper;
 import com.csssl.mapper.CompanyMapper;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.mapper.CompanyKeyShareMapper;
@@ -102,6 +104,7 @@ public class CaService {
     private final CompanyMapper companyMapper;
     private final SysUserMapper sysUserMapper;
     private final CompanyKeyShareMapper keyShareMapper;
+    private final CaSystemMapper systemMapper;
 
     /**
      * 公司根CA状态池（computeIfAbsent 懒加载）。每公司一把 per-state 锁：
@@ -145,6 +148,60 @@ public class CaService {
 
     private Path subCaCertFile(String companyUscc) {
         return subCaDir(companyUscc).resolve("cert.pem");
+    }
+
+    /**
+     * 公司下全部系统名（按 id 升序）：优先取 ssl_ca_system 登记的系统；若该公司尚未登记任何系统，
+     * 则退化为仅含「公司主体 O」的单元素列表（保证至少一张 SUB_CA）；公司表也无 subject_o 时返回空列表。
+     */
+    private List<String> systemNamesOf(String companyUscc) {
+        List<CaSystem> systems = systemMapper.selectList(new LambdaQueryWrapper<CaSystem>()
+                .eq(CaSystem::getCompanyUscc, companyUscc)
+                .orderByAsc(CaSystem::getId));
+        List<String> names = systems.stream().map(CaSystem::getSystemName).toList();
+        if (!names.isEmpty()) {
+            return names;
+        }
+        CaCompany company = companyMapper.selectOne(new LambdaQueryWrapper<CaCompany>()
+                .eq(CaCompany::getUscc, companyUscc));
+        if (company != null && company.getSubjectO() != null && !company.getSubjectO().isBlank()) {
+            return List.of(company.getSubjectO());
+        }
+        return List.of();
+    }
+
+    /**
+     * 文件系统安全化：把路径分隔符与 Windows 禁用字符替换为 _，丢弃控制字符，避免拼路径出问题。
+     * 注意 filesystem 还要禁 ':'（与 CaSystemService.normalizeName 思路一致但更严格）。
+     */
+    private static String sanitize(String s) {
+        if (s == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(s.length());
+        for (char c : s.toCharArray()) {
+            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"'
+                    || c == '<' || c == '>' || c == '|' || Character.isISOControl(c)) {
+                if (Character.isISOControl(c)) {
+                    continue;
+                }
+                sb.append('_');
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 系统维度 SUB_CA 落盘目录：companyBaseDir/systems/{sanitize(systemName)}/subca
+     */
+    private Path subCaDir(String companyUscc, String systemName) {
+        return companyBaseDir(companyUscc).resolve("systems").resolve(sanitize(systemName)).resolve("subca");
+    }
+
+    private Path subCaCertFile(String companyUscc, String systemName) {
+        return subCaDir(companyUscc, systemName).resolve("cert.pem");
     }
 
     /**
@@ -559,7 +616,7 @@ public class CaService {
             if (root == null) {
                 throw new IllegalStateException("根CA未初始化，无法封存");
             }
-            doEnsureSubCa(companyUscc, ov, st);
+            ensureAllSubCas(companyUscc, ov, st);
             st.rootKeyCache = null;
             if (rootKeyFileExists(companyUscc)) {
                 sealRootKeyFile(companyUscc);
@@ -927,7 +984,7 @@ public class CaService {
             CaCert root = doFindRoot(companyUscc);
             if (root != null && (rootKeyFileExists(companyUscc) || doSharesExist(companyUscc))) {
                 // 幂等修复路径：首建中途失败会留下"有根无SUB_CA"的裸域，此处补建（已有有效SUB_CA即直接复用）
-                doEnsureSubCa(companyUscc, ov, st);
+                ensureAllSubCas(companyUscc, ov, st);
                 return doStatus(companyUscc, ov);
             }
             if (root != null) {
@@ -948,7 +1005,7 @@ public class CaService {
                 doClearShareFiles(companyUscc);
             }
             CaCert created = doGenerateRoot(companyUscc, ov);
-            doEnsureSubCa(companyUscc, ov, st);
+            ensureAllSubCas(companyUscc, ov, st);
             // 新根自动切换为 Shamir(3,5) 门限分持（删单点加密文件）
             doEnsureRootShares(companyUscc, ov, st);
             CaStatusVO vo = doStatus(companyUscc, ov);
@@ -970,7 +1027,8 @@ public class CaService {
                 sub.setRevokeReason(reason);
                 sub.setRevokedAt(LocalDateTime.now());
                 certMapper.updateById(sub);
-                purgeCaKeyFiles(subCaDir(companyUscc), ov, sub.getSerialHex());
+                Path subDir = sub.getSystemName() == null ? subCaDir(companyUscc) : subCaDir(companyUscc, sub.getSystemName());
+                purgeCaKeyFiles(subDir, ov, sub.getSerialHex());
             }
         }
     }
@@ -1021,29 +1079,36 @@ public class CaService {
         }
     }
 
-    /**
-     * 确保 SUB_CA 存在（兼容入口=default 公司）
-     */
-    public CaCert ensureSubCa() {
-        return ensureSubCa("default");
-    }
-
-    // ==================== SUB_CA（服务签发二级CA） ====================
+    // ==================== SUB_CA（服务签发二级CA，按 公司×系统 下沉） ====================
 
     /**
-     * 确保公司 SUB_CA 存在（幂等，新建/轮换专用）：仅限启动、封存窗口（sealRootKey/initRoot）
-     * 与每日预检 {@link #dailyPrecheck()} 调用；日常签发路径不再经过这里。
+     * 确保公司下全部系统 SUB_CA 存在（聚合，供 initRoot/根解封窗口调用）：逐个系统 doEnsureSubCa，返回最后一个。
      */
     public CaCert ensureSubCa(String companyUscc) {
         CompanyCaState st = stateOf(companyUscc);
         KeyVault ov = vaultFor(companyUscc);
         synchronized (st.lock) {
-            return doEnsureSubCa(companyUscc, ov, st);
+            CaCert last = null;
+            for (String name : systemNamesOf(companyUscc)) {
+                last = doEnsureSubCa(companyUscc, name, ov, st);
+            }
+            return last;
         }
     }
 
     /**
-     * 强制重建二级CA（高敏操作，须根私钥已通过份额解封置入内存缓存）：
+     * 确保指定公司指定系统 SUB_CA 存在（幂等，新建/轮换专用）。
+     */
+    public CaCert ensureSubCa(String companyUscc, String systemName) {
+        CompanyCaState st = stateOf(companyUscc);
+        KeyVault ov = vaultFor(companyUscc);
+        synchronized (st.lock) {
+            return doEnsureSubCa(companyUscc, systemName, ov, st);
+        }
+    }
+
+    /**
+     * 强制重建公司下全部系统 SUB_CA（高敏操作，须根私钥已通过份额解封置入内存缓存）：
      * 清除旧 SUB_CA 私钥使 {@link #doEnsureSubCa} 走重建分支（旧有效 SUB_CA 标记 EXPIRED），用根重新签发新 SUB_CA。
      * 调用前必须由 {@link #unsealRootKeyWithShares} 完成门槛解封（{@code rootKeyCache != null}）。
      */
@@ -1055,15 +1120,27 @@ public class CaService {
                 throw new IllegalStateException("根CA私钥未解封（内存无缓存），请先通过 ≥" + SHARE_THRESHOLD
                         + " 份份额解封根私钥后再重建二级CA");
             }
-            // 清除旧 SUB_CA 私钥，使 doEnsureSubCa 走重建分支（旧有效 SUB_CA 标记 EXPIRED）
-            ov.deleteDbEntry("subca", "key");
-            return doEnsureSubCa(companyUscc, ov, st);
+            CaCert last = null;
+            for (String name : systemNamesOf(companyUscc)) {
+                ov.deleteDbEntry("subca", name);
+                last = doEnsureSubCa(companyUscc, name, ov, st);
+            }
+            return last;
         }
     }
 
-    private CaCert doEnsureSubCa(String companyUscc, KeyVault ov, CompanyCaState st) {
-        CaCert sub = doFindValidSubCa(companyUscc);
-        if (sub != null && ov.keyExists("subca", "key")) {
+    /**
+     * 确保公司下全部系统 SUB_CA 存在（内部聚合，initRoot/封存窗口/份额解封后调用，替代旧 doEnsureSubCa(companyUscc, ov, st)）。
+     */
+    private void ensureAllSubCas(String companyUscc, KeyVault ov, CompanyCaState st) {
+        for (String name : systemNamesOf(companyUscc)) {
+            doEnsureSubCa(companyUscc, name, ov, st);
+        }
+    }
+
+    private CaCert doEnsureSubCa(String companyUscc, String systemName, KeyVault ov, CompanyCaState st) {
+        CaCert sub = doFindValidSubCa(companyUscc, systemName);
+        if (sub != null && ov.keyExists("subca", systemName)) {
             return sub;
         }
         // 根私钥离线（封存/门限分持未解封）时不允许新建/轮换 SUB_CA
@@ -1079,31 +1156,26 @@ public class CaService {
         // SUB_CA 算法跟随该公司根（RSA根→RSA SUB_CA，国密根→SM2 SUB_CA）
         String algorithm = doFindRoot(companyUscc).getAlgorithm();
         KeyPair subKey = CertUtil.generateKeyPair(algorithm);
-        X509Certificate subCert;
-        if (CaCompany.LEGACY_NAMESPACE.equals(companyUscc)) {
-            // default 域走旧 CN 入口（DN 含 O=CSSSL），存量证书逐字节兼容
-            subCert = CertUtil.issue(subKey, rootCert, rootKey,
-                    subProps.getCn(), TYPE_SUB_CA, subProps.getValidityDays(), null, null, null);
-        } else {
-            CaCompany company = requireCompany(companyUscc);
-            subCert = CertUtil.issue(CertUtil.subjectDn("CSSSL SubCA - " + company.getCompanyName(), company.getSubjectO()),
-                    subKey.getPublic(), rootCert, rootKey,
-                    TYPE_SUB_CA, subProps.getValidityDays(), null, null, null);
-        }
+        // 主体 O = systemName（每系统一张专属二级CA）；统一走此 subjectDn（已删除 legacy default 兼容分支）
+        X509Certificate subCert = CertUtil.issue(
+                CertUtil.subjectDn("CSSSL SubCA - " + systemName, systemName),
+                subKey.getPublic(), rootCert, rootKey,
+                TYPE_SUB_CA, subProps.getValidityDays(), null, null, null);
 
         String serial = subCert.getSerialNumber().toString(16);
         try {
-            Files.createDirectories(subCaDir(companyUscc));
-            Files.writeString(subCaCertFile(companyUscc), PemUtil.certToPem(subCert), StandardCharsets.UTF_8);
+            Files.createDirectories(subCaDir(companyUscc, systemName));
+            Files.writeString(subCaCertFile(companyUscc, systemName), PemUtil.certToPem(subCert), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new IllegalStateException("SUB_CA落盘失败: " + e.getMessage(), e);
         }
-        ov.storeKey("subca", "key", PemUtil.keyToPem(subKey.getPrivate()));
+        ov.storeKey("subca", systemName, PemUtil.keyToPem(subKey.getPrivate()));
 
-        // 该公司旧 SUB_CA 标记 EXPIRED（由新 SUB_CA 接管在线签发）
+        // 本系统旧 SUB_CA 标记 EXPIRED（由新 SUB_CA 接管在线签发）
         List<CaCert> oldSubs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA)
                 .eq(CaCert::getCompanyUscc, companyUscc)
+                .eq(CaCert::getSystemName, systemName)
                 .eq(CaCert::getStatus, "VALID"));
         for (CaCert old : oldSubs) {
             if (!old.getSerialHex().equalsIgnoreCase(serial)) {
@@ -1114,6 +1186,7 @@ public class CaService {
 
         CaCert row = new CaCert();
         row.setCompanyUscc(companyUscc);
+        row.setSystemName(systemName);
         row.setSerialHex(serial);
         row.setSubjectCn(CertUtil.subjectCn(subCert));
         row.setCertType(TYPE_SUB_CA);
@@ -1127,30 +1200,24 @@ public class CaService {
         row.setDescription("服务签发二级CA（根签发，承担在线签发/CRL/OCSP）");
         row.setCreatedAt(LocalDateTime.now());
         certMapper.insert(row);
-        log.info("[SUB_CA][{}] 已用根签发二级CA：cn={}, algorithm={}, serial={}, 有效期{}天",
-                companyUscc, row.getSubjectCn(), algorithm, serial, subProps.getValidityDays());
+        log.info("[SUB_CA][{}][{}] 已用根签发二级CA：cn={}, algorithm={}, serial={}, 有效期{}天",
+                companyUscc, systemName, row.getSubjectCn(), algorithm, serial, subProps.getValidityDays());
         return row;
     }
 
     /**
-     * 查询当前有效 SUB_CA（兼容入口=default 公司）
+     * 查询指定公司指定系统当前有效 SUB_CA（未过期且距到期 > renewBeforeDays）
      */
-    public CaCert findValidSubCa() {
-        return findValidSubCa("default");
-    }
-
-    /**
-     * 查询公司当前有效 SUB_CA（未过期且距到期 > renewBeforeDays）
-     */
-    public CaCert findValidSubCa(String companyUscc) {
+    public CaCert findValidSubCa(String companyUscc, String systemName) {
         UsccValidator.checkCompanyUscc(companyUscc);
-        return doFindValidSubCa(companyUscc);
+        return doFindValidSubCa(companyUscc, systemName);
     }
 
-    private CaCert doFindValidSubCa(String companyUscc) {
+    private CaCert doFindValidSubCa(String companyUscc, String systemName) {
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA)
                 .eq(CaCert::getCompanyUscc, companyUscc)
+                .eq(CaCert::getSystemName, systemName)
                 .eq(CaCert::getStatus, "VALID")
                 .orderByDesc(CaCert::getCreatedAt));
         if (subs.isEmpty()) {
@@ -1167,120 +1234,116 @@ public class CaService {
     }
 
     /**
-     * 每日到期预检（定时任务，与签发路径解耦）：遍历 default + 全部 ACTIVE 公司逐一预检；
-     * 存量单根环境（仅有 default）行为与路线 B 完全一致。
+     * 每日到期预检（定时任务）：遍历全部 ACTIVE 公司（含 default）逐一展开其下所有系统预检；
+     * 缺失/进入 renewBeforeDays 续期窗口且根私钥可用时轮换，根离线只告警。
      */
     @Scheduled(cron = "${csssl.subca-precheck-cron:0 30 3 * * ?}")
     public void dailyPrecheck() {
-        List<String> keys = new ArrayList<>();
-        keys.add("default");
+        List<String> companies = new ArrayList<>();
+        companies.add("default");
         try {
-            List<CaCompany> companies = companyMapper.selectList(new LambdaQueryWrapper<CaCompany>()
+            List<CaCompany> active = companyMapper.selectList(new LambdaQueryWrapper<CaCompany>()
                     .eq(CaCompany::getStatus, CompanyStatusEnum.ACTIVE.getCode())
                     .ne(CaCompany::getUscc, "default"));
-            for (CaCompany company : companies) {
-                keys.add(company.getUscc());
+            for (CaCompany company : active) {
+                companies.add(company.getUscc());
             }
         } catch (Exception e) {
             log.warn("[SUB_CA] 公司清单读取失败，本轮仅预检 default 域: {}", e.getMessage());
         }
-        for (String key : keys) {
-            try {
-                dailyPrecheck(key);
-            } catch (Exception e) {
-                log.warn("[SUB_CA][{}] 到期预检异常: {}", key, e.getMessage());
+        for (String companyUscc : companies) {
+            for (String systemName : systemNamesOf(companyUscc)) {
+                try {
+                    dailyPrecheck(companyUscc, systemName);
+                } catch (Exception e) {
+                    log.warn("[SUB_CA][{}][{}] 到期预检异常: {}", companyUscc, systemName, e.getMessage());
+                }
             }
         }
     }
 
     /**
-     * 公司 SUB_CA 到期预检：缺失/进入 renewBeforeDays 续期窗口且根私钥可用（在线或份额已解封）时轮换；
+     * 公司指定系统 SUB_CA 到期预检：缺失/进入 renewBeforeDays 续期窗口且根私钥可用（在线或份额已解封）时轮换；
      * 根封存期间只告警，绝不隐式触发需根私钥的操作。
      */
-    public void dailyPrecheck(String companyUscc) {
+    public void dailyPrecheck(String companyUscc, String systemName) {
         CompanyCaState st = stateOf(companyUscc);
         KeyVault ov = vaultFor(companyUscc);
         synchronized (st.lock) {
             try {
-                if (doFindValidSubCa(companyUscc) != null && ov.keyExists("subca", "key")) {
+                if (doFindValidSubCa(companyUscc, systemName) != null && ov.keyExists("subca", systemName)) {
                     return;
                 }
                 String rkState = doRootKeyState(companyUscc, ov);
                 boolean rootUsable = ROOT_KEY_ONLINE.equals(rkState)
                         || (ROOT_KEY_SHARES.equals(rkState) && st.rootKeyCache != null);
                 if (!rootUsable) {
-                    log.warn("[SUB_CA][{}] 预检发现 SUB_CA 缺失/临近到期，但根私钥离线（{}），请在根解封窗口轮换", companyUscc, rkState);
+                    log.warn("[SUB_CA][{}][{}] 预检发现 SUB_CA 缺失/临近到期，但根私钥离线（{}），请在根解封窗口轮换", companyUscc, systemName, rkState);
                     return;
                 }
-                doEnsureSubCa(companyUscc, ov, st);
-                log.info("[SUB_CA][{}] 到期预检完成轮换", companyUscc);
+                doEnsureSubCa(companyUscc, systemName, ov, st);
+                log.info("[SUB_CA][{}][{}] 到期预检完成轮换", companyUscc, systemName);
             } catch (Exception e) {
-                log.warn("[SUB_CA][{}] 到期预检失败: {}", companyUscc, e.getMessage());
+                log.warn("[SUB_CA][{}][{}] 到期预检失败: {}", companyUscc, systemName, e.getMessage());
             }
         }
     }
 
     /**
-     * 当前签发CA（兼容入口=default 公司）
+     * 公司指定系统当前签发CA（SUB_CA）证书：只取现有有效 SUB_CA，不触发轮换（轮换见 {@link #dailyPrecheck(String, String)}）
      */
-    public X509Certificate signingCert() {
-        return signingCert("default");
+    public X509Certificate signingCert(String companyUscc, String systemName) {
+        return PemUtil.parseCert(doRequireValidSubCa(companyUscc, systemName).getCertPem());
     }
 
-    /**
-     * 公司当前签发CA（SUB_CA）证书：只取现有有效 SUB_CA，不触发轮换（轮换见 {@link #dailyPrecheck(String)}）
-     */
-    public X509Certificate signingCert(String companyUscc) {
-        return PemUtil.parseCert(doRequireValidSubCa(companyUscc).getCertPem());
-    }
-
-    public PrivateKey signingKey() {
-        return signingKey("default");
-    }
-
-    public PrivateKey signingKey(String companyUscc) {
-        doRequireValidSubCa(companyUscc);
-        String keyPem = vaultFor(companyUscc).loadKey("subca", "key");
+    public PrivateKey signingKey(String companyUscc, String systemName) {
+        CaCert sub = doRequireValidSubCa(companyUscc, systemName);
+        String keyPem = vaultFor(companyUscc).loadKey("subca", systemName);
         if (keyPem == null) {
             throw new IllegalStateException("SUB_CA私钥缺失，请在根解封窗口轮换");
         }
         return PemUtil.parsePrivateKey(keyPem);
     }
 
-    private CaCert doRequireValidSubCa(String companyUscc) {
+    private CaCert doRequireValidSubCa(String companyUscc, String systemName) {
         UsccValidator.checkCompanyUscc(companyUscc);
-        CaCert sub = doFindValidSubCa(companyUscc);
+        CaCert sub = doFindValidSubCa(companyUscc, systemName);
         if (sub == null) {
             // 区分两种成因便于运维定位：域内从未建成 SUB_CA（裸根）vs 建成但已过期/被吊销
-            throw new IllegalStateException(doCurrentSubCa(companyUscc) == null
-                    ? "SUB_CA缺失（公司域未初始化完成），请重新调用公司初始化补建"
+            throw new IllegalStateException(doCurrentSubCa(companyUscc, systemName) == null
+                    ? "SUB_CA缺失（公司域/系统未初始化完成），请重新调用公司初始化补建"
                     : "SUB_CA已过期，请在根解封窗口轮换");
         }
         return sub;
     }
 
     /**
-     * 当前有效 SUB_CA 记录（兼容入口=default 公司）
+     * 公司指定系统当前有效 SUB_CA 记录（供链组装/OCSP 使用；无则返回该公司该系统最近一张；均无则 null）
      */
-    public CaCert currentSubCa() {
-        return currentSubCa("default");
-    }
-
-    /**
-     * 公司当前有效 SUB_CA 记录（供链组装/OCSP 使用；无则返回该公司最近一张；均无则 null）
-     */
-    public CaCert currentSubCa(String companyUscc) {
+    public CaCert currentSubCa(String companyUscc, String systemName) {
         UsccValidator.checkCompanyUscc(companyUscc);
-        return doCurrentSubCa(companyUscc);
+        return doCurrentSubCa(companyUscc, systemName);
     }
 
-    private CaCert doCurrentSubCa(String companyUscc) {
-        CaCert sub = doFindValidSubCa(companyUscc);
+    private CaCert doCurrentSubCa(String companyUscc, String systemName) {
+        CaCert sub = doFindValidSubCa(companyUscc, systemName);
         return sub != null ? sub : certMapper.selectOne(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, TYPE_SUB_CA)
                 .eq(CaCert::getCompanyUscc, companyUscc)
+                .eq(CaCert::getSystemName, systemName)
                 .orderByDesc(CaCert::getCreatedAt)
                 .last("limit 1"));
+    }
+
+    /**
+     * 公司首个系统的当前 SUB_CA（公司级状态汇总/导出用；无系统可回落时返回 null）
+     */
+    private CaCert firstSubCa(String companyUscc) {
+        List<String> names = systemNamesOf(companyUscc);
+        if (names.isEmpty()) {
+            return null;
+        }
+        return doCurrentSubCa(companyUscc, names.get(0));
     }
 
     /**
@@ -1325,7 +1388,7 @@ public class CaService {
         } else {
             vo.setInitialized(true);
         }
-        CaCert sub = doCurrentSubCa(companyUscc);
+        CaCert sub = firstSubCa(companyUscc);
         if (sub != null) {
             CaStatusVO.SubCaStatus subVo = new CaStatusVO.SubCaStatus();
             subVo.setCn(sub.getSubjectCn());
@@ -1366,10 +1429,10 @@ public class CaService {
     }
 
     /**
-     * 公司当前 SUB_CA 证书 PEM（中间CA链配置用）
+     * 公司当前 SUB_CA 证书 PEM（中间CA链配置用；公司下多系统时返回首个系统 SUB_CA）
      */
     public String exportSubCaPem(String companyUscc) {
-        CaCert sub = currentSubCa(companyUscc);
+        CaCert sub = firstSubCa(companyUscc);
         if (sub == null) {
             throw new IllegalStateException("SUB_CA未签发");
         }

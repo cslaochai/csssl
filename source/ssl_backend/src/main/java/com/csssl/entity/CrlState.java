@@ -36,6 +36,11 @@ public class CrlState extends AuditColumns {
     private String companyUscc;
 
     /**
+     * 所属系统（每 (公司, 系统) 一行 CRL 发布状态；ROOT 域/公司级不归属具体系统时可为 NULL）
+     */
+    private String systemName;
+
+    /**
      * 当前全量 CRL 编号（单调递增，仅内容变化/到期续发时递增）
      */
     private Long crlNumber;

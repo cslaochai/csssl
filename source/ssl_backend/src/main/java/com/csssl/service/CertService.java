@@ -13,6 +13,7 @@ import com.csssl.mapper.CaCertMapper;
 import com.csssl.mapper.CompanyMapper;
 import com.csssl.mapper.CertTemplateMapper;
 import com.csssl.mapper.SysUserMapper;
+import com.csssl.service.CaSystemService;
 import com.csssl.util.CertUtil;
 import com.csssl.util.PemUtil;
 import com.csssl.vo.CertOverviewVO;
@@ -68,6 +69,7 @@ public class CertService {
     private final CompanyMapper companyMapper;
     private final SysUserMapper userMapper;
     private final CaService caService;
+    private final CaSystemService caSystemService;
     private final CompanyService companyService;
     private final CssslProperties props;
     private final AuditService auditService;
@@ -201,7 +203,7 @@ public class CertService {
      * policy 非空时按批准快照执行，保证审核内容与签出内容一致；
      * 在线生成密钥对的直签与 CSR 直签端点已连同 cert:issue 权限点一并删除。</p>
      */
-    public CertVO issueWithPublicKey(String companyUscc, PublicKeyIssueDTO req, IssuePolicy policy,
+    public CertVO issueWithPublicKey(String companyUscc, String systemName, PublicKeyIssueDTO req, IssuePolicy policy,
                                      LoginUser actor, String ip) {
         String dn = req.getSubjectDn() == null ? "" : req.getSubjectDn().trim();
         if (dn.isEmpty()) {
@@ -226,14 +228,14 @@ public class CertService {
         String extKeyUsage = policy != null ? policy.extKeyUsage() : (tpl != null ? tpl.getExtKeyUsage() : null);
         String policyOid = policy != null ? policy.policyOid() : (tpl != null ? tpl.getPolicyOid() : null);
 
-        X509Certificate caCert = caService.signingCert(companyUscc);
-        PrivateKey caKey = caService.signingKey(companyUscc);
+        X509Certificate caCert = caService.signingCert(companyUscc, systemName);
+        PrivateKey caKey = caService.signingKey(companyUscc, systemName);
         // SAN 透传：申请单/请求里带的 SAN 必须写进证书，此前模板分支写死 null 属丢弃申请内容
         X509Certificate cert = policy != null || tpl != null
                 ? CertUtil.issuePublicKeyByTemplate(dn, req.getPublicKeyPem(), caCert, caKey,
-                type, days, req.getSan(), crlUrl(companyUscc), ocspUrl(companyUscc), keyUsage, extKeyUsage, policyOid)
+                type, days, req.getSan(), crlUrl(companyUscc, systemName), ocspUrl(companyUscc, systemName), keyUsage, extKeyUsage, policyOid)
                 : CertUtil.issuePublicKey(dn, req.getPublicKeyPem(), caCert, caKey,
-                type, days, req.getSan(), crlUrl(companyUscc), ocspUrl(companyUscc));
+                type, days, req.getSan(), crlUrl(companyUscc, systemName), ocspUrl(companyUscc, systemName));
         checkSubjectCompany(cert, company, type);
 
         String serial = cert.getSerialNumber().toString(16);
@@ -243,7 +245,7 @@ public class CertService {
         String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
 
-        CaCert row = buildRow(companyUscc, serial, cn, type, algorithm, caCert, cert, req.getSan(),
+        CaCert row = buildRow(companyUscc, systemName, serial, cn, type, algorithm, caCert, cert, req.getSan(),
                 req.getDescription(), policy != null ? req.getTemplateId() : (tpl == null ? null : tpl.getId()));
         certMapper.insert(row);
         auditService.record(actor, "CERT_PUBKEY_ISSUE", String.valueOf(row.getId()),
@@ -331,18 +333,19 @@ public class CertService {
         CertTemplate tpl = old.getTemplateId() == null ? null : templateMapper.selectById(old.getTemplateId());
 
         String domain = companyOf(old);
-        X509Certificate caCert = caService.signingCert(domain);
-        PrivateKey caKey = caService.signingKey(domain);
+        String system = old.getSystemName() != null ? old.getSystemName() : caSystemService.firstSystemName(domain);
+        X509Certificate caCert = caService.signingCert(domain, system);
+        PrivateKey caKey = caService.signingKey(domain, system);
         X509Certificate cert = tpl != null
                 ? CertUtil.issueByTemplate(
                 new X500Name(oldCert.getSubjectX500Principal().getName()),
                 oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
-                old.getSan(), crlUrl(domain), ocspUrl(domain),
+                old.getSan(), crlUrl(domain, system), ocspUrl(domain, system),
                 tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
                 : CertUtil.issue(
                 new X500Name(oldCert.getSubjectX500Principal().getName()),
                 oldCert.getPublicKey(), caCert, caKey, old.getCertType(), days,
-                old.getSan(), crlUrl(domain), ocspUrl(domain));
+                old.getSan(), crlUrl(domain, system), ocspUrl(domain, system));
         checkSubjectCompany(cert, company, old.getCertType());
 
         markRevoked(old, "SUPERSEDED");
@@ -353,7 +356,7 @@ public class CertService {
         persistFiles(domain, serial, oldKeyPem, PemUtil.certToPem(cert));
         String algorithm = "EC".equals(cert.getPublicKey().getAlgorithm())
                 ? CertUtil.ALG_SM2 : CertUtil.ALG_RSA2048;
-        CaCert row = buildRow(domain, serial, old.getSubjectCn(), old.getCertType(), algorithm,
+        CaCert row = buildRow(domain, system, serial, old.getSubjectCn(), old.getCertType(), algorithm,
                 caCert, cert, old.getSan(), old.getDescription(), tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(actor, "CERT_RENEW", String.valueOf(row.getId()),
@@ -377,6 +380,7 @@ public class CertService {
             throw new IllegalArgumentException("仅有效/挂起状态的证书可以重签（当前状态：" + old.getStatus() + "）");
         }
         String domain = companyOf(old);
+        String system = old.getSystemName() != null ? old.getSystemName() : caSystemService.firstSystemName(domain);
         if (!caService.issuedKeyExists(domain, old.getSerialHex())) {
             throw new IllegalArgumentException("该证书私钥由申请方自持（CSR/公钥签发），CA 侧无法重签，请申请方重新走 RA 申请");
         }
@@ -387,24 +391,24 @@ public class CertService {
         String algorithm = old.getAlgorithm();
 
         KeyPair kp = CertUtil.generateKeyPair(algorithm);
-        X509Certificate caCert = caService.signingCert(domain);
-        PrivateKey caKey = caService.signingKey(domain);
+        X509Certificate caCert = caService.signingCert(domain, system);
+        PrivateKey caKey = caService.signingKey(domain, system);
         X509Certificate cert = tpl != null
                 ? CertUtil.issueByTemplate(
                 new X500Name(oldCert.getSubjectX500Principal().getName()),
                 kp.getPublic(), caCert, caKey, old.getCertType(), days,
-                old.getSan(), crlUrl(domain), ocspUrl(domain),
+                old.getSan(), crlUrl(domain, system), ocspUrl(domain, system),
                 tpl.getKeyUsage(), tpl.getExtKeyUsage(), tpl.getPolicyOid())
                 : CertUtil.issue(
                 new X500Name(oldCert.getSubjectX500Principal().getName()),
                 kp.getPublic(), caCert, caKey, old.getCertType(), days,
-                old.getSan(), crlUrl(domain), ocspUrl(domain));
+                old.getSan(), crlUrl(domain, system), ocspUrl(domain, system));
         checkSubjectCompany(cert, company, old.getCertType());
 
         markRevoked(old, "SUPERSEDED");
         String serial = cert.getSerialNumber().toString(16);
         persistFiles(domain, serial, PemUtil.keyToPem(kp.getPrivate()), PemUtil.certToPem(cert));
-        CaCert row = buildRow(domain, serial, old.getSubjectCn(), old.getCertType(), algorithm,
+        CaCert row = buildRow(domain, system, serial, old.getSubjectCn(), old.getCertType(), algorithm,
                 caCert, cert, old.getSan(), old.getDescription(), tpl == null ? null : tpl.getId());
         certMapper.insert(row);
         auditService.record(actor, "CERT_REKEY", String.valueOf(row.getId()),
@@ -510,19 +514,27 @@ public class CertService {
     }
 
     /**
-     * 匹配叶子证书的签发 SUB_CA（限同公司域按 issuer 精确匹配，找不到时退回该公司当前 SUB_CA）
+     * 匹配叶子证书的签发 SUB_CA：优先按证书行自带的 systemName 定位到具体系统的 SUB_CA；
+     * systemName 为空（存量/兼容）时按 issuerCn 同公司域精确匹配，找不到退回该公司首个系统的当前 SUB_CA。
      */
     private CaCert matchingSubCa(CaCert leaf) {
         String companyUscc = companyOf(leaf);
+        String systemName = leaf.getSystemName();
+        if (systemName != null && !systemName.isBlank()) {
+            return caService.currentSubCa(companyUscc, systemName);
+        }
         if (leaf.getIssuerCn() == null || leaf.getIssuerCn().isBlank()) {
-            return caService.currentSubCa(companyUscc);
+            return caService.currentSubCa(companyUscc, caSystemService.firstSystemName(companyUscc));
         }
         List<CaCert> subs = certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCertType, "SUB_CA")
                 .eq(CaCert::getCompanyUscc, companyUscc)
                 .eq(CaCert::getSubjectCn, leaf.getIssuerCn())
                 .orderByDesc(CaCert::getCreatedAt));
-        return subs.isEmpty() ? caService.currentSubCa(companyUscc) : subs.get(0);
+        if (!subs.isEmpty()) {
+            return subs.get(0);
+        }
+        return caService.currentSubCa(companyUscc, caSystemService.firstSystemName(companyUscc));
     }
 
     /**
@@ -666,26 +678,23 @@ public class CertService {
      * CRL 分发点 URL（写入证书 CDP 扩展）：default 沿用现有公开端点（存量证书扩展语义兼容），
      * 非 default 指向公司域端点 /ssl/ca/public/{companyUscc}/crl。
      */
-    private String crlUrl(String companyUscc) {
-        return CaCompany.LEGACY_NAMESPACE.equals(companyUscc)
-                ? props.getPublicBaseUrl() + "/ca/public/crl"
-                : props.getPublicBaseUrl() + "/ca/public/" + companyUscc + "/crl";
+    private String crlUrl(String companyUscc, String systemName) {
+        return props.getPublicBaseUrl() + "/ca/public/" + companyUscc + "/" + systemName + "/crl";
     }
 
     /**
-     * OCSP 访问点 URL（写入证书 AIA 扩展）：default 现有端点不变，非 default 为 /ssl/ca/public/{companyUscc}/ocsp
+     * OCSP 访问点 URL（写入证书 AIA 扩展）：按公司+系统维度指向 /ca/public/{companyUscc}/{systemName}/ocsp
      */
-    private String ocspUrl(String companyUscc) {
-        return CaCompany.LEGACY_NAMESPACE.equals(companyUscc)
-                ? props.getPublicBaseUrl() + "/ca/public/ocsp"
-                : props.getPublicBaseUrl() + "/ca/public/" + companyUscc + "/ocsp";
+    private String ocspUrl(String companyUscc, String systemName) {
+        return props.getPublicBaseUrl() + "/ca/public/" + companyUscc + "/" + systemName + "/ocsp";
     }
 
-    private CaCert buildRow(String companyUscc, String serial, String cn, String type, String algorithm,
+    private CaCert buildRow(String companyUscc, String systemName, String serial, String cn, String type, String algorithm,
                             X509Certificate caCert, X509Certificate cert, String san,
                             String description, Long templateId) {
         CaCert row = new CaCert();
         row.setCompanyUscc(companyUscc);
+        row.setSystemName(systemName);
         row.setSerialHex(serial);
         row.setSubjectCn(cn);
         row.setCertType(type);

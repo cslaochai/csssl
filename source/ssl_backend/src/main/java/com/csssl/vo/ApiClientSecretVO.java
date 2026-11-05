@@ -13,6 +13,7 @@ public class ApiClientSecretVO {
     private String companyUscc;
     private String companyName;
     private String clientName;
+    private String systemName;
     private String secret;
     private Integer secretVersion;
 }

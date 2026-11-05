@@ -328,6 +328,26 @@ SET @s15 = IF(@c15k > 0,
     IF(@c15u = 0, 'ALTER TABLE ssl_crl_state ADD COLUMN company_uscc VARCHAR(32) NOT NULL DEFAULT ''default'' COMMENT ''所属公司（统一社会信用代码；每公司独立CRL发布状态行）''', 'SELECT 1'));
 PREPARE s15 FROM @s15; EXECUTE s15; DEALLOCATE PREPARE s15;
 
+-- =============================================================================
+-- 路线A下沉二期（S2）：证书 / 申请 / CRL 状态下沉到「系统」维度
+-- system_name = 证书主体 O（公司下每系统一张专属二级CA）；列可空，存量行由
+-- migrate-s2-system-ca.sql 回填到公司首个系统名；新签发/发布路径必填。
+-- =============================================================================
+SET @c_s1 = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND column_name = 'system_name');
+SET @s_s1 = IF(@c_s1 = 0, 'ALTER TABLE ssl_ca_cert ADD COLUMN system_name VARCHAR(128) NULL COMMENT ''系统维度（证书主体O）；ROOT行为NULL，SUB_CA与签发证书填所属系统'' AFTER company_uscc', 'SELECT 1');
+PREPARE s_s1 FROM @s_s1; EXECUTE s_s1; DEALLOCATE PREPARE s_s1;
+
+SET @c_s2 = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_cert_application' AND column_name = 'system_name');
+SET @s_s2 = IF(@c_s2 = 0, 'ALTER TABLE ssl_cert_application ADD COLUMN system_name VARCHAR(128) NULL COMMENT ''系统维度（证书主体O）；缺省回落公司首个系统'' AFTER company_uscc', 'SELECT 1');
+PREPARE s_s2 FROM @s_s2; EXECUTE s_s2; DEALLOCATE PREPARE s_s2;
+
+SET @c_s3 = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND column_name = 'system_name');
+SET @s_s3 = IF(@c_s3 = 0, 'ALTER TABLE ssl_crl_state ADD COLUMN system_name VARCHAR(128) NULL COMMENT ''系统维度（证书主体O）；CRL 按(company_uscc,system_name)独立发布'' AFTER company_uscc', 'SELECT 1');
+PREPARE s_s3 FROM @s_s3; EXECUTE s_s3; DEALLOCATE PREPARE s_s3;
+
 -- 平台级保险库（TSA/审计签名/接入密钥）用 NULL 表示不归属任何公司
 SET @c15a = (SELECT COUNT(*) FROM information_schema.columns
              WHERE table_schema = DATABASE() AND table_name = 'ssl_key_vault' AND column_name = 'company_key');
@@ -344,6 +364,17 @@ SET @c15c = (SELECT COUNT(*) FROM information_schema.columns
 SET @s15c = IF(@c15c > 0, 'ALTER TABLE ssl_api_client CHANGE COLUMN company_key company_uscc VARCHAR(32) NOT NULL COMMENT ''绑定公司（统一社会信用代码）：请求公司域由此反查，不信任调用方''', 'SELECT 1');
 PREPARE s15c FROM @s15c; EXECUTE s15c; DEALLOCATE PREPARE s15c;
 
+-- ssl_api_client 增加「系统层」字段（公司下多系统，各自一套共享密钥）
+SET @c15d = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_api_client' AND column_name = 'system_code');
+SET @s15d = IF(@c15d = 0, 'ALTER TABLE ssl_api_client ADD COLUMN system_code VARCHAR(64) NULL COMMENT ''系统编码（公司下唯一，如 HIS_CORE/PACS/LIS）''', 'SELECT 1');
+PREPARE s15d FROM @s15d; EXECUTE s15d; DEALLOCATE PREPARE s15d;
+
+SET @c15e = (SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'ssl_api_client' AND column_name = 'system_name');
+SET @s15e = IF(@c15e = 0, 'ALTER TABLE ssl_api_client ADD COLUMN system_name VARCHAR(128) NULL COMMENT ''系统中文名（如 HIS 生产核心 / 影像系统）''', 'SELECT 1');
+PREPARE s15e FROM @s15e; EXECUTE s15e; DEALLOCATE PREPARE s15e;
+
 -- 幂等加索引：证书按公司过滤（公司化查询主路径）、审计按公司+时间检索
 SET @c16 = (SELECT COUNT(*) FROM information_schema.statistics
             WHERE table_schema = DATABASE() AND table_name = 'ssl_ca_cert' AND index_name = 'idx_company');
@@ -355,10 +386,11 @@ SET @c17 = (SELECT COUNT(*) FROM information_schema.statistics
 SET @s17 = IF(@c17 = 0, 'ALTER TABLE ssl_audit_log ADD KEY idx_company_time (company_uscc, created_at)', 'SELECT 1');
 PREPARE s17 FROM @s17; EXECUTE s17; DEALLOCATE PREPARE s17;
 
--- CRL 发布状态每公司一行：company_uscc 唯一（并发首建靠唯一索引闭环，代码侧 DuplicateKey 重试兜底）
+-- CRL 发布状态按 (公司,系统) 一行：唯一键闭环并发首建，代码侧 DuplicateKey 重试兜底。
+-- 历史库可能残留旧 uk_crl_state_company(company_uscc)，由 migrate-s2-system-ca.sql 删除并补建本键。
 SET @c18 = (SELECT COUNT(*) FROM information_schema.statistics
-            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND index_name = 'uk_crl_state_company');
-SET @s18 = IF(@c18 = 0, 'ALTER TABLE ssl_crl_state ADD UNIQUE KEY uk_crl_state_company (company_uscc)', 'SELECT 1');
+            WHERE table_schema = DATABASE() AND table_name = 'ssl_crl_state' AND index_name = 'uk_crl_state_company_system');
+SET @s18 = IF(@c18 = 0, 'ALTER TABLE ssl_crl_state ADD UNIQUE KEY uk_crl_state_company_system (company_uscc, system_name)', 'SELECT 1');
 PREPARE s18 FROM @s18; EXECUTE s18; DEALLOCATE PREPARE s18;
 
 -- 公司域内按序列号检索（OCSP/verify 域内命中）
@@ -483,6 +515,8 @@ CREATE TABLE IF NOT EXISTS ssl_api_client (
     app_id             VARCHAR(64)  NOT NULL COMMENT '随机客户端标识（app_+32位十六进制）',
     company_uscc         VARCHAR(32)  NOT NULL COMMENT '绑定公司：请求公司域由此反查，不信任调用方',
     client_name        VARCHAR(64)  NOT NULL COMMENT '客户端名称（审计展示，如 HIS生产前置）',
+    system_code        VARCHAR(64)  NULL COMMENT '【已废弃】系统编码；系统统一以 system_name（主体O）为业务键，保留列仅为兼容存量数据',
+    system_name        VARCHAR(128) NULL COMMENT '系统名称（= 证书主体 O；公司内唯一，关联 ssl_ca_system.system_name）',
     ip_allowlist       VARCHAR(500) NULL COMMENT '逗号分隔 IP/CIDR（IPv4 CIDR；空=不限来源）',
     client_cert_sha256 VARCHAR(128) NULL COMMENT 'mTLS 客户端证书 SHA-256 指纹（空=不校验）',
     secret_version     INT          NOT NULL DEFAULT 1 COMMENT 'secret 版本（轮换+1，旧 secret 立即失效）',
@@ -499,6 +533,22 @@ CREATE TABLE IF NOT EXISTS ssl_api_client (
     UNIQUE KEY uk_app_id (app_id),
     KEY idx_client_company (company_uscc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='外部系统 API 客户端（HIS 等；公司绑定+随机凭证）';
+
+-- 公司下的「系统」：真正的证书域单元。系统名称即证书主体 O，公司内唯一；
+-- 每个系统对应一张专属二级 CA、一套接入凭证与独立的 CRL/吊销域。根 CA 归公司，不归系统。
+CREATE TABLE IF NOT EXISTS ssl_ca_system (
+    id                 BIGINT       NOT NULL AUTO_INCREMENT,
+    company_uscc       VARCHAR(32)  NOT NULL COMMENT '所属公司（统一社会信用代码）',
+    system_name        VARCHAR(128) NOT NULL COMMENT '系统名称（= 证书主体 O；公司内唯一，禁止路径分隔符）',
+    status             TINYINT      NOT NULL DEFAULT 1 COMMENT '1-启用 0-停用',
+    description        VARCHAR(500) NULL COMMENT '说明',
+    created_by_user_id BIGINT       NULL COMMENT '创建人ID',
+    created_by_name    VARCHAR(64)  NULL COMMENT '创建人真实姓名（写入时快照）',
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_system_company_name (company_uscc, system_name),
+    KEY idx_system_company (company_uscc)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公司下的系统（证书域单元，每系统一张专属二级CA）';
 
 -- 幂等补列：申请单外部对接字段（幂等键/对账/来源渠道）
 SET @c_ext1 := (SELECT COUNT(*) FROM information_schema.COLUMNS

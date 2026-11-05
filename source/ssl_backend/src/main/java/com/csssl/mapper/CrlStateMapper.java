@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.csssl.entity.CaCompany;
 import com.csssl.entity.CrlState;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * CRL 发布状态行（路线A：每公司一行，company_uscc 逻辑唯一）。
@@ -32,11 +33,35 @@ public interface CrlStateMapper extends BaseMapper<CrlState> {
     }
 
     /**
+     * 行锁读取指定 (公司, 系统) 发布状态行（须在事务内调用才有意义）
+     */
+    default CrlState selectForUpdate(@Param("companyUscc") String companyUscc,
+                                     @Param("systemName") String systemName) {
+        return selectOne(new LambdaQueryWrapper<CrlState>()
+                .eq(CrlState::getCompanyUscc, companyUscc)
+                .eq(CrlState::getSystemName, systemName)
+                .orderByDesc(CrlState::getId)
+                .last("LIMIT 1 FOR UPDATE"));
+    }
+
+    /**
      * 读取指定公司发布状态行（只读，不加锁；无行返回 null）
      */
     default CrlState selectByCompany(String companyUscc) {
         return selectOne(new LambdaQueryWrapper<CrlState>()
                 .eq(CrlState::getCompanyUscc, companyUscc)
+                .orderByDesc(CrlState::getId)
+                .last("LIMIT 1"));
+    }
+
+    /**
+     * 读取指定 (公司, 系统) 发布状态行（只读，不加锁；无行返回 null）
+     */
+    default CrlState selectByCompanyAndSystem(@Param("companyUscc") String companyUscc,
+                                              @Param("systemName") String systemName) {
+        return selectOne(new LambdaQueryWrapper<CrlState>()
+                .eq(CrlState::getCompanyUscc, companyUscc)
+                .eq(CrlState::getSystemName, systemName)
                 .orderByDesc(CrlState::getId)
                 .last("LIMIT 1"));
     }

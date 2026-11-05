@@ -100,6 +100,17 @@ import java.util.Locale;
      * 校验（公司域版）：沿该公司 根CA ← SUB_CA ← 叶子 链验证
      */
     public VerifyResultVO verify(VerifyQueryDTO req, String companyUscc) {
+        return verify(req, companyUscc, null);
+    }
+
+    /**
+     * 校验（公司域 + 系统域版）：沿该公司 根CA ← SUB_CA ← 叶子 链验证。
+     *
+     * <p>{@code systemName} 为公开端点 URL 上声明的期望系统（一公司一棵根 → 每系统一张专属二级 CA）。
+     * 系统归属以「证书实际由哪张 SUB_CA 签发」为准：SUB_CA 主体 O = 系统名，故按 issuer DN 反查即可唯一定位。
+     * 若声明的系统与证书实际归属系统不一致（跨系统验签），显式失败，避免同公司多系统时验签失去域边界。</p>
+     */
+    public VerifyResultVO verify(VerifyQueryDTO req, String companyUscc, String systemName) {
         if (req.getCertPem() == null || req.getCertPem().isBlank()) {
             throw new IllegalArgumentException("待校验证书PEM不能为空");
         }
@@ -124,7 +135,11 @@ import java.util.Locale;
         X500Name rootSubject = X500Name.getInstance(root.getSubjectX500Principal().getEncoded());
 
         if (sameDn(issuer, rootSubject)) {
-            // 链①：叶子直接由根签发（根/早期证书场景）
+            // 链①：叶子直接由根签发（根/早期证书场景）——根签发物不属于任何具体系统
+            if (systemName != null && !systemName.isBlank()) {
+                fail(r, "该证书由根CA直接签发（CA证书），不属于系统「" + systemName + "」");
+                return r;
+            }
             if (!verifySignedBy(cert, root, r, "根CA")) {
                 return r;
             }
@@ -137,6 +152,18 @@ import java.util.Locale;
                 r.setStatusText("签发者不是本公司签发");
                 fail(r, "证书签发者不是本站CA（" + cert.getIssuerX500Principal().getName() + "）");
                 return r;
+            }
+            // 系统归属校验：声明系统与证书实际归属系统必须一致（跨系统验签直接拒绝）
+            if (systemName != null && !systemName.isBlank()) {
+                String actual = subRow.getSystemName();
+                if (actual == null || actual.isBlank()) {
+                    fail(r, "签发CA（" + subRow.getSubjectCn() + "）未归属系统，无法匹配请求系统「" + systemName + "」");
+                    return r;
+                }
+                if (!actual.equals(systemName)) {
+                    fail(r, "证书归属系统「" + actual + "」，与请求系统「" + systemName + "」不一致");
+                    return r;
+                }
             }
             X509Certificate sub = PemUtil.parseCert(subRow.getCertPem());
             if (!"VALID".equals(subRow.getStatus())) {

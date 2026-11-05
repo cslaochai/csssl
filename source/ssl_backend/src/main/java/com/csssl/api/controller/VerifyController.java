@@ -4,6 +4,7 @@ import com.csssl.common.Result;
 import com.csssl.dto.VerifyQueryDTO;
 import com.csssl.vo.VerifyResultVO;
 import com.csssl.service.CaService;
+import com.csssl.service.CaSystemService;
 import com.csssl.service.CrlService;
 import com.csssl.service.OcspService;
 import com.csssl.service.CompanyService;
@@ -42,6 +43,7 @@ public class VerifyController {
     private final CrlService crlService;
     private final OcspService ocspService;
     private final CompanyService companyService;
+    private final CaSystemService caSystemService;
 
     /**
      * 根证书 PEM 下载（各子系统信任链配置）
@@ -68,11 +70,12 @@ public class VerifyController {
     }
 
     /**
-     * CRL 下载（吊销列表，供业务系统缓存校验）：判重发布，内容未变复用已发布 CRL，不再每次 GET 自增 CRLNumber
+     * CRL 下载（吊销列表，供业务系统缓存校验）：判重发布，内容未变复用已发布 CRL，不再每次 GET 自增 CRLNumber。
+     * 无系统名路径的存量端点回落到 default 域首个系统名。
      */
     @GetMapping("/crl")
     public String crl() {
-        return crlService.publishIfNeeded("default").pem();
+        return crlService.publishIfNeeded("default", caSystemService.firstSystemName("default")).pem();
     }
 
     /**
@@ -81,7 +84,7 @@ public class VerifyController {
      */
     @GetMapping("/crl/delta")
     public String crlDelta() {
-        return crlService.buildDeltaCrl("default").pem();
+        return crlService.buildDeltaCrl("default", caSystemService.firstSystemName("default")).pem();
     }
 
     /**
@@ -90,7 +93,7 @@ public class VerifyController {
     @PostMapping(value = "/ocsp", consumes = "application/ocsp-request",
             produces = "application/ocsp-response")
     public ResponseEntity<byte[]> ocspPost(@RequestBody byte[] body) {
-        byte[] resp = ocspService.respond("default", body);
+        byte[] resp = ocspService.respond("default", caSystemService.firstSystemName("default"), body);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
@@ -100,7 +103,7 @@ public class VerifyController {
     @GetMapping(value = "/ocsp/{b64url}", produces = "application/ocsp-response")
     public ResponseEntity<byte[]> ocspGet(@PathVariable String b64url) {
         byte[] req = Base64.getUrlDecoder().decode(b64url);
-        byte[] resp = ocspService.respond("default", req);
+        byte[] resp = ocspService.respond("default", caSystemService.firstSystemName("default"), req);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
@@ -125,51 +128,54 @@ public class VerifyController {
     }
 
     /**
-     * 公司域证书链在线校验（沿该公司根链验证）
+     * 公司域证书链在线校验（沿该公司根链验证；按 systemName 定位具体系统的 SUB_CA 链）
      */
-    @PostMapping("/{companyUscc}/verify")
-    public Result<VerifyResultVO> companyVerify(@PathVariable String companyUscc, @RequestBody VerifyQueryDTO req) {
+    @PostMapping("/{companyUscc}/{systemName}/verify")
+    public Result<VerifyResultVO> companyVerify(@PathVariable String companyUscc, @PathVariable String systemName,
+                                               @RequestBody VerifyQueryDTO req) {
         requireCompanyExists(companyUscc);
-        return Result.success("校验完成", verifyService.verify(req, companyUscc));
+        return Result.success("校验完成", verifyService.verify(req, companyUscc, systemName));
     }
 
     /**
-     * 公司域 CRL 下载（判重发布逻辑同 default，per-company 独立编号）
+     * 公司域 CRL 下载（判重发布逻辑同 default，per-(company,system) 独立编号）
      */
-    @GetMapping("/{companyUscc}/crl")
-    public String companyCrl(@PathVariable String companyUscc) {
+    @GetMapping("/{companyUscc}/{systemName}/crl")
+    public String companyCrl(@PathVariable String companyUscc, @PathVariable String systemName) {
         requireCompanyExists(companyUscc);
-        return crlService.publishIfNeeded(companyUscc).pem();
+        return crlService.publishIfNeeded(companyUscc, systemName).pem();
     }
 
     /**
      * 公司域增量 CRL（dCRL）下载：该域自最近全量发布以来新增的吊销/挂起条目
      */
-    @GetMapping("/{companyUscc}/crl/delta")
-    public String companyCrlDelta(@PathVariable String companyUscc) {
+    @GetMapping("/{companyUscc}/{systemName}/crl/delta")
+    public String companyCrlDelta(@PathVariable String companyUscc, @PathVariable String systemName) {
         requireCompanyExists(companyUscc);
-        return crlService.buildDeltaCrl(companyUscc).pem();
+        return crlService.buildDeltaCrl(companyUscc, systemName).pem();
     }
 
     /**
-     * 公司域 OCSP：POST 请求（该公司 SUB_CA 签响应；SUSPENDED/CLOSED 公司历史证书仍必须可查，只读不门禁）
+     * 公司域 OCSP：POST 请求（该系统 SUB_CA 签响应；SUSPENDED/CLOSED 公司历史证书仍必须可查，只读不门禁）
      */
-    @PostMapping(value = "/{companyUscc}/ocsp", consumes = "application/ocsp-request",
+    @PostMapping(value = "/{companyUscc}/{systemName}/ocsp", consumes = "application/ocsp-request",
             produces = "application/ocsp-response")
-    public ResponseEntity<byte[]> companyOcspPost(@PathVariable String companyUscc, @RequestBody byte[] body) {
+    public ResponseEntity<byte[]> companyOcspPost(@PathVariable String companyUscc, @PathVariable String systemName,
+                                                 @RequestBody byte[] body) {
         requireCompanyExists(companyUscc);
-        byte[] resp = ocspService.respond(companyUscc, body);
+        byte[] resp = ocspService.respond(companyUscc, systemName, body);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 
     /**
      * 公司域 OCSP：GET 请求（RFC 6960 base64url 编码的 DER）
      */
-    @GetMapping(value = "/{companyUscc}/ocsp/{b64url}", produces = "application/ocsp-response")
-    public ResponseEntity<byte[]> companyOcspGet(@PathVariable String companyUscc, @PathVariable String b64url) {
+    @GetMapping(value = "/{companyUscc}/{systemName}/ocsp/{b64url}", produces = "application/ocsp-response")
+    public ResponseEntity<byte[]> companyOcspGet(@PathVariable String companyUscc, @PathVariable String systemName,
+                                                @PathVariable String b64url) {
         requireCompanyExists(companyUscc);
         byte[] req = Base64.getUrlDecoder().decode(b64url);
-        byte[] resp = ocspService.respond(companyUscc, req);
+        byte[] resp = ocspService.respond(companyUscc, systemName, req);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/ocsp-response")).body(resp);
     }
 

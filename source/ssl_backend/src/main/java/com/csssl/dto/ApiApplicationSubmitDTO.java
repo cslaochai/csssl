@@ -37,6 +37,11 @@ public class ApiApplicationSubmitDTO {
     private String subjectDn;
 
     /**
+     * 所属系统（= 证书主体 O）；由接入客户端的 systemName 透传，缺省时用该公司首个系统名兜底
+     */
+    private String systemName;
+
+    /**
      * 模板编码（如 DOCTOR_SIGN）；必须是全局或本公司模板，SUB_CA 模板拒绝
      */
     @NotBlank(message = "templateCode 不能为空")

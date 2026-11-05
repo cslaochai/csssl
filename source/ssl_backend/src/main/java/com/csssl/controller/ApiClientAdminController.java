@@ -51,8 +51,8 @@ public class ApiClientAdminController {
                                             HttpServletRequest request) {
         LoginUser user = requireGlobalAdmin();
         return Result.success("登记成功，请立即保存 secret（仅展示一次）",
-                clientService.create(body.getCompanyUscc(), body.getClientName(), body.getIpAllowlist(),
-                        body.getClientCertSha256(), user, clientIp(request)));
+                clientService.create(body.getCompanyUscc(), body.getClientName(), body.getSystemName(),
+                        body.getIpAllowlist(), body.getClientCertSha256(), user, clientIp(request)));
     }
 
     /**

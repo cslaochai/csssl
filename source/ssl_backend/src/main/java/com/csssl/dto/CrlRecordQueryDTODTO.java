@@ -17,6 +17,11 @@ public class CrlRecordQueryDTODTO extends PageParam {
     private String companyUscc;
 
     /**
+     * 系统维度过滤（证书主体 O）：缺省时回落到该公司首个系统名
+     */
+    private String systemName;
+
+    /**
      * 关键字（命中 主体CN/序列号）
      */
     private String keyword;

@@ -17,6 +17,11 @@ public class ApplicationSubmitDTO {
     private String companyUscc;
 
     /**
+     * 所属系统（= 证书主体 O）；缺省时用该公司首个系统名兜底
+     */
+    private String systemName;
+
+    /**
      * 申请人类别（证书主体类型）：INSTITUTION-单位（系统/法人等非个人主体） / PERSON-个人（自然人）；与公司公司域无关
      */
     @NotBlank(message = "申请人类别不能为空")

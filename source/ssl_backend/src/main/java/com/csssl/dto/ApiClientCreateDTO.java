@@ -16,6 +16,12 @@ public class ApiClientCreateDTO {
     private String clientName;
 
     /**
+     * 系统名称（= 证书主体 O）：必须已在「系统管理」中登记，公司内唯一
+     */
+    @NotBlank(message = "必须指定所属系统")
+    private String systemName;
+
+    /**
      * 逗号分隔 IP/CIDR 白名单（可选）
      */
     private String ipAllowlist;

@@ -4,10 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.csssl.config.CssslProperties;
 import com.csssl.util.UsccValidator;
-import com.csssl.entity.ApiClient;
 import com.csssl.entity.CaCompany;
 import com.csssl.enums.CompanyStatusEnum;
-import com.csssl.mapper.ApiClientMapper;
 import com.csssl.mapper.CompanyMapper;
 import com.csssl.util.CertUtil;
 import com.csssl.vo.CaStatusVO;
@@ -37,7 +35,6 @@ public class CompanyService {
     private static final String USCC_CHARSET = "0123456789ABCDEFGHJKLMNPQRTUWXY";
     private static final int[] USCC_WEIGHTS = {1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28};
     private final CompanyMapper companyMapper;
-    private final ApiClientMapper apiClientMapper;
     private final CaService caService;
     private final CssslProperties props;
 
@@ -98,15 +95,6 @@ public class CompanyService {
             // 单公司状态异常不拖垮整个列表（如密钥文件损坏）
             vo.setHasRoot(false);
             vo.setStatusError(e.getMessage());
-        }
-        ApiClient client = apiClientMapper.selectOne(new LambdaQueryWrapper<ApiClient>()
-                .eq(ApiClient::getCompanyUscc, company.getUscc())
-                .orderByAsc(ApiClient::getId)
-                .last("LIMIT 1"));
-        if (client != null) {
-            vo.setApiClientId(client.getId());
-            vo.setApiAppId(client.getAppId());
-            vo.setApiClientStatus(client.getStatus());
         }
         return vo;
     }

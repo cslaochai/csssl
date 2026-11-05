@@ -62,6 +62,7 @@ public class CertApplicationService {
     private final MessageService messageService;
     private final SysUserMapper sysUserMapper;
     private final WorkflowEngineService engine;
+    private final CaSystemService caSystemService;
 
     /**
      * 数据域强制：申请单归属公司必须等于操作者有效域（公司用户越域 403；全局用户须显式传对 companyUscc）
@@ -317,6 +318,7 @@ public class CertApplicationService {
         app.setSan(blankToNull(body.getSan()));
         app.setPublicKeyPem(publicKeyPem.trim());
         app.setDescription(blankToNull(body.getDescription()));
+        app.setSystemName(blankToNull(body.getSystemName()));
         app.setStatus(CertApplicationStatusEnum.PENDING.getCode());
         app.setChannel("WEB");
         app.setAppliedByUserId(loginUser == null ? null : loginUser.getUserId());
@@ -362,6 +364,7 @@ public class CertApplicationService {
         app.setSan(blankToNull(body.getSan()));
         app.setPublicKeyPem(publicKeyPem.trim());
         app.setDescription(blankToNull(body.getDescription()));
+        app.setSystemName(blankToNull(body.getSystemName()));
         app.setStatus(CertApplicationStatusEnum.PENDING.getCode());
         app.setChannel("WEB");
         app.setAppliedByUserId(userId);
@@ -511,7 +514,10 @@ public class CertApplicationService {
         // 签发一律按快照执行，不重查可变模板最新值；存量单无快照时回退现查模板（模板须仍存在）
         CertService.IssuePolicy policy = parseSnapshot(app);
         // 公司版正式入口：落到申请单受理公司根域（requireCompanyMatch 已保证 effCompany==申请单域）
-        CertVO vo = certService.issueWithPublicKey(effCompany, req, policy, actor, ip);
+        // systemName 优先取申请单自带值，缺失时回落到该公司首个系统名（保证签发路径必有 SUB_CA）
+        String systemName = app.getSystemName() != null ? app.getSystemName()
+                : caSystemService.firstSystemName(effCompany);
+        CertVO vo = certService.issueWithPublicKey(effCompany, systemName, req, policy, actor, ip);
 
         app.setStatus(CertApplicationStatusEnum.ISSUED.getCode());
         app.setIssuedCertId(Long.valueOf(vo.getId()));

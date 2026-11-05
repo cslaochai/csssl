@@ -385,6 +385,34 @@ export function detailCertOp(id) {
   return request.post('/admin/cert-ops/detail', { id })
 }
 
+// ===== 外部系统 API 客户端（接入凭证）管理 =====
+/** 接入客户端列表（不返回 secret；按公司域自行过滤）；仅 apiclient:manage */
+export function listApiClients() {
+  return request.post('/admin/api-clients/list', {})
+}
+/** 登记接入客户端：{companyUscc, clientName, systemName, ipAllowlist?, clientCertSha256?} */
+export function createApiClient(data) {
+  return request.post('/admin/api-clients/create', data)
+}
+
+// ===== 公司下的系统（证书域单元，系统名 = 主体 O） =====
+/** 按公司列出系统：{companyUscc} */
+export function listSystems(companyUscc) {
+  return request.post('/admin/systems/list', {companyUscc})
+}
+/** 新增系统：{companyUscc, systemName, description?}（公司内系统名唯一） */
+export function createSystem(data) {
+  return request.post('/admin/systems/create', data)
+}
+/** 轮换接入密钥：{id} → 一次性新 secret */
+export function rotateApiClient(id) {
+  return request.post('/admin/api-clients/rotate', { id })
+}
+/** 启停接入客户端：{id, enabled} */
+export function setApiClientStatus(id, enabled) {
+  return request.post('/admin/api-clients/status', { id, enabled })
+}
+
 // ===== 导出 =====
 /** 导出 PKCS#12：口令放 POST body（避免 URL 泄漏），返回二进制 blob */
 export function exportCertP12(id, password) {

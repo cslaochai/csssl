@@ -40,6 +40,11 @@ public class ApiClient extends AuditColumns {
     private String clientName;
 
     /**
+     * 系统名称（= 证书主体 O，关联 ssl_ca_system.system_name）：接入凭证归属的系统域
+     */
+    private String systemName;
+
+    /**
      * 逗号分隔 IP/CIDR 白名单（空=不限）
      */
     private String ipAllowlist;

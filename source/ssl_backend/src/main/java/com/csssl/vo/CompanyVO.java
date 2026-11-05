@@ -126,21 +126,6 @@ public class CompanyVO {
     private String statusError;
 
     /**
-     * 该公司默认接入客户端的记录 ID（无则 null）
-     */
-    private Long apiClientId;
-
-    /**
-     * 接入 ID（App ID）：外部系统配置后随请求头 X-App-Id 发送，CA 据此反查公司
-     */
-    private String apiAppId;
-
-    /**
-     * 接入状态：1-启用 0-停用（无接入凭证时省略）
-     */
-    private Integer apiClientStatus;
-
-    /**
      * 公司档案部分（根CA状态字段由服务层按公司实时状态填充）
      */
     public static CompanyVO from(CaCompany company) {

@@ -42,12 +42,14 @@ public class OcspService {
 
     private final CaCertMapper certMapper;
     private final CaService caService;
+    private final CaSystemService caSystemService;
     private final CssslProperties props;
 
     /**
-     * 公司域 responder：按 companyUscc 定位公司域查询吊销状态，用该公司 SUB_CA 密钥签响应
+     * 公司+系统域 responder：按 companyUscc + systemName 定位域查询吊销状态，用该系统 SUB_CA 密钥签响应。
+     * systemName 为调用方给出的系统（公开端点路径 / 首个系统回落）；若账内证书行自带 systemName 则优先采用。
      */
-    public byte[] respond(String companyUscc, byte[] requestDer) {
+    public byte[] respond(String companyUscc, String systemName, byte[] requestDer) {
         try {
             OCSPReq req = new OCSPReq(requestDer);
             Req[] reqs = req.getRequestList();
@@ -62,8 +64,11 @@ public class OcspService {
                     .eq(CaCert::getSerialHex, serial.toString(16))
                     .eq(CaCert::getCompanyUscc, companyUscc));
 
-            X509Certificate signerCert = caService.signingCert(companyUscc);
-            PrivateKey signerKey = caService.signingKey(companyUscc);
+            // 响应签名方 = 该证书所属系统的 SUB_CA：优先按证书行 systemName 定位，缺失回落公司首个系统名
+            String ocspSystem = (row != null && row.getSystemName() != null && !row.getSystemName().isBlank())
+                    ? row.getSystemName() : caSystemService.firstSystemName(companyUscc);
+            X509Certificate signerCert = caService.signingCert(companyUscc, ocspSystem);
+            PrivateKey signerKey = caService.signingKey(companyUscc, ocspSystem);
             JcaX509CertificateHolder signerHolder = new JcaX509CertificateHolder(signerCert);
             // responder 身份 = 该公司服务签发二级CA（SUB_CA），响应由同一私钥签名
             BasicOCSPRespBuilder builder = new BasicOCSPRespBuilder(signerHolder.getSubjectPublicKeyInfo(),

@@ -19,7 +19,7 @@ public class CompanyCreateDTO {
     private String companyName;
 
     /**
-     * 证书主体O（该公司全部证书使用）
+     * 系统名称（即证书主体 O）：建公司时同时创建该公司首个系统，公司内系统不重名
      */
     private String subjectO;
 

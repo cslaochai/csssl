@@ -113,6 +113,8 @@ public class CaApiService {
         dto.setPublicKeyPem(body.getPublicKeyPem());
         dto.setSan(body.getSan());
         dto.setDescription(body.getDescription());
+        // 系统维度：取 API 客户端绑定的系统名（ssl_api_client.system_name），缺失时回落到公司首个系统名
+        dto.setSystemName(client.getSystemName());
 
         CertApplication app;
         try {

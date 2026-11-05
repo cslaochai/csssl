@@ -11,6 +11,12 @@ public class CompanyCreateVO {
     private String companyUscc;
     private String companyName;
     private String subjectO;
+
+    /**
+     * 首个系统名称（与 subjectO 相同；系统才是证书域单元）
+     */
+    private String systemName;
+
     private String algorithm;
     private String appId;
     private String secret;

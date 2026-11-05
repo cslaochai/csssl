@@ -29,6 +29,11 @@ public class CaCert extends AuditColumns {
     private String companyUscc;
 
     /**
+     * 所属系统（每系统一张专属二级CA；ROOT 为 NULL，SUB_CA 与签发证书行都填所属系统名=证书主体 O）
+     */
+    private String systemName;
+
+    /**
      * 证书序列号（16进制，唯一）
      */
     private String serialHex;

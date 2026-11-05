@@ -17,6 +17,7 @@ public class ApiClientVO {
     private String companyUscc;
     private String companyName;
     private String clientName;
+    private String systemName;
     private String ipAllowlist;
     private String clientCertSha256;
     private Integer secretVersion;
@@ -35,6 +36,7 @@ public class ApiClientVO {
         vo.setAppId(c.getAppId());
         vo.setCompanyUscc(c.getCompanyUscc());
         vo.setClientName(c.getClientName());
+        vo.setSystemName(c.getSystemName());
         vo.setIpAllowlist(c.getIpAllowlist());
         vo.setClientCertSha256(c.getClientCertSha256());
         vo.setSecretVersion(c.getSecretVersion());

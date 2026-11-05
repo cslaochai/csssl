@@ -74,6 +74,7 @@ public class CrlService {
     private final CrlStateMapper crlStateMapper;
     private final CaService caService;
     private final CompanyService companyService;
+    private final CaSystemService caSystemService;
     private final CssslProperties props;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
@@ -104,25 +105,41 @@ public class CrlService {
     }
 
     /**
+     * 系统名用于拼 vault 的目录层级，禁止路径分隔符与控制字符；与 CaSystemService 口径一致
+     */
+    private static String sanitize(String s) {
+        if (s == null) {
+            return "unknown";
+        }
+        return s.replace("/", "_").replace("\\", "_").replace(":", "_")
+                .replace("*", "_").replace("?", "_").replace("\"", "_")
+                .replace("<", "_").replace(">", "_").replace("|", "_")
+                .chars().filter(c -> !Character.isISOControl(c)).mapToObj(c -> String.valueOf((char) c))
+                .collect(Collectors.joining());
+    }
+
+    /**
      * 应纳入指定公司域 CRL 的证书：该公司的已吊销（REVOKED）+ 挂起（FROZEN，reason=certificateHold）；
      * 排除 ROOT/SUB_CA（由上一级CA管理）。公司域间互不信任，CRL 只列本域签发证书。
      */
-    public List<CaCert> revokedList(String companyUscc) {
+    public List<CaCert> revokedList(String companyUscc, String systemName) {
         return certMapper.selectList(new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCompanyUscc, companyUscc)
+                .eq(CaCert::getSystemName, systemName)
                 .in(CaCert::getStatus, "REVOKED", "FROZEN")
                 .notIn(CaCert::getCertType, CaService.TYPE_ROOT, CaService.TYPE_SUB_CA)
                 .orderByDesc(CaCert::getRevokedAt));
     }
 
     /**
-     * 吊销记录分页查询（管理页）：口径与 {@link #revokedList(String)} 一致
-     * （本域 REVOKED/FROZEN、排除 ROOT/SUB_CA），另支持 关键字（CN/序列号）/状态/吊销原因 过滤。
+     * 吊销记录分页查询（管理页）：口径与 {@link #revokedList(String, String)} 一致
+     * （本域、本系统 REVOKED/FROZEN、排除 ROOT/SUB_CA），另支持 关键字（CN/序列号）/状态/吊销原因 过滤。
      */
-    public Page<CertVO> recordsPage(String companyUscc, String keyword, String status, String reason,
+    public Page<CertVO> recordsPage(String companyUscc, String systemName, String keyword, String status, String reason,
                                     long pageNo, long pageSize) {
         LambdaQueryWrapper<CaCert> qw = new LambdaQueryWrapper<CaCert>()
                 .eq(CaCert::getCompanyUscc, companyUscc)
+                .eq(CaCert::getSystemName, systemName)
                 .in(CaCert::getStatus, "REVOKED", "FROZEN")
                 .notIn(CaCert::getCertType, CaService.TYPE_ROOT, CaService.TYPE_SUB_CA);
         if (status != null && !status.isBlank()) {
@@ -140,30 +157,43 @@ public class CrlService {
     }
 
     /**
-     * 判重发布入口（公司版）：以该公司 SUB_CA（signingCert(companyUscc)）签名，落到该公司 CRL 域
+     * 判重发布入口（公司+系统版）：以该系统 SUB_CA（signingCert(companyUscc, systemName)）签名，落到该系统 CRL 域
      */
-    public synchronized CrlInfo publishIfNeeded(String companyUscc) {
-        List<CaCert> revoked = revokedList(companyUscc);
+    public synchronized CrlInfo publishIfNeeded(String companyUscc, String systemName) {
+        List<CaCert> revoked = revokedList(companyUscc, systemName);
         String fingerprint = fingerprintOf(revoked);
         // 编程式事务：@Scheduled 与类内自调用不走注解代理，SELECT ... FOR UPDATE 的行锁必须显式事务包住
         // "读指纹→重签→回写"全程，否则语句结束即释放行锁、判重失效
-        return transactionTemplate.execute(status -> doPublish(companyUscc, revoked, fingerprint));
+        return transactionTemplate.execute(status -> doPublish(companyUscc, systemName, revoked, fingerprint));
     }
 
     /**
-     * 每日定时发布：遍历 default + 全部 ACTIVE 公司逐一主动续发/补发，
+     * 每日定时发布：遍历 default + 全部 ACTIVE 公司，公司下每个系统逐一主动续发/补发，
      * 把「吊销生效 → CRL 可见」窗口从"下次有人拉"收敛到至多下个调度点。
      * SUSPENDED/CLOSED 公司不进定时续发名单（其 CRL 由公开 GET 按需判重复用/续签，历史证书仍可验证）。
      */
     @Scheduled(cron = "${csssl.crl-refresh-cron:0 0 3 * * ?}")
     public void dailyRefresh() {
         for (String companyUscc : refreshTargets()) {
-            try {
-                CrlInfo info = publishIfNeeded(companyUscc);
-                log.info("[CRL][{}] 定时发布检查完成：条目数={}, CRLNumber={}, nextUpdate={}",
-                        companyUscc, info.entries(), info.crlNumber(), info.nextUpdate());
-            } catch (Exception e) {
-                log.warn("[CRL][{}] 定时发布失败（SUB_CA 离线或签发异常，待解封窗口处理）: {}", companyUscc, e.getMessage());
+            List<String> systems = caSystemService.listSystemNames(companyUscc);
+            if (systems.isEmpty()) {
+                // 公司无系统行时回落到首个系统名（与公司兜底签发口径一致），保证历史 CRL 仍可续发
+                try {
+                    systems = List.of(caSystemService.firstSystemName(companyUscc));
+                } catch (Exception e) {
+                    log.warn("[CRL][{}] 无可用系统，跳过定时发布: {}", companyUscc, e.getMessage());
+                    continue;
+                }
+            }
+            for (String systemName : systems) {
+                try {
+                    CrlInfo info = publishIfNeeded(companyUscc, systemName);
+                    log.info("[CRL][{}][{}] 定时发布检查完成：条目数={}, CRLNumber={}, nextUpdate={}",
+                            companyUscc, systemName, info.entries(), info.crlNumber(), info.nextUpdate());
+                } catch (Exception e) {
+                    log.warn("[CRL][{}][{}] 定时发布失败（SUB_CA 离线或签发异常，待解封窗口处理）: {}",
+                            companyUscc, systemName, e.getMessage());
+                }
             }
         }
     }
@@ -187,53 +217,53 @@ public class CrlService {
     }
 
     /**
-     * 生成该公司域增量 CRL：自该域最近全量发布以来新增的吊销/挂起条目；无全量基础时返回空增量
+     * 生成该系统域增量 CRL：自该域最近全量发布以来新增的吊销/挂起条目；无全量基础时返回空增量
      */
-    public synchronized DeltaCrlInfo buildDeltaCrl(String companyUscc) {
-        CrlState state = crlStateMapper.selectByCompany(companyUscc);
+    public synchronized DeltaCrlInfo buildDeltaCrl(String companyUscc, String systemName) {
+        CrlState state = crlStateMapper.selectByCompanyAndSystem(companyUscc, systemName);
         long baseNumber = state == null || state.getCrlNumber() == null ? 0L : state.getCrlNumber();
         if (state == null || baseNumber == 0 || state.getThisUpdate() == null) {
-            log.info("[CRL][{}] 增量生成跳过：尚无全量 CRL 基础（先生成全量）", companyUscc);
+            log.info("[CRL][{}][{}] 增量生成跳过：尚无全量 CRL 基础（先生成全量）", companyUscc, systemName);
             return new DeltaCrlInfo("", null, null, 0, 0, 0);
         }
         LocalDateTime base = state.getThisUpdate();
-        List<CaCert> added = revokedList(companyUscc).stream()
+        List<CaCert> added = revokedList(companyUscc, systemName).stream()
                 .filter(c -> c.getRevokedAt() != null && c.getRevokedAt().isAfter(base))
                 .toList();
         // 增量编号瞬态：基础全量编号+1；不写回状态行（全量编号只由 publishIfNeeded 推进）
         long number = baseNumber + 1;
-        X509Certificate caCert = caService.signingCert(companyUscc);
-        PrivateKey caKey = caService.signingKey(companyUscc);
+        X509Certificate caCert = caService.signingCert(companyUscc, systemName);
+        PrivateKey caKey = caService.signingKey(companyUscc, systemName);
         X509CRL crl = CertUtil.buildDeltaCrl(caCert, caKey, toEntries(added), number,
                 baseNumber, DELTA_CRL_NEXT_UPDATE_DAYS);
         DeltaCrlInfo info = new DeltaCrlInfo(PemUtil.crlToPem(crl), toLocal(crl.getThisUpdate()),
                 toLocal(crl.getNextUpdate()), added.size(), number, baseNumber);
-        log.info("[CRL][{}] 增量生成完成，新增条目数={}, CRLNumber={}, 基础全量={}", companyUscc, added.size(), number, baseNumber);
+        log.info("[CRL][{}][{}] 增量生成完成，新增条目数={}, CRLNumber={}, 基础全量={}", companyUscc, systemName, added.size(), number, baseNumber);
         return info;
     }
 
     /**
      * 行锁事务内发布决策：判重复用 or 重签推进（本公司域独立状态行/独立文件/独立签名CA）
      */
-    private CrlInfo doPublish(String companyUscc, List<CaCert> revoked, String fingerprint) {
-        CrlState state = ensureStateRowLocked(companyUscc);
+    private CrlInfo doPublish(String companyUscc, String systemName, List<CaCert> revoked, String fingerprint) {
+        CrlState state = ensureStateRowLocked(companyUscc, systemName);
         long current = state.getCrlNumber() == null ? 0L : state.getCrlNumber();
         boolean reusable = current > 0
                 && fingerprint.equals(state.getFingerprint())
                 && state.getNextUpdate() != null
                 && state.getNextUpdate().isAfter(LocalDateTime.now().plusDays(REPUBLISH_AHEAD_DAYS));
         if (reusable) {
-            CrlInfo reuse = readCurrentPem(companyUscc, state, revoked.size(), current);
+            CrlInfo reuse = readCurrentPem(companyUscc, systemName, state, revoked.size(), current);
             if (reuse != null) {
                 return reuse;
             }
         }
         long number = current + 1;
-        X509Certificate caCert = caService.signingCert(companyUscc);
-        PrivateKey caKey = caService.signingKey(companyUscc);
+        X509Certificate caCert = caService.signingCert(companyUscc, systemName);
+        PrivateKey caKey = caService.signingKey(companyUscc, systemName);
         X509CRL crl = CertUtil.buildCrl(caCert, caKey, toEntries(revoked), number, FULL_CRL_NEXT_UPDATE_DAYS);
         String pem = PemUtil.crlToPem(crl);
-        writeCurrentPem(companyUscc, pem);
+        writeCurrentPem(companyUscc, systemName, pem);
         LocalDateTime thisUpdate = toLocal(crl.getThisUpdate());
         LocalDateTime nextUpdate = toLocal(crl.getNextUpdate());
         state.setCrlNumber(number);
@@ -242,20 +272,19 @@ public class CrlService {
         state.setNextUpdate(nextUpdate);
         state.setDeltaBaseNumber(number);
         crlStateMapper.updateById(state);
-        log.info("[CRL][{}] 全量重签发布：条目数={}, CRLNumber={}, thisUpdate={}, nextUpdate={}, 指纹={}",
-                companyUscc, revoked.size(), number, thisUpdate, nextUpdate, fingerprint.substring(0, 8));
+        log.info("[CRL][{}][{}] 全量重签发布：条目数={}, CRLNumber={}, thisUpdate={}, nextUpdate={}, 指纹={}",
+                companyUscc, systemName, revoked.size(), number, thisUpdate, nextUpdate, fingerprint.substring(0, 8));
         return new CrlInfo(pem, thisUpdate, nextUpdate, revoked.size(),
                 CertUtil.subjectCn(caCert), number, null);
     }
 
     /**
-     * 获取该公司状态行（FOR UPDATE 行锁）；首启补建本公司行。
+     * 获取该公司+系统状态行（FOR UPDATE 行锁）；首启补建本 (公司,系统) 行。
      * ssl_crl_state.id 无 AUTO_INCREMENT（存量 DDL），新行按 max(id)+1 显式生成；
-     * default 域首建时兼容旧 store-dir/crl-state.json 编号迁移（存量一次性逻辑，仅作用于 default）。
-     * 并发首建撞 company_uscc/id 唯一约束时重取行锁（company_uscc 唯一索引见待加DDL；过渡期靠行锁+重试兜底）。
+     * 并发首建撞 (company_uscc, system_name)/id 唯一约束时重取行锁（过渡期靠行锁+重试兜底）。
      */
-    private CrlState ensureStateRowLocked(String companyUscc) {
-        CrlState state = crlStateMapper.selectForUpdate(companyUscc);
+    private CrlState ensureStateRowLocked(String companyUscc, String systemName) {
+        CrlState state = crlStateMapper.selectForUpdate(companyUscc, systemName);
         if (state != null) {
             return state;
         }
@@ -263,24 +292,21 @@ public class CrlService {
             state = new CrlState();
             state.setId(nextRowId());
             state.setCompanyUscc(companyUscc);
-            if (CaCompany.LEGACY_NAMESPACE.equals(companyUscc)) {
-                LegacyState legacy = readLegacyState();
-                state.setCrlNumber(legacy.crlNumber());
-                state.setThisUpdate(legacy.lastFullCrlTime());
-            }
+            state.setSystemName(systemName);
             try {
                 crlStateMapper.insert(state);
                 return state;
             } catch (DuplicateKeyException e) {
-                // 并发首启：另一事务已建本公司行（company_uscc 冲突）或占用了同一 id；
-                // 锁定读在 RR 隔离级别下仍读最新已提交版本，本公司行存在即直接重取，否则重算 id 再试
-                CrlState existing = crlStateMapper.selectForUpdate(companyUscc);
+                // 并发首启：另一事务已建本 (公司,系统) 行（唯一键冲突）或占用了同一 id；
+                // 锁定读在 RR 隔离级别下仍读最新已提交版本，本行存在即直接重取，否则重算 id 再试
+                CrlState existing = crlStateMapper.selectForUpdate(companyUscc, systemName);
                 if (existing != null) {
                     return existing;
                 }
             }
         }
-        throw new IllegalStateException("CRL 状态行创建失败（companyUscc=" + companyUscc + "），请检查 ssl_crl_state 表约束与并发发布日志");
+        throw new IllegalStateException("CRL 状态行创建失败（companyUscc=" + companyUscc
+                + ", systemName=" + systemName + "），请检查 ssl_crl_state 表约束与并发发布日志");
     }
 
     /**
@@ -292,57 +318,37 @@ public class CrlService {
     }
 
     /**
-     * 旧 JSON 状态迁移（一次性，仅 default 域）：读 crlNumber/lastFullCrlTime 字段；失败按初始状态处理
-     */
-    private LegacyState readLegacyState() {
-        Path f = Path.of(props.getStoreDir()).resolve("crl-state.json");
-        if (!Files.exists(f)) {
-            return new LegacyState(0L, null);
-        }
-        try {
-            JsonNode node = objectMapper.readTree(Files.readString(f, StandardCharsets.UTF_8));
-            long number = node.path("crlNumber").asLong(0);
-            String time = node.path("lastFullCrlTime").asText(null);
-            LocalDateTime lastFull = time == null || time.isBlank() ? null : LocalDateTime.parse(time);
-            log.info("[CRL] 已从旧 crl-state.json 迁移初始编号：crlNumber={}, lastFullCrlTime={}", number, lastFull);
-            return new LegacyState(number, lastFull);
-        } catch (Exception e) {
-            log.warn("[CRL] 旧状态文件读取失败，按初始状态处理: {}", e.getMessage());
-            return new LegacyState(0L, null);
-        }
-    }
-
-    /**
      * 回读已发布 CRL（指纹未变即复用，不重签）；文件缺失/读失败返回 null 降级重签
      */
-    private CrlInfo readCurrentPem(String companyUscc, CrlState state, int entries, long crlNumber) {
+    private CrlInfo readCurrentPem(String companyUscc, String systemName, CrlState state, int entries, long crlNumber) {
         try {
-            Path f = currentPemFile(companyUscc);
+            Path f = currentPemFile(companyUscc, systemName);
             if (!Files.exists(f)) {
                 return null;
             }
             return new CrlInfo(Files.readString(f, StandardCharsets.UTF_8),
                     state.getThisUpdate(), state.getNextUpdate(), entries,
-                    CertUtil.subjectCn(caService.signingCert(companyUscc)), crlNumber, null);
+                    CertUtil.subjectCn(caService.signingCert(companyUscc, systemName)), crlNumber, null);
         } catch (Exception e) {
-            log.warn("[CRL][{}] 已发布 CRL 回读失败，降级重签: {}", companyUscc, e.getMessage());
+            log.warn("[CRL][{}][{}] 已发布 CRL 回读失败，降级重签: {}", companyUscc, systemName, e.getMessage());
             return null;
         }
     }
 
     /**
-     * CRL 文件路径：default=store-dir/crl/current.pem（存量不变）；其他=store-dir/companies/{companyUscc}/crl/current.pem
+     * CRL 文件路径：store-dir/companies/{companyUscc}/systems/{systemName}/crl/current.pem
      */
-    private Path currentPemFile(String companyUscc) {
-        return companyVaults.companyStoreDir(companyUscc).resolve("crl").resolve("current.pem");
+    private Path currentPemFile(String companyUscc, String systemName) {
+        return companyVaults.companyStoreDir(companyUscc)
+                .resolve("systems").resolve(sanitize(systemName)).resolve("crl").resolve("current.pem");
     }
 
     /**
      * 已发布 CRL 落盘：临时文件 + 原子移动，杜绝并发下载端点读到半写 PEM
      */
-    private void writeCurrentPem(String companyUscc, String pem) {
+    private void writeCurrentPem(String companyUscc, String systemName, String pem) {
         try {
-            Path f = currentPemFile(companyUscc);
+            Path f = currentPemFile(companyUscc, systemName);
             Files.createDirectories(f.getParent());
             Path tmp = f.resolveSibling("current.pem.tmp");
             Files.writeString(tmp, pem, StandardCharsets.UTF_8);
@@ -361,12 +367,6 @@ public class CrlService {
                     CertUtil.crlReasonCode(c.getRevokeReason())));
         }
         return entries;
-    }
-
-    /**
-     * 旧 crl-state.json 的迁移字段
-     */
-    private record LegacyState(long crlNumber, LocalDateTime lastFullCrlTime) {
     }
 
     /**

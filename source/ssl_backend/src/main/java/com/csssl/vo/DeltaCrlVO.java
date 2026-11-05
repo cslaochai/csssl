@@ -22,6 +22,12 @@ public class DeltaCrlVO {
     private String companyUscc;
 
     /**
+     * 系统维度（证书主体 O；仅非 default 域输出）
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String systemName;
+
+    /**
      * 增量 CRL PEM
      */
     private String deltaPem;

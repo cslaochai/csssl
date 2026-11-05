@@ -33,6 +33,11 @@ public class CertApplication extends AuditColumns {
     private String companyUscc;
 
     /**
+     * 所属系统（= 证书主体 O，关联 ssl_ca_system.system_name）；缺省时用该公司首个系统名兜底
+     */
+    private String systemName;
+
+    /**
      * 申请单号（RA20261027xxx）
      */
     private String applyNo;
