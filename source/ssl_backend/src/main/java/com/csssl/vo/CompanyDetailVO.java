@@ -72,6 +72,12 @@ public class CompanyDetailVO {
     private List<CaSubCaHolderVO> holders;
 
     /**
+     * 公司下的系统（证书域单元）及接入凭证一览（只读巡检；不含 secret 明文）。
+     * 无凭证的系统也会列出，App ID 为空表示尚未登记。
+     */
+    private List<SystemBindingVO> systems;
+
+    /**
      * 公司档案部分（rootStatus 由服务层填充）
      */
     public static CompanyDetailVO from(CaCompany company) {
@@ -86,5 +92,22 @@ public class CompanyDetailVO {
         vo.setDescription(company.getDescription());
         vo.setCreatedAt(company.getCreatedAt());
         return vo;
+    }
+
+    /**
+     * 公司下的系统与接入凭证绑定行（只读；secret 永不返回）。
+     */
+    @Data
+    public static class SystemBindingVO {
+        /** 系统名称（= 证书主体 O） */
+        private String systemName;
+        /** 接入 App ID（未登记凭证时为空） */
+        private String appId;
+        /** 凭证状态：1-启用 0-停用；无凭证时为 null */
+        private Integer status;
+        /** 密钥版本（未登记凭证时为 null） */
+        private Integer secretVersion;
+        /** 最近一次调用时间 */
+        private String lastUsedAt;
     }
 }

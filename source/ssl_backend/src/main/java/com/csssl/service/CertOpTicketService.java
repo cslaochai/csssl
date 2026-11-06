@@ -17,6 +17,7 @@ import com.csssl.service.ApplicationTrailService;
 import com.csssl.service.MessageService;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.workflow.WorkflowEngineService;
+import com.csssl.workflow.dto.TaskVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -88,10 +89,11 @@ public class CertOpTicketService {
         if (companyScope != null && !companyScope.isBlank()) {
             qw.eq(CaCertOpTicket::getCompanyUscc, companyScope);
         }
-        applyViewerScope(qw, viewer);
+        Set<String> myFlowNos = myFlowBizNos(viewer);
+        applyViewerScope(qw, viewer, myFlowNos);
         qw.orderByDesc(CaCertOpTicket::getCreatedAt);
         Page<CaCertOpTicket> page = ticketMapper.selectPage(new Page<>(pageNo, pageSize), qw);
-        markReviewable(page.getRecords(), viewer);
+        markReviewable(page.getRecords(), viewer, myFlowNos);
         return page;
     }
 
@@ -103,15 +105,33 @@ public class CertOpTicketService {
         if (ticket == null) {
             throw new IllegalArgumentException("操作单不存在（id=" + id + "）");
         }
-        markReviewable(List.of(ticket), viewer);
+        markReviewable(List.of(ticket), viewer, myFlowBizNos(viewer));
         return ticket;
     }
 
     /**
-     * 角色可见范围：持 cert:op:approve 的审核员收窄到「与我相关 + 我能处理」，
+     * 流程当前环节派给「我」的单号集合：一次取回，供列表可见范围与逐行动作位共用
+     * （逐行 engine.canHandle 会按页行数放大成 N+1）。无审批权限点的视角返回空集。
+     */
+    private Set<String> myFlowBizNos(LoginUser viewer) {
+        if (!viewer.getPermissions().contains(PermissionCatalog.CERT_OP_APPROVE)) {
+            return Set.of();
+        }
+        Set<String> nos = new HashSet<>();
+        for (TaskVO task : engine.myPendingTasks()) {
+            if (task.getBusinessId() != null && !task.getBusinessId().isBlank()) {
+                nos.add(task.getBusinessId());
+            }
+        }
+        return nos;
+    }
+
+    /**
+     * 角色可见范围：持 cert:op:approve 的审核员收窄到「发起人=我 OR 指派处理人=我 OR 审核人=我
+     * OR 流程当前环节办理人=我 OR 无人认领的待审批单」，
      * 监管/只读角色（ADMIN/RA_ADMIN/AUDITOR/SECURITY_ADMIN）保持全量只读，普通操作员仅看自己提交的。
      */
-    private void applyViewerScope(LambdaQueryWrapper<CaCertOpTicket> qw, LoginUser viewer) {
+    private void applyViewerScope(LambdaQueryWrapper<CaCertOpTicket> qw, LoginUser viewer, Set<String> myFlowNos) {
         List<String> perms = viewer.getPermissions();
         boolean canApprove = perms.contains(PermissionCatalog.CERT_OP_APPROVE);
         if (!canApprove) {
@@ -123,30 +143,38 @@ public class CertOpTicketService {
             return;
         }
         Long me = viewer.getUserId();
-        qw.and(w -> w.eq(CaCertOpTicket::getAssigneeUserId, me)
-                .or().eq(CaCertOpTicket::getRequestedByUserId, me)
-                .or().eq(CaCertOpTicket::getReviewedByUserId, me)
-                // 流程驱动后审批人由节点配置决定：待审单对持审批权的账号放开可见，按钮显隐按节点办理人回算
-                .or().eq(CaCertOpTicket::getStatus, TicketStatusEnum.PENDING.getCode()));
+        qw.and(w -> {
+            w.eq(CaCertOpTicket::getAssigneeUserId, me)
+                    .or().eq(CaCertOpTicket::getRequestedByUserId, me)
+                    .or().eq(CaCertOpTicket::getReviewedByUserId, me);
+            if (!myFlowNos.isEmpty()) {
+                // 当前环节办理人以流程为准（assignee 列只是提交时的快照，节点流转后不再代表处理人）
+                w.or().in(CaCertOpTicket::getOpNo, myFlowNos);
+            }
+            // 「无人认领」逃生门：与 markReviewable 的接管判据同口径，防单据因处理人停用/离职永久卡死
+            w.or(x -> x.eq(CaCertOpTicket::getStatus, TicketStatusEnum.PENDING.getCode())
+                    .apply(UNCLAIMED_ASSIGNEE_SQL));
+        });
     }
 
     /**
      * 逐行标注当前登录人可做的动作：reviewable（可审批）/ urgeable（可催办）/ revocable（可撤回）。
-     * reviewable 与 {@link #checkAssignee} 同一口径，前端据此隐藏按钮（不置灰）。
+     * reviewable 与 {@link #checkAssignee} 同一口径，前端据此隐藏按钮（不置灰）：
+     * 有流程实例只认「流程当前环节办理人=我」（与列表可见范围同一个集合），历史无实例的单回落到被指派人。
      */
-    private void markReviewable(List<CaCertOpTicket> rows, LoginUser viewer) {
+    private void markReviewable(List<CaCertOpTicket> rows, LoginUser viewer, Set<String> myFlowNos) {
         if (rows == null || rows.isEmpty()) {
             return;
         }
         boolean canReview = viewer.getPermissions().contains(PermissionCatalog.CERT_OP_APPROVE);
         Long me = viewer.getUserId();
-        Set<Long> enabled = canReview ? enabledApproverIds() : Set.of();
+        Set<Long> enabled = canReview ? enabledUserIds() : Set.of();
         for (CaCertOpTicket row : rows) {
             boolean pending = TicketStatusEnum.PENDING.is(row.getStatus());
             boolean flowActive = row.getOpNo() != null && engine.hasInstance(row.getOpNo());
             row.setReviewable(canReview && pending
                     && (flowActive
-                            ? engine.canHandle(row.getOpNo(), viewer)
+                            ? myFlowNos.contains(row.getOpNo())
                             : isAssigneeTakable(row.getAssigneeUserId(), me, enabled)));
             row.setUrgeable(pending && row.getAssigneeUserId() != null);
             row.setRevocable(pending && Objects.equals(row.getRequestedByUserId(), me));
@@ -166,11 +194,10 @@ public class CertOpTicketService {
         return !enabled.contains(assigneeUserId);
     }
 
-    /** 全部启用状态审核员 id（审批人池规模很小，一次取回避免逐行查库） */
-    private Set<Long> enabledApproverIds() {
+    /** 全部启用状态账号 id（口径与 {@link #checkAssignee}、列表的「无人认领」SQL 一致：在岗指派人只有本人能办） */
+    private Set<Long> enabledUserIds() {
         List<SysUser> users = userMapper.selectList(new LambdaQueryWrapper<SysUser>()
                 .select(SysUser::getId)
-                .eq(SysUser::getRoleCode, "APPROVER")
                 .eq(SysUser::getStatus, 1));
         Set<Long> ids = new HashSet<>();
         users.forEach(u -> ids.add(u.getId()));

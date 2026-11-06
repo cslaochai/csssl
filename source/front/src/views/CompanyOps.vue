@@ -111,33 +111,6 @@
       </div>
     </el-card>
 
-    <!-- 接入凭证回执（仅展示一次） -->
-    <el-dialog v-model="credVisible" :close-on-click-modal="false" title="接入凭证" width="620px" @closed="cred = null">
-      <el-alert
-          :closable="false"
-          show-icon
-          title="密钥仅展示一次，关闭后无法再次查看；请立即复制到 HIS 等外部系统的配置中。"
-          type="warning"
-      />
-      <el-descriptions v-if="cred" :column="2" border class="cred-desc">
-        <el-descriptions-item label="接入ID（App ID）" :span="2">
-          <span class="cell-mono">{{ cred.appId }}</span>
-          <el-button link size="small" type="primary" @click="onCopy(cred.appId)">复制</el-button>
-        </el-descriptions-item>
-        <el-descriptions-item label="接入密钥" :span="2">
-          <span class="cell-mono">{{ cred.secret }}</span>
-          <el-button link size="small" type="primary" @click="onCopy(cred.secret)">复制</el-button>
-        </el-descriptions-item>
-        <el-descriptions-item label="绑定公司">{{ cred.companyName || cred.companyUscc }}</el-descriptions-item>
-        <el-descriptions-item label="密钥版本">{{ cred.secretVersion ?? '-' }}</el-descriptions-item>
-      </el-descriptions>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button type="primary" @click="credVisible = false">我已保存</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
     <!-- 保管人投票明细（重新指派保管人单） -->
     <el-dialog v-model="voteVisible" :close-on-click-modal="false" :title="`保管人投票明细：${voteTicket?.opNo || ''}`" width="680px">
       <el-alert v-if="voteTicket" :closable="false" class="dialog-tip" show-icon type="info"
@@ -222,11 +195,10 @@ import {computed, onMounted, reactive, ref} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {Refresh, Search} from '@element-plus/icons-vue'
-import {approveCompanyOp, cancelCompanyOp, detailCompanyOp, listCompanyOpTrail, pageCompanyOps, rejectCompanyOp, takeCompanyOpReceipt, urgeCompanyOp, voteCompanyOp} from '@/api/system'
+import {cancelCompanyOp, detailCompanyOp, listCompanyOpTrail, pageCompanyOps, urgeCompanyOp} from '@/api/system'
 import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
 import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 import {hasPerm} from '@/lib/perm'
-import {copyText} from '@/lib/clipboard'
 import {getWorkflowDiagram} from '@/api/workflow'
 import WorkflowDiagram from '@/views/WorkflowDiagram.vue'
 
@@ -249,9 +221,6 @@ const rows = ref([])
 const total = ref(0)
 const query = reactive({pageNo: 1, pageSize: DEFAULT_PAGE_SIZE, status: '', opType: '', keyword: ''})
 const {queryCardRef, footerRef, tableMaxHeight} = useTableMaxHeight()
-
-const credVisible = ref(false)
-const cred = ref(null)
 
 function opTypeText(t) {
   return OP_TYPE_LABELS[t] || t || '-'
@@ -276,22 +245,13 @@ function statusTag(s) {
   return {PENDING: 'warning', EXECUTED: 'success', REJECTED: 'danger', CANCELLED: 'info'}[s] || 'info'
 }
 
-// 操作列：全部平铺，不再收进「更多」下拉。
-// 重新指派保管人单由原保管人投票（同意/驳回，myVotable 由服务端按当前登录人回算），不走公司审批员通道；
-// 其他类型维持审批员审批；撤回/领取回执沿用服务端逐行回算
+// 操作列：纯台账——审批/投票/领取接入凭证已全部收敛到「我的待办」，本页只看不办。
+// 保留：详情（含流程图+轨迹）、投票明细（只读）、催办（发起人）、撤回（发起人）
 function rowActions(row) {
   const acts = []
   acts.push({label: '详情', run: () => onDetail(row)})
   if (row.opType === 'REASSIGN_HOLDERS') {
-    if (row.status === 'PENDING' && row.myVotable) {
-      acts.push({label: '同意', type: 'success', run: () => onVote(row, true)})
-      acts.push({label: '驳回', type: 'danger', run: () => onVote(row, false)})
-    }
     acts.push({label: '投票明细', type: 'primary', run: () => onVoteDetail(row)})
-  } else if (row.status === 'PENDING' && row.reviewable) {
-    // reviewable 由后端按「本单被指派人 == 当前登录人」现算，与 approve/reject 接口同一口径；不可审的直接不给按钮
-    acts.push({label: '审批通过', type: 'success', run: () => onApprove(row)})
-    acts.push({label: '驳回', type: 'danger', run: () => onReject(row)})
   }
   if (row.status === 'PENDING' && row.urgeable && hasPerm('company:op:apply')) {
     acts.push({label: '催办', type: 'warning', run: () => onUrge(row)})
@@ -299,26 +259,7 @@ function rowActions(row) {
   if (row.revocable) {
     acts.push({label: '撤回', type: 'info', run: () => onCancel(row)})
   }
-  if (row.receiptClaimable) {
-    acts.push({label: '领取接入凭证', type: 'primary', run: () => onTakeReceipt(row)})
-  }
   return acts
-}
-
-async function onCopy(text) {
-  const ok = await copyText(text)
-  ok ? ElMessage.success('已复制') : ElMessage.error('复制失败，请手动选择复制')
-}
-
-function showCredential(payload) {
-  cred.value = {
-    appId: payload.appId,
-    secret: payload.secret,
-    companyUscc: payload.companyUscc,
-    companyName: payload.companyName,
-    secretVersion: payload.secretVersion
-  }
-  credVisible.value = true
 }
 
 async function load() {
@@ -361,34 +302,6 @@ function handleSizeChange(val) {
 function handleCurrentChange(val) {
   query.pageNo = val
   load()
-}
-
-async function onApprove(row) {
-  const {value} = await ElMessageBox.prompt(
-      `批准后将立即执行「${opTypeText(row.opType)}」（目标 ${row.companyUscc}），不可撤回。审批意见可留空。`,
-      '审批通过',
-      {type: 'warning', confirmButtonText: '批准并执行', cancelButtonText: '取消', inputPlaceholder: '审批意见（选填）'}
-  )
-  await approveCompanyOp(row.id, String(value || '').trim() || undefined)
-  ElMessage.success('已批准并执行')
-  await load()
-}
-
-async function onReject(row) {
-  const {value} = await ElMessageBox.prompt(
-      `驳回「${opTypeText(row.opType)}」（目标 ${row.companyUscc}），审批意见必填。`,
-      '驳回变更单',
-      {
-        type: 'error',
-        confirmButtonText: '确定驳回',
-        cancelButtonText: '取消',
-        inputPlaceholder: '驳回原因（必填）',
-        inputValidator: v => (String(v || '').trim() ? true : '驳回必须填写审批意见')
-      }
-  )
-  await rejectCompanyOp(row.id, String(value).trim())
-  ElMessage.success('已驳回')
-  await load()
 }
 
 async function onCancel(row) {
@@ -494,43 +407,6 @@ function trailType(step) {
     VOTE: 'warning',
     URGE: 'warning'
   }[step] || ''
-}
-
-async function onVote(row, agree) {
-  if (agree) {
-    const {value} = await ElMessageBox.prompt(
-        `同意重新指派保管人（变更单 ${row.opNo}，目标 ${row.companyUscc}）？累计同意数达到 ${row.voteRequired ?? 4} 将自动执行重绑。投票意见可留空。`,
-        '投票：同意',
-        {type: 'success', confirmButtonText: '同意', cancelButtonText: '取消', inputPlaceholder: '投票意见（选填）'}
-    )
-    await voteCompanyOp(row.id, {agree: true, comment: String(value || '').trim() || undefined})
-  } else {
-    const {value} = await ElMessageBox.prompt(
-        `驳回重新指派保管人（变更单 ${row.opNo}）？累计驳回达到 2 票即整单否决。驳回意见必填。`,
-        '投票：驳回',
-        {
-          type: 'error',
-          confirmButtonText: '驳回',
-          cancelButtonText: '取消',
-          inputPlaceholder: '驳回原因（必填）',
-          inputValidator: v => (String(v || '').trim() ? true : '驳回必须填写投票意见')
-        }
-    )
-    await voteCompanyOp(row.id, {agree: false, comment: String(value).trim()})
-  }
-  ElMessage.success('投票已记录')
-  await load()
-}
-
-async function onTakeReceipt(row) {
-  await ElMessageBox.confirm(
-      '接入密钥仅展示一次，领取后无法再次查看；关闭弹窗后如未保存，只能重新发起重置变更单。',
-      '领取接入凭证',
-      {type: 'warning', confirmButtonText: '领取', cancelButtonText: '取消'}
-  )
-  const res = await takeCompanyOpReceipt(row.id)
-  showCredential(res.data || {})
-  await load()
 }
 
 onMounted(async () => {

@@ -62,13 +62,20 @@ public class WorkflowEngineService {
      */
     @Transactional(rollbackFor = Exception.class)
     public FlowInstance start(StartRequest req) {
+        return start(req, requireCurrentUser());
+    }
+
+    /**
+     * 启动流程（发起人显式传入）：供无登录态通道（对外 API）建单时起流程用。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public FlowInstance start(StartRequest req, LoginUser user) {
         if (req == null || req.getFlowCode() == null || req.getFlowCode().isBlank()) {
             throw new IllegalArgumentException("流程编码不能为空");
         }
         if (req.getBusinessId() == null || req.getBusinessId().isBlank()) {
             throw new IllegalArgumentException("业务单据ID不能为空");
         }
-        LoginUser user = requireCurrentUser();
         FlowDefinition def = defService.getPublished(req.getFlowCode());
         if (def == null) {
             throw new IllegalArgumentException("流程未发布或不存在：" + req.getFlowCode());
@@ -303,6 +310,20 @@ public class WorkflowEngineService {
         req.setBusinessId(businessId);
         req.setAssigneeUserId(assigneeUserId);
         return start(req);
+    }
+
+    /**
+     * 无登录态通道（对外 API）建单时发起流程：发起人不是自然人，
+     * 按「人员身份口径」发起人 id 留空、姓名写 API 客户端名称。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public FlowInstance startForBusiness(String flowCode, String businessId, Long assigneeUserId,
+                                         Long starterUserId, String starterName) {
+        StartRequest req = new StartRequest();
+        req.setFlowCode(flowCode);
+        req.setBusinessId(businessId);
+        req.setAssigneeUserId(assigneeUserId);
+        return start(req, new LoginUser(starterUserId, starterName, null, false, null));
     }
 
     /**

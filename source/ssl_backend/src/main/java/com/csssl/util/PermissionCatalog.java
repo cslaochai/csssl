@@ -44,8 +44,9 @@ public final class PermissionCatalog {
     public static final String MENU_USERS = "menu:users";
     public static final String MENU_ROLES = "menu:roles";
     public static final String MENU_AUDIT = "menu:audit";
-    public static final String MENU_APPROVAL_CENTER = "menu:approval-center";
     public static final String MENU_MY_APPROVALS = "menu:my-approvals";
+    public static final String MENU_WORKFLOW = "menu:workflow";
+    public static final String WORKFLOW_EDIT = "workflow:edit";
 
     // ===== 操作权限点 =====
     public static final String APP_SUBMIT = "app:submit";
@@ -124,8 +125,9 @@ public final class PermissionCatalog {
         menu(MENU_USERS, "用户管理", "管理账号的建号、改角色、启停与重置口令");
         menu(MENU_ROLES, "角色配置", "角色档案与菜单/按钮权限授权");
         menu(MENU_AUDIT, "审计日志", "操作留痕查询、验签与归档（审计独立）");
-        menu(MENU_APPROVAL_CENTER, "审批中心", "二级CA重建申请单查询、保管人审批（附本人份额）与发起人执行重建");
         menu(MENU_MY_APPROVALS, "我的待办", "四条审批流统一聚合：待我处理 / 我发起的 / 已办，一屏看完当前该谁管");
+        menu(MENU_WORKFLOW, "流程管理", "审批流程定义的查看与可视化编排（安全管理员配置，系统管理员只读巡检）");
+        action("流程管理", WORKFLOW_EDIT, "流程编辑", "流程定义的编辑/发布/撤销/删除，仅安全管理员；系统管理员只读巡检");
 
         // ---------- RA 申请 ----------
         action("RA申请", APP_SUBMIT, "提交证书申请", "录入员代录申请单，与审核分离");
@@ -179,7 +181,7 @@ public final class PermissionCatalog {
         action("用户与角色", USER_UPDATE, "修改账号", "改角色/启停/重置口令");
         action("用户与角色", ROLE_UPDATE, "编辑角色档案", "名称/职责/排序/启停");
         action("用户与角色", ROLE_PERM, "配置角色权限", "菜单与按钮授权，不得越法定边界");
-        action("用户与角色", APICLIENT_MANAGE, "管理API客户端", "外部系统接入凭证登记、轮换与启停（secret 仅展示一次）");
+        action("用户与角色", APICLIENT_MANAGE, "管理系统接入", "公司下系统的接入凭证登记、轮换与启停（secret 仅展示一次）");
 
         // ---------- 审计 ----------
         action("审计", AUDIT_VIEW, "查看审计日志", "审计独立，仅审计员可读");

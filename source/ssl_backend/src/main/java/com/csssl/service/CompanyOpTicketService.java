@@ -24,6 +24,7 @@ import com.csssl.util.PermissionCatalog;
 import com.csssl.vo.ApiClientSecretVO;
 import com.csssl.vo.CompanyOpReceiptVO;
 import com.csssl.workflow.WorkflowEngineService;
+import com.csssl.workflow.dto.TaskVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -112,13 +113,14 @@ public class CompanyOpTicketService {
                     .like(CompanyOpTicket::getCompanyUscc, kw).or()
                     .like(CompanyOpTicket::getCompanyName, kw));
         }
-        applyViewerScope(qw, viewer);
+        Set<String> myFlowNos = myFlowBizNos(viewer);
+        applyViewerScope(qw, viewer, myFlowNos);
         qw.orderByDesc(CompanyOpTicket::getCreatedAt);
         Page<CompanyOpTicket> page = ticketMapper.selectPage(new Page<>(pageNo, pageSize), qw);
         for (CompanyOpTicket t : page.getRecords()) {
             fillVoteState(t, viewer);
             fillActorState(t, viewer);
-            markReviewable(t, viewer);
+            markReviewable(t, viewer, myFlowNos);
         }
         return page;
     }
@@ -128,20 +130,39 @@ public class CompanyOpTicketService {
         if (ticket == null) {
             throw new IllegalArgumentException("变更单不存在（id=" + id + "）");
         }
-        markReviewable(ticket, viewer);
+        Set<String> myFlowNos = myFlowBizNos(viewer);
+        markReviewable(ticket, viewer, myFlowNos);
         fillVoteState(ticket, viewer);
         fillActorState(ticket, viewer);
         return ticket;
     }
 
     /**
+     * 流程当前环节派给「我」的单号集合：一次取回，供列表可见范围与逐行动作位共用
+     * （逐行 engine.canHandle 会按页行数放大成 N+1）。无审批权限点的视角返回空集。
+     */
+    private Set<String> myFlowBizNos(LoginUser viewer) {
+        if (!viewer.getPermissions().contains(PermissionCatalog.COMPANY_OP_APPROVE)) {
+            return Set.of();
+        }
+        Set<String> nos = new HashSet<>();
+        for (TaskVO task : engine.myPendingTasks()) {
+            if (task.getBusinessId() != null && !task.getBusinessId().isBlank()) {
+                nos.add(task.getBusinessId());
+            }
+        }
+        return nos;
+    }
+
+    /**
      * 角色可见范围（仅全局账号可参与公司生命周期）：
-     * 持 company:op:approve 的公司审批员收窄到「与我相关 + 我能处理」；
+     * 持 company:op:approve 的公司审批员收窄到「发起人=我 OR 指派处理人=我 OR 审核人=我
+     * OR 流程当前环节办理人=我 OR 无人认领的待审批单」；
      * 密钥管理员（KEY_ADMIN）需对「重新指派保管人」单投票，保持全量可见；
      * 监管/只读角色（ADMIN/RA_ADMIN/AUDITOR/SECURITY_ADMIN）全量只读；
      * 普通发起人（COMPANY_ADMIN）仅看自己提交的。
      */
-    private void applyViewerScope(LambdaQueryWrapper<CompanyOpTicket> qw, LoginUser viewer) {
+    private void applyViewerScope(LambdaQueryWrapper<CompanyOpTicket> qw, LoginUser viewer, Set<String> myFlowNos) {
         List<String> perms = viewer.getPermissions();
         String role = viewer.getRoleCode();
         boolean canApprove = perms.contains(PermissionCatalog.COMPANY_OP_APPROVE);
@@ -154,21 +175,29 @@ public class CompanyOpTicketService {
             return;
         }
         Long me = viewer.getUserId();
-        qw.and(w -> w.eq(CompanyOpTicket::getAssigneeUserId, me)
-                .or().eq(CompanyOpTicket::getRequestedByUserId, me)
-                .or().eq(CompanyOpTicket::getReviewedByUserId, me)
-                // 流程驱动后审批人由节点配置决定：待审单对持审批权的账号放开可见
-                // 「重新指派保管人」仍走原保管人投票通道，不在此放开
-                .or(x -> x.eq(CompanyOpTicket::getStatus, TicketStatusEnum.PENDING.getCode())
-                        .ne(CompanyOpTicket::getOpType, "REASSIGN_HOLDERS")));
+        qw.and(w -> {
+            w.eq(CompanyOpTicket::getAssigneeUserId, me)
+                    .or().eq(CompanyOpTicket::getRequestedByUserId, me)
+                    .or().eq(CompanyOpTicket::getReviewedByUserId, me);
+            if (!myFlowNos.isEmpty()) {
+                // 当前环节办理人以流程为准（assignee 列只是提交时的快照，节点流转后不再代表处理人）
+                w.or().in(CompanyOpTicket::getOpNo, myFlowNos);
+            }
+            // 「无人认领」逃生门：与 markReviewable 的接管判据同口径，防单据因处理人停用/离职永久卡死；
+            // 「重新指派保管人」仍走原保管人投票通道，不在此放开
+            w.or(x -> x.eq(CompanyOpTicket::getStatus, TicketStatusEnum.PENDING.getCode())
+                    .ne(CompanyOpTicket::getOpType, CompanyOpTypeEnum.REASSIGN_HOLDERS.getCode())
+                    .apply(UNCLAIMED_ASSIGNEE_SQL));
+        });
     }
 
     /**
      * 逐行标注当前登录人可做的动作：reviewable（可审批）/ urgeable（可催办）。
      * 「重新指派保管人」单走原保管人投票分支，不进入公司审批员通道，故 reviewable/urgeable 置否。
-     * reviewable 与 {@link #checkAssignee} 同一口径，前端据此隐藏按钮（不置灰）。
+     * reviewable 与 {@link #checkAssignee} 同一口径，前端据此隐藏按钮（不置灰）：
+     * 有流程实例只认「流程当前环节办理人=我」（与列表可见范围同一个集合），历史无实例的单回落到被指派人。
      */
-    private void markReviewable(CompanyOpTicket ticket, LoginUser viewer) {
+    private void markReviewable(CompanyOpTicket ticket, LoginUser viewer, Set<String> myFlowNos) {
         boolean canReview = viewer.getPermissions().contains(PermissionCatalog.COMPANY_OP_APPROVE);
         if (CompanyOpTypeEnum.REASSIGN_HOLDERS.getCode().equals(ticket.getOpType())) {
             ticket.setReviewable(false);
@@ -176,12 +205,12 @@ public class CompanyOpTicketService {
             return;
         }
         Long me = viewer.getUserId();
-        Set<Long> enabled = canReview ? enabledCompanyApproverIds() : Set.of();
+        Set<Long> enabled = canReview ? enabledUserIds() : Set.of();
         boolean pending = TicketStatusEnum.PENDING.is(ticket.getStatus());
         boolean flowActive = ticket.getOpNo() != null && engine.hasInstance(ticket.getOpNo());
         ticket.setReviewable(canReview && pending
                 && (flowActive
-                        ? engine.canHandle(ticket.getOpNo(), viewer)
+                        ? myFlowNos.contains(ticket.getOpNo())
                         : isAssigneeTakable(ticket.getAssigneeUserId(), me, enabled)));
         ticket.setUrgeable(pending && ticket.getAssigneeUserId() != null);
     }
@@ -199,11 +228,10 @@ public class CompanyOpTicketService {
         return !enabled.contains(assigneeUserId);
     }
 
-    /** 全部启用状态公司审批员 id（审批人池规模很小，一次取回避免逐行查库） */
-    private Set<Long> enabledCompanyApproverIds() {
+    /** 全部启用状态账号 id（口径与 {@link #checkAssignee}、列表的「无人认领」SQL 一致：在岗指派人只有本人能办） */
+    private Set<Long> enabledUserIds() {
         List<SysUser> users = userMapper.selectList(new LambdaQueryWrapper<SysUser>()
                 .select(SysUser::getId)
-                .eq(SysUser::getRoleCode, "COMPANY_APPROVER")
                 .eq(SysUser::getStatus, 1));
         Set<Long> ids = new HashSet<>();
         users.forEach(u -> ids.add(u.getId()));

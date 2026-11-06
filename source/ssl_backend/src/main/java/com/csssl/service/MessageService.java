@@ -33,12 +33,27 @@ public class MessageService {
     public void send(String companyUscc, Long recipientUserId, String recipientRealName,
                      LoginUser sender, String type, String title, String content,
                      String bizType, String bizId) {
+        sendAs(companyUscc, recipientUserId, recipientRealName,
+                sender == null ? null : sender.getUserId(),
+                sender == null ? null : sender.getRealName(),
+                type, title, content, bizType, bizId);
+    }
+
+    /**
+     * 发消息（发件人显式指定口径）：无登录态的自动流转与对外 API 通道用，
+     * senderUserId 留空、senderRealName 写「系统」或 API 客户端名称（不为外部通道伪造自然人账号）。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void sendAs(String companyUscc, Long recipientUserId, String recipientRealName,
+                       Long senderUserId, String senderRealName, String type, String title, String content,
+                       String bizType, String bizId) {
         Message m = new Message();
         m.setCompanyUscc(companyUscc == null || companyUscc.isBlank() ? "default" : companyUscc);
         m.setRecipientUserId(recipientUserId);
         m.setRecipientRealName(recipientRealName);
-        m.setSenderUserId(sender == null ? null : sender.getUserId());
-        m.setSenderRealName(sender == null ? AuditMetaObjectHandler.SYSTEM_NAME : sender.getRealName());
+        m.setSenderUserId(senderUserId);
+        m.setSenderRealName(senderRealName == null || senderRealName.isBlank()
+                ? AuditMetaObjectHandler.SYSTEM_NAME : senderRealName);
         m.setType(type);
         m.setTitle(title);
         m.setContent(content);

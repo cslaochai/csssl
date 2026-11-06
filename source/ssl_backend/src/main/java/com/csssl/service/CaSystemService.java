@@ -142,7 +142,7 @@ public class CaSystemService {
     }
 
     /**
-     * 登记接入客户端时校验系统存在（系统名是证书域的业务键）。
+     * 登记接入凭证时校验系统存在（系统名是证书域的业务键）。
      */
     public CaSystem requireByName(String companyUscc, String systemName) {
         String company = companyUscc == null ? null : companyUscc.trim();

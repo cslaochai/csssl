@@ -85,7 +85,14 @@ public class KeyVault {
         try {
             return sm4.decryptStr(entry.getCipherHex().trim());
         } catch (Exception e) {
-            throw new IllegalStateException("私钥解密失败（请核对主密钥 SSL_MASTER_KEY）: " + e.getMessage(), e);
+            // 库内密文只认「写入时那套 store-dir 的 master.key」。启动目录/SSL_STORE_DIR 一变就换 KEK，
+            // 症状是 BadPaddingException。这里把域/条目/盘路径一并带出，避免只留一句「核对 SSL_MASTER_KEY」无从下手。
+            throw new IllegalStateException("私钥解密失败：密文与当前 KEK 不匹配（"
+                    + (scopeCompanyUscc == null ? "default" : scopeCompanyUscc) + "/" + relDir + "/" + name
+                    + "，store-dir=" + legacyStoreDir.toAbsolutePath().normalize()
+                    + "）。多为启动目录或 SSL_STORE_DIR 变更导致换了一套 master.key；"
+                    + "TSA、审计签名等可再生密钥可删除对应 ssl_key_vault 条目后重启自动重建，"
+                    + "SUB_CA/接入凭证等密钥必须找回原 KEK: " + e.getMessage(), e);
         }
     }
 

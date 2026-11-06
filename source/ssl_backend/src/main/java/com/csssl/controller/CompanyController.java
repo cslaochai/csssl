@@ -8,14 +8,18 @@ import com.csssl.dto.CompanyUsccDTO;
 import com.csssl.entity.CaCompany;
 import com.csssl.entity.LoginUser;
 import com.csssl.entity.CompanyKeyShare;
+import com.csssl.service.ApiClientService;
 import com.csssl.service.CaService;
+import com.csssl.service.CaSystemService;
 import com.csssl.service.CompanyProvisionService;
 import com.csssl.service.CompanyService;
 import com.csssl.util.UserUtils;
 import com.csssl.vo.CaSubCaHolderVO;
+import com.csssl.vo.CaSystemVO;
 import com.csssl.vo.CompanyCreateVO;
 import com.csssl.vo.CompanyDetailVO;
 import com.csssl.vo.CompanyVO;
+import com.csssl.vo.ApiClientVO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +29,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -41,6 +48,8 @@ public class CompanyController {
     private final CompanyService companyService;
     private final CompanyProvisionService companyProvisionService;
     private final CaService caService;
+    private final CaSystemService caSystemService;
+    private final ApiClientService apiClientService;
 
     /**
      * 新建公司（直接执行，仅全局账号；返回一次性接入凭证，secret 不落库）
@@ -91,7 +100,48 @@ public class CompanyController {
             h.setHolderRealName(s.getHolderRealName());
             return h;
         }).collect(Collectors.toList()));
+        // 公司下的系统 + 接入凭证（只读巡检；不含 secret）
+        vo.setSystems(buildSystemBindings(company.getUscc()));
         return Result.success("查询成功", vo);
+    }
+
+    /**
+     * 组装公司下的系统与接入凭证一览：以系统为主表，凭证按 systemName 匹配；
+     * 未登记凭证的系统也列出（appId 为空）。供管理员只读巡检，无需 apiclient:manage 权限。
+     */
+    private List<CompanyDetailVO.SystemBindingVO> buildSystemBindings(String uscc) {
+        List<CaSystemVO> systems = caSystemService.listByCompany(uscc);
+        List<ApiClientVO> clients = apiClientService.list().stream()
+                .filter(c -> uscc.equals(c.getCompanyUscc()))
+                .collect(Collectors.toList());
+        Map<String, ApiClientVO> bySystem = clients.stream()
+                .collect(Collectors.toMap(ApiClientVO::getSystemName, c -> c, (a, b) -> a));
+        List<CompanyDetailVO.SystemBindingVO> rows = new ArrayList<>();
+        for (CaSystemVO s : systems) {
+            CompanyDetailVO.SystemBindingVO row = new CompanyDetailVO.SystemBindingVO();
+            row.setSystemName(s.getSystemName());
+            ApiClientVO client = bySystem.remove(s.getSystemName());
+            if (client != null) {
+                row.setAppId(client.getAppId());
+                row.setStatus(client.getStatus());
+                row.setSecretVersion(client.getSecretVersion());
+                row.setLastUsedAt(client.getLastUsedAt() == null ? null
+                        : client.getLastUsedAt().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            }
+            rows.add(row);
+        }
+        // 存量凭证未归属任何系统（system_name 为空）时也要展示
+        for (ApiClientVO client : bySystem.values()) {
+            CompanyDetailVO.SystemBindingVO row = new CompanyDetailVO.SystemBindingVO();
+            row.setSystemName(client.getClientName());
+            row.setAppId(client.getAppId());
+            row.setStatus(client.getStatus());
+            row.setSecretVersion(client.getSecretVersion());
+            row.setLastUsedAt(client.getLastUsedAt() == null ? null
+                    : client.getLastUsedAt().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            rows.add(row);
+        }
+        return rows;
     }
 
     private String clientIp(HttpServletRequest request) {

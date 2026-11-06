@@ -21,10 +21,10 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 外部系统 API 客户端管理（仅全局账号）：登记/轮换/启停，secret 仅登记与轮换响应展示一次。
+ * 系统接入凭证管理（仅全局账号）：登记/轮换/启停，secret 仅登记与轮换响应展示一次。
  *
  * <p>接入凭证归公司管理员（apiclient:manage），系统管理员只读巡检、不得登记或轮换；
- * 客户端绑定的公司在登记时确定，外部请求 URL 不携带公司标识。</p>
+ * 凭证绑定的公司在登记时确定，外部请求 URL 不携带公司标识。</p>
  */
 @RestController
 @RequestMapping("/admin/api-clients")
@@ -35,7 +35,7 @@ public class ApiClientAdminController {
     private final ApiClientService clientService;
 
     /**
-     * 客户端列表（不返回 secret）
+     * 系统接入凭证列表（不返回 secret）
      */
     @PostMapping("/list")
     public Result<List<ApiClientVO>> list() {
@@ -44,7 +44,7 @@ public class ApiClientAdminController {
     }
 
     /**
-     * 登记客户端：返回一次性 secret，调用方须立即妥善保存
+     * 登记系统接入凭证：返回一次性 secret，调用方须立即妥善保存
      */
     @PostMapping("/create")
     public Result<ApiClientSecretVO> create(@Valid @RequestBody ApiClientCreateDTO body,
@@ -69,7 +69,7 @@ public class ApiClientAdminController {
     }
 
     /**
-     * 启停客户端
+     * 启停系统接入凭证
      */
     @PostMapping("/status")
     public Result<ApiClientVO> status(@Valid @RequestBody BoolIdDTO body,

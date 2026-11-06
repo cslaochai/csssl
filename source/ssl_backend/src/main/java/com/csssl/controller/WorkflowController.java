@@ -2,11 +2,13 @@ package com.csssl.controller;
 
 import com.csssl.common.Result;
 import com.csssl.dto.WorkflowDiagramDTO;
+import com.csssl.dto.WorkflowTodoDetailDTO;
 import com.csssl.service.WorkflowTodoService;
 import com.csssl.util.UserUtils;
 import com.csssl.vo.WorkflowDiagramVO;
 import com.csssl.vo.WorkflowStepStateVO;
 import com.csssl.vo.WorkflowTodoBoardVO;
+import com.csssl.vo.WorkflowTodoDetailVO;
 import com.csssl.enums.AssignStrategyEnum;
 import com.csssl.workflow.WorkflowDefinition;
 import com.csssl.workflow.WorkflowRegistry;
@@ -97,23 +99,32 @@ public class WorkflowController {
             } else if (s.getCode().equals(currentCode)) {
                 state = "CURRENT";
             } else if (s.isTerminal()) {
-                state = "DONE";
+                // 终态节点（如"完成"）只有在流程真正走到它（流程已结束，currentCode==终态本身）时才亮绿；
+                // 流程还在中间步骤时它应保持灰色待办，不能提前亮绿误导用户以为已走完。
+                state = "PENDING";
             } else {
                 state = si >= 0 && si < currentIdx ? "DONE" : "PENDING";
             }
 
-            steps.add(new WorkflowStepStateVO(s.getCode(), s.getName(), s.getActorLabel(),
+            String label = s.getActorLabel();
+            if ("CURRENT".equals(state) && assigneeRealName != null && !assigneeRealName.isBlank()) {
+                label = s.getActorLabel() + " · " + assigneeRealName;
+            }
+            steps.add(new WorkflowStepStateVO(s.getCode(), s.getName(), label,
                     s.getAssignStrategy().name(), s.isTerminal(), state));
         }
 
-        // 驳回/撤销后不会再有「下一审批人」
+        // 「下一步」= 当前节点审批通过后流转到的下一节点（不是当前节点本身）。
+        // 当前节点的具体处理人已在顶部 alert 展示，这里只展示下一环节的角色名；
+        // 下一节点若是终态（DONE/完成）则不再显示"下一步"。
         String nextLabel = null;
-        if (!rejected && !cancelled && current != null && !current.isTerminal()) {
-            if (current.getAssignStrategy() == AssignStrategyEnum.SINGLE_LEAST_BACKLOG
-                    && assigneeRealName != null && !assigneeRealName.isBlank()) {
-                nextLabel = assigneeRealName + "（" + current.getActorLabel() + "）";
-            } else {
-                nextLabel = current.getActorLabel();
+        if (!rejected && !cancelled && current != null && !current.isTerminal() && currentIdx >= 0) {
+            int nextIdx = currentIdx + 1;
+            if (nextIdx < def.getSteps().size()) {
+                WorkflowStep nextStep = def.getSteps().get(nextIdx);
+                if (!nextStep.isTerminal()) {
+                    nextLabel = nextStep.getActorLabel();
+                }
             }
         }
 
@@ -128,10 +139,20 @@ public class WorkflowController {
 
     /**
      * 统一待办看板：把四条审批流里「与我相关」的单据收敛成一份清单（待我处理 / 我发起的 / 已办）。
-     * 供「审批中心聚合页」一屏看完，不再需要在四个页面之间来回切。
+     * 每行都带服务端算好的可执行动作，前端不再逐行回查四个业务接口。
      */
     @PostMapping("/todo")
     public Result<WorkflowTodoBoardVO> todo() {
         return Result.success("查询成功", todoService.board(UserUtils.requireLoginUser()));
+    }
+
+    /**
+     * 待办详情：一次返回待办行 + 完整业务行 + 审批轨迹 + 流程轨迹，供弹窗直接渲染。
+     * 可见性口径与看板完全一致——看板里看不到的单，这里同样取不到。
+     */
+    @PostMapping("/todo-detail")
+    public Result<WorkflowTodoDetailVO> todoDetail(@Valid @RequestBody WorkflowTodoDetailDTO body) {
+        return Result.success("查询成功",
+                todoService.detailTodo(body.getBizType(), body.getBizId(), UserUtils.requireLoginUser()));
     }
 }

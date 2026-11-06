@@ -20,7 +20,8 @@ import java.util.List;
 /**
  * 流程定义 CRUD —— 自研轻量引擎的定义侧，供前端拖拽设计器使用。
  *
- * <p>权限口径：流程设计器属于系统级能力，授予 ADMIN 与 SECURITY_ADMIN。</p>
+ * <p>权限口径：列表/设计器回显 ADMIN 与 SECURITY_ADMIN 都能看（ADMIN 只读巡检）；
+ * 保存/发布/删除等写操作仅 SECURITY_ADMIN（安全管理员）。</p>
  *
  * <p>接口约定：URL 路径中不出现雪花 ID（避免前端精度丢失和日志噪音），
  * 读写一律通过 query 参数或请求体传递。</p>
@@ -81,6 +82,7 @@ public class WorkflowDefController {
      * 保存（新增或更新），保存后为草稿；返回的 id 按字符串下发，防止前端精度丢失
      */
     @PostMapping("/save")
+    @PreAuthorize("hasRole('SECURITY_ADMIN')")
     public Result<String> save(@RequestBody DefJson defJson, HttpServletRequest request) {
         Long id = defService.save(defJson);
         auditService.record(UserUtils.requireLoginUser(), "WORKFLOW_DEF_SAVE", String.valueOf(id),
@@ -93,6 +95,7 @@ public class WorkflowDefController {
      * 保存并发布（设计器用）：一次事务内先保存当前设计，再发布
      */
     @PostMapping("/save-publish")
+    @PreAuthorize("hasRole('SECURITY_ADMIN')")
     public Result<String> saveAndPublish(@RequestBody DefJson defJson, HttpServletRequest request) {
         Long id = defService.saveAndPublish(defJson);
         auditService.record(UserUtils.requireLoginUser(), "WORKFLOW_DEF_PUBLISH", String.valueOf(id),
@@ -105,6 +108,7 @@ public class WorkflowDefController {
      * 发布（列表页用：仅切换发布状态）
      */
     @PostMapping("/publish")
+    @PreAuthorize("hasRole('SECURITY_ADMIN')")
     public Result<Boolean> publish(@RequestBody DefIdRequest req, HttpServletRequest request) {
         defService.publish(req.getId());
         DefJson design = defService.queryDesign(req.getId());
@@ -118,6 +122,7 @@ public class WorkflowDefController {
      * 取消发布
      */
     @PostMapping("/unpublish")
+    @PreAuthorize("hasRole('SECURITY_ADMIN')")
     public Result<Boolean> unpublish(@RequestBody DefIdRequest req, HttpServletRequest request) {
         defService.unpublish(req.getId());
         auditService.record(UserUtils.requireLoginUser(), "WORKFLOW_DEF_UNPUBLISH", String.valueOf(req.getId()),
@@ -129,6 +134,7 @@ public class WorkflowDefController {
      * 删除（级联删除节点与跳转）
      */
     @PostMapping("/delete")
+    @PreAuthorize("hasRole('SECURITY_ADMIN')")
     public Result<Boolean> delete(@RequestBody DefIdRequest req, HttpServletRequest request) {
         defService.delete(req.getId());
         auditService.record(UserUtils.requireLoginUser(), "WORKFLOW_DEF_DELETE", String.valueOf(req.getId()),

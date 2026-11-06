@@ -32,7 +32,7 @@
     <div class="page-card">
       <div class="section-title">业务系统对接示例</div>
       <pre class="cmd-block"># 1. 获取 TSA 验签公钥（匿名可取）
-curl -s http://&lt;CA主机&gt;:8092/ssl/tsa/publicKey
+curl -s -X POST http://&lt;CA主机&gt;:8092/ssl/tsa/public-key
 
 # 2. 对内容摘要盖时间戳（SHA-256/SM3 摘要的 64 位十六进制）
 curl -s -X POST http://&lt;CA主机&gt;:8092/ssl/tsa/stamp \

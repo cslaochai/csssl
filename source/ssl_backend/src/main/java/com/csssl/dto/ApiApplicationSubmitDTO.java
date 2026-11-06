@@ -22,7 +22,8 @@ public class ApiApplicationSubmitDTO {
     private String externalRequestId;
 
     /**
-     * 申请人类别：INSTITUTION-单位 / PERSON-个人
+     * 申请人类别：历史上由调用方传入；当前对外 API 通道只发医生个人客户端证书，
+     * 服务端一律按 PERSON 落库，本字段仅做协议兼容保留，传入值会被忽略。
      */
     @NotBlank(message = "applicantType 不能为空（INSTITUTION / PERSON）")
     @Pattern(regexp = "INSTITUTION|PERSON", message = "applicantType 只能是 INSTITUTION 或 PERSON")
@@ -57,14 +58,18 @@ public class ApiApplicationSubmitDTO {
     private String description;
 
     /**
-     * HIS 员工主键（对账用，可空）
+     * HIS 员工主键（历史字段，已废弃：对外 API 通道只认工号，本字段传入值会被忽略）
      */
     @Size(max = 64, message = "externalEmployeeId 不超过64字符")
+    @Deprecated
     private String externalEmployeeId;
 
     /**
-     * 工号（对账用，可空）
+     * 工号（必填）：医生在本公司内的唯一身份锚点。
+     * 同一公司下工号唯一，CA 侧会强制把它写进证书 DN 的 OU= 字段并做唯一性校验；
+     * 外部 API 吊销时也按工号交叉校验，杜绝"拿 A 医生的序列号吊 B 医生的证"。
      */
+    @NotBlank(message = "externalEmployeeCode（工号）不能为空：医生身份锚点，同公司下唯一")
     @Size(max = 64, message = "externalEmployeeCode 不超过64字符")
     private String externalEmployeeCode;
 
@@ -75,16 +80,10 @@ public class ApiApplicationSubmitDTO {
     private String externalDeptName;
 
     /**
-     * 个人证书必须带医生身份锚点：吊销时要拿它做交叉校验，申请时不留就没法验。
+     * 对外 API 通道只发医生个人客户端证书，applicantType 由服务端强制为 PERSON，本字段不再参与身份校验。
      */
-    @AssertTrue(message = "applicantType=PERSON 时必须填写医生身份：externalEmployeeCode 与 externalEmployeeId 至少填一个")
+    @AssertTrue(message = "对外 API 通道必须携带 externalEmployeeCode（工号）")
     public boolean isPersonIdentified() {
-        return !"PERSON".equalsIgnoreCase(applicantType)
-                || notBlank(externalEmployeeId)
-                || notBlank(externalEmployeeCode);
-    }
-
-    private static boolean notBlank(String s) {
-        return s != null && !s.isBlank();
+        return externalEmployeeCode != null && !externalEmployeeCode.isBlank();
     }
 }

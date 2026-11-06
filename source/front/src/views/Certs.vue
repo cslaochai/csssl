@@ -348,7 +348,7 @@ import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 // 按钮权限点与后端接口校验一一对应；旧会话（无权限缓存）回退角色判断，服务端仍强校验
 const role = localStorage.getItem('role') || ''
 const permLoaded = permReady()
-const canDownloadCert = permLoaded ? hasPerm('cert:download') : ['OPERATOR', 'CERT_OFFICER'].includes(role)
+const canDownloadCert = permLoaded ? hasPerm('cert:download') : role === 'OPERATOR'
 const canDownloadKey = permLoaded ? hasPerm('cert:key:download') : role === 'KEY_ADMIN'
 
 // 公司域由页面显式选择：列表可留空=跨公司只读，操作单必须指定目标公司

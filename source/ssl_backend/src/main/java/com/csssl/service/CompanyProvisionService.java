@@ -47,13 +47,14 @@ public class CompanyProvisionService {
         // 建根（initRoot 已在 companyService.create 内完成）→ 指定 5 名密钥份额保管人，一人一份落表
         caService.assignRootShares(company.getUscc(), shareHolders);
 
-        // 系统名称 = 主体 O：创建该公司首个系统（幂等；后续系统由「系统管理」单独新增）
+        // 系统名称 = 主体 O：创建该公司首个系统（幂等；后续系统由「系统接入」单独新增）
         CaSystem system = caSystemService.getOrCreate(company.getUscc(), company.getSubjectO(),
                 "建公司时创建的首个系统", actor, ip);
 
         // 为该首个系统登记接入凭证（appId/appSecret 归系统，但 vault 仍按公司域存放，避免改动已验证链路）
+        // 凭证名称留空：由服务端落系统名，与「系统接入」页的展示口径一致
         ApiClientSecretVO credential = apiClientService.create(company.getUscc(),
-                system.getSystemName() + "接入客户端", system.getSystemName(),
+                null, system.getSystemName(),
                 null, null, actor, ip);
 
         auditService.record(actor, "COMPANY_CREATE", company.getUscc(),

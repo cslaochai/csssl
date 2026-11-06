@@ -4,15 +4,17 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
- * 登记外部 API 客户端请求（仅系统管理员）。
+ * 登记系统接入凭证请求（「系统接入」页新增系统时自动调用）。
  */
 @Data
 public class ApiClientCreateDTO {
 
-    @NotBlank(message = "必须指定客户端绑定的公司")
+    @NotBlank(message = "必须指定凭证绑定的公司")
     private String companyUscc;
 
-    @NotBlank(message = "客户端名称不能为空")
+    /**
+     * 凭证名称（可选；留空时服务端用所属系统名，前端不再单独录入）
+     */
     private String clientName;
 
     /**

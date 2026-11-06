@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 外部系统 API 客户端登记与凭证管理。
+ * 系统接入凭证（appId/secret）的登记与生命周期管理。
  *
  * <p>凭证模型：appId 为随机不可猜标识（app_+32hex），secret 为随机密钥（sk_+64hex），
  * secret 经密钥保险库 SM4 加密后落库 ssl_key_vault（rel_dir=api-clients, name=appId），
@@ -36,10 +36,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ApiClientService {
 
-    /**
-     * 无具体系统上下文时使用的兜底客户端名称（存量公司重置凭证路径）
-     */
-    public static final String DEFAULT_CLIENT_NAME = "默认接入客户端";
     private static final String VAULT_DIR = "api-clients";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final char[] HEX = "0123456789abcdef".toCharArray();
@@ -66,12 +62,12 @@ public class ApiClientService {
     }
 
     /**
-     * 登记 API 客户端（仅接入凭证管理员，控制器已校验）：必须指定已登记的系统，返回一次性 secret。
+     * 登记系统接入凭证（仅接入凭证管理员，控制器已校验）：必须指定已登记的系统，返回一次性 secret。
      */
     public ApiClientSecretVO create(String companyUscc, String clientName, String systemName,
                                     String ipAllowlist, String clientCertSha256, LoginUser actor, String ip) {
         if (companyUscc == null || companyUscc.isBlank()) {
-            throw new IllegalArgumentException("必须指定客户端绑定的公司");
+            throw new IllegalArgumentException("必须指定凭证绑定的公司");
         }
         String company = companyUscc.trim();
         CaCompany companyRow = companyService.get(company);
@@ -79,10 +75,10 @@ public class ApiClientService {
             throw new IllegalArgumentException("公司状态不可用: " + company + "（" + companyRow.getStatus() + "）");
         }
         CaSystem system = caSystemService.requireByName(company, systemName);
-        String name = clientName == null || clientName.isBlank()
-                ? system.getSystemName() + "接入客户端" : clientName.trim();
+        // 凭证不再单独起名：留空即用系统名，与「系统接入」页一行一系统的展示口径一致
+        String name = clientName == null || clientName.isBlank() ? system.getSystemName() : clientName.trim();
         if (name.length() > 64) {
-            throw new IllegalArgumentException("客户端名称不超过64字符");
+            throw new IllegalArgumentException("系统名称过长，凭证名称不超过64字符");
         }
         String appId = generateUniqueAppId();
         String secret = generateSecret();
@@ -101,7 +97,7 @@ public class ApiClientService {
         companyVaultResolver.forCompany(company).storeKey(VAULT_DIR, appId, secret);
 
         auditService.record(actor, "API_CLIENT_CREATE", appId,
-                "登记外部API客户端：" + name + "（appId=" + appId + "，公司=" + company
+                "登记系统接入凭证：" + name + "（appId=" + appId + "，公司=" + company
                         + "，系统=" + system.getSystemName()
                         + (client.getIpAllowlist() == null ? "" : "，IP白名单=" + client.getIpAllowlist()) + "）",
                 ip, company);
@@ -122,7 +118,7 @@ public class ApiClientService {
         companyVaultResolver.forCompany(client.getCompanyUscc()).storeKey(VAULT_DIR, client.getAppId(), secret);
 
         auditService.record(actor, "API_CLIENT_ROTATE", client.getAppId(),
-                "轮换外部API客户端密钥：" + client.getClientName() + "（新版本 " + client.getSecretVersion() + "）",
+                "轮换系统接入凭证密钥：" + client.getClientName() + "（新版本 " + client.getSecretVersion() + "）",
                 ip, client.getCompanyUscc());
         log.info("[API客户端] secret 已轮换 appId={}, version={}", client.getAppId(), client.getSecretVersion());
         return secretVo(client, companyName(client.getCompanyUscc()), secret);
@@ -136,7 +132,7 @@ public class ApiClientService {
         client.setStatus(enabled ? 1 : 0);
         clientMapper.updateById(client);
         auditService.record(actor, enabled ? "API_CLIENT_ENABLE" : "API_CLIENT_DISABLE", client.getAppId(),
-                (enabled ? "启用" : "停用") + "外部API客户端：" + client.getClientName(),
+                (enabled ? "启用" : "停用") + "系统接入凭证：" + client.getClientName(),
                 ip, client.getCompanyUscc());
         ApiClientVO vo = ApiClientVO.from(client);
         vo.setCompanyName(companyName(client.getCompanyUscc()));
@@ -159,7 +155,7 @@ public class ApiClientService {
     }
 
     /**
-     * 公司首个接入客户端（无则 null；存量公司重置凭证用）
+     * 公司首个接入凭证（无则 null；存量公司重置凭证用）
      */
     public ApiClient findFirstByCompany(String companyUscc) {
         return clientMapper.selectOne(new LambdaQueryWrapper<ApiClient>()
@@ -176,7 +172,7 @@ public class ApiClientService {
         ApiClient existing = findFirstByCompany(companyUscc);
         if (existing == null) {
             CaSystem system = caSystemService.firstOrCreateForCompany(companyUscc, actor, ip);
-            return create(companyUscc, DEFAULT_CLIENT_NAME, system.getSystemName(),
+            return create(companyUscc, null, system.getSystemName(),
                     null, null, actor, ip);
         }
         return rotate(existing.getId(), actor, ip);
@@ -218,7 +214,7 @@ public class ApiClientService {
         ApiClient client = clientMapper.selectOne(new LambdaQueryWrapper<ApiClient>()
                 .eq(ApiClient::getAppId, appId));
         if (client == null) {
-            throw new IllegalStateException("接入客户端不存在（appId=" + appId + "）");
+            throw new IllegalStateException("接入凭证不存在（appId=" + appId + "）");
         }
         String secret = companyVaultResolver.forCompany(client.getCompanyUscc()).loadKey(VAULT_DIR, appId);
         if (secret == null || secret.isBlank()) {

@@ -49,6 +49,7 @@
       </el-table-column>
       <el-table-column label="操作" width="260" fixed="right" align="center">
         <template #default="{ row }">
+          <template v-if="canEdit">
           <el-button size="small" link type="primary" @click="edit(row)">编辑</el-button>
           <el-button
               v-if="row.isPublish === 1"
@@ -76,6 +77,7 @@
               @click="remove(row)"
           >删除
           </el-button>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -98,10 +100,12 @@ import {computed, onMounted, ref} from 'vue'
 import {useRouter} from 'vue-router'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {deleteDef, listDefs, publishDef, unpublishDef} from '@/api/workflow'
+import {hasPerm} from '@/lib/perm'
 
 const router = useRouter()
 
 const loading = ref(false)
+const canEdit = computed(() => hasPerm('workflow:edit'))
 const keyword = ref('')
 const defs = ref([])
 const page = ref(1)

@@ -385,12 +385,12 @@ export function detailCertOp(id) {
   return request.post('/admin/cert-ops/detail', { id })
 }
 
-// ===== 外部系统 API 客户端（接入凭证）管理 =====
-/** 接入客户端列表（不返回 secret；按公司域自行过滤）；仅 apiclient:manage */
+// ===== 系统接入（每系统一套共享凭证）管理 =====
+/** 系统接入凭证列表（不返回 secret；按公司域自行过滤）；仅 apiclient:manage */
 export function listApiClients() {
   return request.post('/admin/api-clients/list', {})
 }
-/** 登记接入客户端：{companyUscc, clientName, systemName, ipAllowlist?, clientCertSha256?} */
+/** 登记系统接入凭证：{companyUscc, systemName, clientName?, ipAllowlist?, clientCertSha256?}（clientName 留空用系统名） */
 export function createApiClient(data) {
   return request.post('/admin/api-clients/create', data)
 }
@@ -408,7 +408,7 @@ export function createSystem(data) {
 export function rotateApiClient(id) {
   return request.post('/admin/api-clients/rotate', { id })
 }
-/** 启停接入客户端：{id, enabled} */
+/** 启停系统接入凭证：{id, enabled} */
 export function setApiClientStatus(id, enabled) {
   return request.post('/admin/api-clients/status', { id, enabled })
 }
@@ -424,7 +424,7 @@ export function exportAuditCsv(companyUscc) {
 
 // ===== TSA 可信时间戳（公开） =====
 export function getTsaPublicKey() {
-  return request.get('/tsa/publicKey')
+  return request.post('/tsa/public-key')
 }
 
 // ===== 公开验证端点（按公司域，无需登录；PKI 协议保留路径段） =====

@@ -20,7 +20,21 @@ spring:
       maximum-pool-size: 10
       minimum-idle: 2
       connection-test-query: SELECT 1
-  # 系统启动不允许执行 DDL/重建表结构：建库建表用 db/schema.sql 手工导入
+  # 系统启动不允许执行 DDL/重建表结构：建库建表用 db/schema.sql 手工导入。
+  # 种子/铺底数据同理：db/data/init-dml.sql + db/data/baseline-data.sql 手工导入，
+  # 启动流程一律不跑 schema.sql / data.sql，避免覆盖已有业务数据。
+  sql:
+    init:
+      mode: never
+      schema-locations: ""
+      data-locations: ""
+      continue-on-error: false
+  # 本工程未引入 spring-boot-starter-data-redis，不存在 redis 初始化/预热动作；
+  # 此处显式留空，后续若引入 redis 也默认不做启动期写入。
+  data:
+    redis:
+      repositories:
+        enabled: false
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml

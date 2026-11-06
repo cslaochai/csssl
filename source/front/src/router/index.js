@@ -17,13 +17,13 @@ const routes = [
   {
     path: '/',
     component: () => import('@/views/Layout.vue'),
-    redirect: '/dashboard',
+    redirect: '/my-approvals',
     children: [
       {
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { title: '概览', perm: 'menu:dashboard', roles: ALL_ROLES, group: 'portal', icon: 'DataBoard' }
+        meta: { title: '概览', perm: 'menu:dashboard', roles: ALL_ROLES, group: 'portal', icon: 'DataBoard', hidden: true }
       },
       {
         path: 'applications',
@@ -35,19 +35,6 @@ const routes = [
           roles: ['ADMIN', 'OPERATOR', 'APPROVER'],
           group: 'business',
           icon: 'EditPen'
-        }
-      },
-      {
-        path: 'application-review',
-        name: 'application-review',
-        component: () => import('@/views/Applications.vue'),
-        // RA申请审核：申请单 + 证书操作单合并一张表，按「单据类型」筛选，审核人在这里批准/驳回/签发
-        meta: {
-          title: 'RA申请审核',
-          perm: 'menu:applications',
-          roles: ['ADMIN', 'APPROVER', 'RA_ADMIN', 'CERT_OFFICER'],
-          group: 'business',
-          icon: 'Stamp'
         }
       },
       {
@@ -98,9 +85,9 @@ const routes = [
         path: 'company-ops',
         name: 'company-ops',
         component: () => import('@/views/CompanyOps.vue'),
-        // 生命周期变更单：公司管理员发起，公司审批员批准执行（发起人不得自批）
+        // 生命周期变更单台账：公司管理员发起；审批动作已全部收敛到「我的待办」，本页只看不改
         meta: {
-          title: '公司变更审批',
+          title: '公司变更',
           perm: 'menu:company-ops',
           roles: ['ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER'],
           group: 'company',
@@ -139,31 +126,6 @@ const routes = [
         meta: { title: '审计日志', perm: 'menu:audit', roles: ['AUDITOR', 'ADMIN'], group: 'platform', icon: 'Memo' }
       },
       {
-        path: 'messages',
-        name: 'messages',
-        component: () => import('@/views/MessageCenter.vue'),
-        // 消息待办（原消息中心更名）：全员可见本人消息；并聚合「待我审批 / 待我执行」待办
-        meta: {
-          title: '消息待办',
-          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'CERT_OFFICER', 'AUDIT_ADMIN'],
-          group: 'portal',
-          icon: 'Bell'
-        }
-      },
-      {
-        path: 'approval-center',
-        name: 'approval-center',
-        component: () => import('@/views/ApprovalCenter.vue'),
-        // 审批中心：二级CA重建申请单的分页查询 + 审批弹框（审批时填入本人密钥份额）+ 执行重建
-        meta: {
-          title: '审批中心',
-          perm: 'menu:approval-center',
-          roles: ['ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN'],
-          group: 'portal',
-          icon: 'Stamp'
-        }
-      },
-      {
         path: 'my-approvals',
         name: 'my-approvals',
         component: () => import('@/views/MyApprovals.vue'),
@@ -172,7 +134,19 @@ const routes = [
           title: '我的待办',
           perm: 'menu:my-approvals',
           roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN',
-            'COMPANY_ADMIN', 'COMPANY_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'CERT_OFFICER', 'AUDIT_ADMIN'],
+            'COMPANY_ADMIN', 'COMPANY_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'AUDIT_ADMIN'],
+          group: 'portal',
+          icon: 'Bell'
+        }
+      },
+      {
+        path: 'messages',
+        name: 'messages',
+        component: () => import('@/views/MessageCenter.vue'),
+        // 消息待办（原消息中心更名）：全员可见本人消息；并聚合「待我审批 / 待我执行」待办
+        meta: {
+          title: '消息待办',
+          roles: ['ADMIN', 'OPERATOR', 'APPROVER', 'AUDITOR', 'SECURITY_ADMIN', 'KEY_ADMIN', 'COMPANY_ADMIN', 'COMPANY_APPROVER', 'USER_ADMIN', 'RA_ADMIN', 'AUDIT_ADMIN'],
           group: 'portal',
           icon: 'Bell'
         }
@@ -184,6 +158,7 @@ const routes = [
         // 流程管理：列表（分页查询）+ 操作列（编辑 / 发布·撤销 / 删除）
         meta: {
           title: '流程管理',
+          perm: 'menu:workflow',
           roles: ['ADMIN', 'SECURITY_ADMIN'],
           group: 'platform',
           icon: 'Connection'

@@ -104,9 +104,24 @@ public class CaApiService {
         }
         CertTemplate tpl = resolveTemplate(company, body.getTemplateCode());
 
+        // 对外 API 通道定位收死：只发医生个人客户端证书（DOCTOR_SIGN）。
+        // 服务端/公司通信证书（SERVER_COMM）走 CA 管理端手工签，不开放给外部 API；
+        // 历史上 caller 误传 applicantType=INSTITUTION 导致医生证书被记成"单位"且绕过医生身份锚点校验，
+        // 这里不再信任请求体里的 applicantType，一律按 PERSON 落库。
+        if (!"CLIENT".equalsIgnoreCase(tpl.getCertType())) {
+            throw new ApiException(422, "对外 API 仅受理医生客户端证书（模板 certType=CLIENT）；服务端/系统证书请通过 CA 管理端签发");
+        }
+        // 身份锚点统一为工号：HIS 员工主键已废弃，不再读取
+        String employeeCode = trimToNull(body.getExternalEmployeeCode());
+        if (employeeCode == null) {
+            throw new ApiException(400, "医生签名证书必须携带 externalEmployeeCode（工号）：同一公司下唯一，用于吊销时的身份交叉校验");
+        }
+        String employeeId = null;
+
         ApplicationSubmitDTO dto = new ApplicationSubmitDTO();
         dto.setCompanyUscc(company);
-        dto.setApplicantType(body.getApplicantType());
+        // 不再透传 body.getApplicantType()：本通道只发医生个人证书，统一按 PERSON 落库
+        dto.setApplicantType("PERSON");
         dto.setApplicantName(body.getApplicantName());
         dto.setSubjectDn(body.getSubjectDn());
         dto.setTemplateId(tpl.getId());
@@ -119,7 +134,7 @@ public class CaApiService {
         CertApplication app;
         try {
             app = applicationService.submitExternal(dto, client.getAppId(), body.getExternalRequestId(),
-                    requestHash, body.getExternalEmployeeId(), body.getExternalEmployeeCode(),
+                    requestHash, employeeId, employeeCode,
                     body.getExternalDeptName(), apiUsername(client), client.getClientName(), ip, company);
         } catch (DuplicateKeyException e) {
             // 并发同 ID 提交：唯一键兜底，以先落库的单为准（同体重放/异体冲突）
@@ -142,9 +157,9 @@ public class CaApiService {
         if (CertApplicationStatusEnum.CANCELLED.is(app.getStatus())) {
             return toVo(app, false);
         }
-        if (!CertApplicationStatusEnum.PENDING.is(app.getStatus())
-                && !CertApplicationStatusEnum.APPROVED.is(app.getStatus())) {
-            throw new ApiException(409, "申请单当前状态为 " + applicationStatusText(app.getStatus()) + "，不可撤销");
+        // 只有 PENDING（待审核）能撤；一旦审核员批了（APPROVED）就进了签发环节，不能再撤
+        if (!CertApplicationStatusEnum.PENDING.is(app.getStatus())) {
+            throw new ApiException(409, "申请单当前状态为 " + applicationStatusText(app.getStatus()) + "，不可撤销（仅待审核状态可撤）");
         }
         LoginUser apiActor = new LoginUser(1L, "管理员", null, false, null);
         CertApplication cancelled = applicationService.cancel(app.getId(), apiActor, ip,
@@ -164,8 +179,8 @@ public class CaApiService {
      *   <li>医生身份（工号 / HIS 员工主键）与申请单记录一致。</li>
      * </ol>
      */
-    public ApiCertStatusVO revoke(ApiClient client, ApiCertRevokeDTO body, String ip) {
-        CaCert cert = requireCertBySerial(client.getCompanyUscc(), body.getSerialHex());
+    public ApiCertStatusVO revoke(ApiClient client, ApiCertRevokeDTO certRevokeDTO, String ip) {
+        CaCert cert = requireCertBySerial(client.getCompanyUscc(), certRevokeDTO.getSerialHex());
         if ("REVOKED".equals(cert.getStatus())) {
             log.info("[对外API][{}] 吊销幂等命中 appId={}, serial={}",
                     client.getCompanyUscc(), client.getAppId(), cert.getSerialHex());
@@ -173,14 +188,13 @@ public class CaApiService {
         }
         requireRevocableCertType(cert);
         CertApplication app = requireOwnIssuedApplication(client, cert);
-        requireEmployeeMatch(client, app, body);
-        String reason = body.getReason().trim();
+        requirePublicKeyMatch(client, app, certRevokeDTO);
+        String reason = certRevokeDTO.getReason().trim();
         LoginUser apiActor = new LoginUser(1L, "管理员", null, false, null);
         certService.revoke(cert.getId(), reason, apiActor, ip);
         ApiCertStatusVO vo = statusVo(certService.findById(cert.getId()));
-        log.info("[对外API][{}] 吊销证书 appId={}, serial={}, applyNo={}, employee={}, reason={}",
+        log.info("[对外API][{}] 吊销证书 appId={}, serial={}, applyNo={},  reason={}",
                 client.getCompanyUscc(), client.getAppId(), cert.getSerialHex(), app.getApplyNo(),
-                body.getExternalEmployeeCode() == null ? body.getExternalEmployeeId() : body.getExternalEmployeeCode(),
                 reason);
         return vo;
     }
@@ -229,26 +243,37 @@ public class CaApiService {
     }
 
     /**
-     * 医生身份交叉校验：请求携带的工号 / HIS 员工主键必须与申请单记录一致，
-     * 杜绝"拿 A 医生的序列号配 B 医生的身份"吊销。
-     *
-     * <p>存量申请单若两个身份字段都为空，降级为仅按 appId 归属放行并打告警，
-     * 便于数据补齐后收紧；新申请已由 {@link ApiApplicationSubmitDTO#isPersonIdentified()} 强制留痕。
+     * 公钥指纹强校验：吊销时 HIS 回传申请时公钥的 SHA-256 指纹，
+     * CA 与申请单里记录的公钥比对，不一致直接拒绝——没有原始公钥就算不出正确指纹，
+     * 这是吊销的核心身份凭证，不接受降级。
      */
-    private void requireEmployeeMatch(ApiClient client, CertApplication app, ApiCertRevokeDTO body) {
-        String reqEmployeeId = trimToNull(body.getExternalEmployeeId());
-        String reqEmployeeCode = trimToNull(body.getExternalEmployeeCode());
-        String recEmployeeId = trimToNull(app.getExternalEmployeeId());
-        String recEmployeeCode = trimToNull(app.getExternalEmployeeCode());
-        if (recEmployeeId == null && recEmployeeCode == null) {
-            log.warn("[对外API][{}] 吊销降级：存量申请单未记录医生身份，仅按 appId 归属放行 appId={} applyNo={}",
-                    client.getCompanyUscc(), client.getAppId(), app.getApplyNo());
-            return;
+    private void requirePublicKeyMatch(ApiClient client, CertApplication app, ApiCertRevokeDTO body) {
+        String reqFp = trimToNull(body.getPublicKeyFingerprint());
+        if (reqFp == null) {
+            throw new ApiException(400, "吊销必须携带 publicKeyFingerprint（申请时公钥的 SHA-256 指纹）");
         }
-        boolean idMatch = reqEmployeeId != null && reqEmployeeId.equals(recEmployeeId);
-        boolean codeMatch = reqEmployeeCode != null && reqEmployeeCode.equals(recEmployeeCode);
-        if (!idMatch && !codeMatch) {
-            throw new ApiException(403, "医生身份与证书申请记录不一致，拒绝吊销（applyNo=" + app.getApplyNo() + "）");
+        String recFp = publicKeySha256Fingerprint(app.getPublicKeyPem());
+        if (recFp == null || !reqFp.equalsIgnoreCase(recFp)) {
+            throw new ApiException(403, "公钥指纹与申请记录不一致，拒绝吊销（applyNo=" + app.getApplyNo() + "）");
+        }
+    }
+
+    /** 对 PEM 格式公钥做 SHA-256 指纹（hex，小写）。解析失败返回 null。 */
+    private static String publicKeySha256Fingerprint(String publicKeyPem) {
+        if (publicKeyPem == null || publicKeyPem.isBlank()) return null;
+        try {
+            String base64 = publicKeyPem
+                    .replaceAll("-----BEGIN [A-Z ]+-----", "")
+                    .replaceAll("-----END [A-Z ]+-----", "")
+                    .replaceAll("\\s", "");
+            byte[] der = java.util.Base64.getDecoder().decode(base64);
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(der);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
         }
     }
 

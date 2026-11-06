@@ -13,9 +13,12 @@ import com.csssl.mapper.SysUserMapper;
 import com.csssl.util.PermissionCatalog;
 import com.csssl.vo.CertVO;
 import com.csssl.workflow.WorkflowEngineService;
+import com.csssl.workflow.dto.TaskVO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.bouncycastle.asn1.ASN1Encodable;
+import org.bouncycastle.asn1.DERUTF8String;
 import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
 import org.bouncycastle.asn1.x500.RDN;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -99,50 +102,58 @@ public class CertApplicationService {
         if (companyScope != null && !companyScope.isBlank()) {
             qw.eq(CertApplication::getCompanyUscc, companyScope);
         }
-        applyViewerScope(qw, viewer);
+        Set<String> myFlowNos = myFlowBizNos(viewer);
+        applyViewerScope(qw, viewer, myFlowNos);
         qw.orderByDesc(CertApplication::getCreatedAt);
         Page<CertApplication> page = applicationMapper.selectPage(new Page<>(pageNo, pageSize), qw);
-        markReviewable(page.getRecords(), viewer);
+        markReviewable(page.getRecords(), viewer, myFlowNos);
         return page;
     }
 
     /**
-     * 角色可见范围：持有审核/录入/签发权限点的人收窄到「与我相关 + 我能处理」，
+     * 流程当前环节派给「我」的业务单号集合：一次取回，供列表可见范围与逐行动作位共用
+     * （逐行 engine.canHandle 会按页行数放大成 N+1，这里统一按待办集合判定）。
+     * 无审核权限点、不需要按流程收口的视角返回空集。
+     */
+    private Set<String> myFlowBizNos(LoginUser viewer) {
+        List<String> perms = viewer.getPermissions();
+        if (!perms.contains(PermissionCatalog.APP_APPROVE) && !perms.contains(PermissionCatalog.APP_REJECT)
+                && !perms.contains(PermissionCatalog.APP_ISSUE)) {
+            return Set.of();
+        }
+        Set<String> nos = new HashSet<>();
+        for (TaskVO task : engine.myPendingTasks()) {
+            if (task.getBusinessId() != null && !task.getBusinessId().isBlank()) {
+                nos.add(task.getBusinessId());
+            }
+        }
+        return nos;
+    }
+
+    /**
+     * 角色可见范围：持有审核/录入/签发权限点的人收窄到「发起人=我 OR 指派处理人=我 OR 审核人=我
+     * OR 流程当前环节办理人=我 OR 无人认领的待审单」，
      * RA业务管理员（流程监管、可撤销）与纯只读巡检角色（ADMIN/审计员，无上述权限点）保持数据域全量。
      *
      * <p>可见不等于可批——批准/驳回另有 {@link #checkAssignee} 硬校验，
      * 收口口径由 {@link #markReviewable} 回传给前端决定按钮显隐。</p>
      */
-    private void applyViewerScope(LambdaQueryWrapper<CertApplication> qw, LoginUser viewer) {
-        List<String> perms = viewer.getPermissions();
-        boolean canApprove = perms.contains(PermissionCatalog.APP_APPROVE);
-        boolean canSubmit = perms.contains(PermissionCatalog.APP_SUBMIT);
-        boolean canIssue = perms.contains(PermissionCatalog.APP_ISSUE);
-        if ((!canApprove && !canSubmit && !canIssue) || "RA_ADMIN".equals(viewer.getRoleCode())) {
+    private void applyViewerScope(LambdaQueryWrapper<CertApplication> qw, LoginUser viewer, Set<String> myFlowNos) {
+        // 全局只读巡检（ADMIN）与 RA 业务管理员（RA_ADMIN）看全量，不按提交人收口；
+        // 其他角色在本页只看「我提交的」——待我审批/待我签发/我审批过的单一律去「我的待办」处理，不在本列表混排。
+        String role = viewer.getRoleCode();
+        if ("ADMIN".equals(role) || "RA_ADMIN".equals(role)) {
             return;
         }
-        Long me = viewer.getUserId();
-        String pending = CertApplicationStatusEnum.PENDING.getCode();
-        String approved = CertApplicationStatusEnum.APPROVED.getCode();
-        qw.and(w -> {
-            w.eq(CertApplication::getAppliedByUserId, me)
-                    .or().eq(CertApplication::getAssigneeUserId, me)
-                    .or().eq(CertApplication::getReviewedByUserId, me);
-            if (canApprove) {
-                // 流程驱动后审批人由节点配置决定，不再是「谁被指派的谁才可见」；
-                // 待审单对持审批权的账号放开可见，按钮显隐由 markReviewable 按节点办理人回算
-                w.or().eq(CertApplication::getStatus, pending);
-            }
-            if (canIssue) {
-                w.or().eq(CertApplication::getStatus, approved);
-            }
-        });
+        qw.eq(CertApplication::getAppliedByUserId, viewer.getUserId());
     }
 
     /**
      * 逐行标注「当前登录人可否审核」，与 {@link #checkAssignee} 同一口径，前端据此隐藏按钮（不置灰）。
+     * 有流程实例的单只认「流程当前环节办理人=我」（{@code myFlowNos}，与列表可见范围同一个集合）；
+     * 无实例的历史单（含改造前 API 通道建的单）回落到被指派人。
      */
-    private void markReviewable(List<CertApplication> rows, LoginUser viewer) {
+    private void markReviewable(List<CertApplication> rows, LoginUser viewer, Set<String> myFlowNos) {
         if (rows == null || rows.isEmpty()) {
             return;
         }
@@ -155,7 +166,7 @@ public class CertApplicationService {
             boolean flowActive = row.getApplyNo() != null && engine.hasInstance(row.getApplyNo());
             row.setReviewable(canReview && pending.equals(row.getStatus())
                     && (flowActive
-                            ? engine.canHandle(row.getApplyNo(), viewer)
+                            ? myFlowNos.contains(row.getApplyNo())
                             : isAssigneeTakable(row.getAssigneeUserId(), me, enabled)));
             row.setUrgeable(pending.equals(row.getStatus()) && row.getAssigneeUserId() != null);
         }
@@ -206,7 +217,7 @@ public class CertApplicationService {
     public CertApplication detailVisible(Long id, LoginUser viewer) {
         CertApplication app = detail(id);
 
-        markReviewable(List.of(app), viewer);
+        markReviewable(List.of(app), viewer, myFlowBizNos(viewer));
         return app;
     }
 
@@ -247,27 +258,26 @@ public class CertApplicationService {
 
     /**
      * 外部系统直连提交（HIS 等 API）：HIS 侧没有人可挑审批人，按「当前待审积压最少」自动指派，
-     * 与 WEB 通道共用同一套「单必归属到人」口径；其余复用同一套校验与落库，
-     * 另记外部系统/幂等键/渠道，审计主体为 API 客户端（不伪装成自然人）。
+     * 与 WEB 通道走同一套后续动作（起流程 + 回填办理人 + 轨迹 + 站内信），保证审批人在「我的待办」里看得见；
+     * 另记外部系统/幂等键/渠道，审计与轨迹主体为 API 客户端（不伪装成自然人）。
      */
     @Transactional(rollbackFor = Exception.class)
     public CertApplication submitExternal(ApplicationSubmitDTO body, String externalSystem, String externalRequestId,
                                           String requestHash, String employeeId, String employeeCode, String deptName,
                                           String username, String displayName, String ip, String company) {
-        // 外部系统若未在 DN 里写 OU，用其传入的员工号补进 DN（本系统约定 OU=员工编号）
-        if (employeeCode != null && !employeeCode.isBlank()
-                && body.getSubjectDn() != null
-                && !body.getSubjectDn().toUpperCase(Locale.ROOT).contains("OU=")) {
-            body.setSubjectDn(body.getSubjectDn().trim() + ",OU=" + employeeCode.trim());
+        // 工号强制锚定到 DN 的 OU=：HIS 传的 OU= 一律以 externalEmployeeCode 覆盖，
+        // 保证后续 checkSubjectDnCompany + ensureEmployeeNoUnique 校验的就是工号本身（同公司工号唯一）
+        if (employeeCode != null && !employeeCode.isBlank() && body.getSubjectDn() != null) {
+            body.setSubjectDn(forceEmployeeNoInDn(body.getSubjectDn().trim(), employeeCode.trim()));
         }
-        body.setAssigneeUsername(leastPendingApprover().getUsername());
+        SysUser approver = leastPendingApprover();
         Long userId = null;
         if (username != null && !username.isBlank()) {
             SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getUsername, username.trim()));
             userId = user == null ? null : user.getId();
         }
-        CertApplication app = createAs(body, userId, displayName, company);
+        CertApplication app = createAs(body, userId, displayName, company, approver);
         app.setChannel("API");
         app.setExternalSystem(externalSystem);
         app.setExternalRequestId(externalRequestId);
@@ -276,9 +286,33 @@ public class CertApplicationService {
         app.setExternalEmployeeCode(blankToNull(employeeCode));
         app.setExternalDeptName(blankToNull(deptName));
         applicationMapper.updateById(app);
+        // 流程只能在单据落库后起：待办的 business_id 就是申请单号，无登录态时发起人记 API 客户端（id 留空）
+        engine.startForBusiness(FLOW_CODE, app.getApplyNo(), approver.getId(), null, displayName);
+        List<SysUser> assignees = engine.pendingAssignees(app.getApplyNo());
+        if (assignees.isEmpty()) {
+            // 流程节点没解析出办理人也要保住「单必归属到人」：回落到自动分派的那个人，避免无人可审
+            assignees = List.of(approver);
+        } else {
+            SysUser first = assignees.get(0);
+            app.setAssigneeUserId(first.getId());
+            app.setAssigneeRealName(first.getRealName());
+            applicationMapper.updateById(app);
+        }
         auditService.recordAs(userId, displayName, "RA_API_SUBMIT", app.getApplyNo(),
                 "外部系统提交证书申请：" + app.getApplicantName() + "（客户端 " + displayName
                         + "，externalRequestId=" + externalRequestId + "）", ip, company);
+        trailService.recordAs(company, app.getId(), app.getApplyNo(), "SUBMIT",
+                userId, displayName, null, null, app.getStatus(), null);
+        trailService.recordAs(company, app.getId(), app.getApplyNo(), "ASSIGN",
+                userId, displayName, null, null, app.getStatus(),
+                "流程节点办理人：" + assignees.stream().map(SysUser::getRealName).distinct()
+                        .collect(java.util.stream.Collectors.joining("、")));
+        for (SysUser assignee : assignees) {
+            messageService.sendAs(app.getCompanyUscc(), assignee.getId(), assignee.getRealName(),
+                    userId, displayName, "APP_SUBMITTED", "您有一条新的证书申请待审批",
+                    "申请单 " + app.getApplyNo() + " 待您审批（提交人：" + app.getAppliedByName() + "）",
+                    "CERT_APPLICATION", String.valueOf(app.getId()));
+        }
         return app;
     }
 
@@ -331,9 +365,10 @@ public class CertApplicationService {
     }
 
     /**
-     * 校验并落一条 PENDING 申请单（外部 API 通道，无登录态，指定 user_id + 姓名快照版）
+     * 校验并落一条 PENDING 申请单（外部 API 通道，无登录态，指定 user_id + 姓名快照 + 已分派审批人版）
      */
-    private CertApplication createAs(ApplicationSubmitDTO body, Long userId, String realName, String company) {
+    private CertApplication createAs(ApplicationSubmitDTO body, Long userId, String realName, String company,
+                                     SysUser approver) {
         String applicantType = body.getApplicantType();
         if (!"INSTITUTION".equals(applicantType) && !"PERSON".equals(applicantType)) {
             throw new IllegalArgumentException("申请人类别仅支持 INSTITUTION-单位 / PERSON-个人");
@@ -371,10 +406,6 @@ public class CertApplicationService {
         app.setAppliedByName(realName);
         app.setAppliedAt(LocalDateTime.now());
         app.setCreatedAt(LocalDateTime.now());
-        String assignee = body.getAssigneeUsername();
-        SysUser approver = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUsername, assignee.trim())
-                .eq(SysUser::getStatus, 1));
         app.setAssigneeUserId(approver.getId());
         app.setAssigneeRealName(approver.getRealName());
         applicationMapper.insert(app);
@@ -386,8 +417,7 @@ public class CertApplicationService {
      * 同积压按账号升序取首个，保证同一时刻分派结果可复现。
      * 审批人池与 /approvers 名单同口径（公司级统管，不按公司过滤）。
      */
-    private SysUser leastPendingApprover() {
-        List<SysUser> pool = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+    private SysUser leastPendingApprover() {        List<SysUser> pool = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                 .select(SysUser::getId, SysUser::getUsername, SysUser::getRealName)
                 .in(SysUser::getRoleCode, "APPROVER", "RA_ADMIN")
                 .eq(SysUser::getStatus, 1)
@@ -399,6 +429,45 @@ public class CertApplicationService {
         QueryWrapper<CertApplication> group = new QueryWrapper<>();
         group.select("assignee_user_id as assignee", "count(1) as cnt")
                 .eq("status", CertApplicationStatusEnum.PENDING.getCode())
+                .in("assignee_user_id", pool.stream().map(SysUser::getId).toList())
+                .groupBy("assignee_user_id");
+        for (Map<String, Object> row : applicationMapper.selectMaps(group)) {
+            Object assignee = row.get("assignee");
+            Object cnt = row.get("cnt");
+            if (assignee != null && cnt instanceof Number n) {
+                backlog.put(Long.valueOf(String.valueOf(assignee)), n.longValue());
+            }
+        }
+        SysUser chosen = pool.get(0);
+        long min = Long.MAX_VALUE;
+        for (SysUser u : pool) {
+            long cnt = backlog.getOrDefault(u.getId(), 0L);
+            if (cnt < min) {
+                min = cnt;
+                chosen = u;
+            }
+        }
+        return chosen;
+    }
+
+    /**
+     * 签发员池兜底（审批通过后下一节点未解析出具体办理人时用）：取启用状态的 CA操作员里
+     * 当前「已批准待签发」积压最少的一个，同积压按账号升序，保证分派可复现。
+     * 与 leastPendingApprover 同一套口径，只是角色池与积压状态换成签发侧。
+     */
+    private SysUser leastPendingIssuer() {
+        List<SysUser> pool = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .select(SysUser::getId, SysUser::getUsername, SysUser::getRealName)
+                .eq(SysUser::getRoleCode, "OPERATOR")
+                .eq(SysUser::getStatus, 1)
+                .orderByAsc(SysUser::getUsername));
+        if (pool.isEmpty()) {
+            throw new IllegalStateException("当前无启用状态的 CA操作员，无法承接已批准申请的签发");
+        }
+        Map<Long, Long> backlog = new HashMap<>();
+        QueryWrapper<CertApplication> group = new QueryWrapper<>();
+        group.select("assignee_user_id as assignee", "count(1) as cnt")
+                .eq("status", CertApplicationStatusEnum.APPROVED.getCode())
                 .in("assignee_user_id", pool.stream().map(SysUser::getId).toList())
                 .groupBy("assignee_user_id");
         for (Map<String, Object> row : applicationMapper.selectMaps(group)) {
@@ -443,6 +512,18 @@ public class CertApplicationService {
         requireCompanyMatch(app, effCompany);
         checkReviewerDiff(app, loginUser);
         approveInFlow(app, loginUser, comment);
+        // 流程已推进到"签发"节点：把下一节点办理人回写到业务表 assignee。
+        // 漏这步会让 assignee 仍指向上一节点的审核员，操作员在「我的待办」里按 viewerScope 查不到这单，
+        // 审核员又过了 PENDING 状态动不了，单子就此卡死（2026-11-05 苏慧那单即此症状）。
+        List<SysUser> nextIssuers = engine.pendingAssignees(app.getApplyNo());
+        if (nextIssuers.isEmpty()) {
+            // 流程节点按角色组配置但未解析出具体办理人时，按签发员池积压最少兜底，保住"单必归属到人"
+            nextIssuers = List.of(leastPendingIssuer());
+        }
+        SysUser firstIssuer = nextIssuers.get(0);
+        app.setAssigneeUserId(firstIssuer.getId());
+        app.setAssigneeRealName(firstIssuer.getRealName());
+
         CertTemplate tpl = templateService.detailVisible(app.getTemplateId(), app.getCompanyUscc());
         app.setTemplateSnapshot(snapshotJson(tpl));
         app.setStatus(CertApplicationStatusEnum.APPROVED.getCode());
@@ -455,9 +536,21 @@ public class CertApplicationService {
                 "批准证书申请：" + app.getApplicantName() + "（已固化模板策略快照）", ip, app.getCompanyUscc());
         trailService.record(app.getCompanyUscc(), app.getId(), app.getApplyNo(), "APPROVE",
                 loginUser, "PENDING", "APPROVED", blankToNull(comment));
-        messageService.send(app.getCompanyUscc(), app.getAppliedByUserId(), app.getAppliedByName(),
-                loginUser, "APP_APPROVED", "证书申请已批准",
-                "您的申请单 " + app.getApplyNo() + " 已批准，等待签发", "CERT_APPLICATION", String.valueOf(app.getId()));
+        trailService.record(app.getCompanyUscc(), app.getId(), app.getApplyNo(), "ASSIGN",
+                loginUser, "APPROVED", "APPROVED",
+                "签发环节办理人：" + nextIssuers.stream().map(SysUser::getRealName).distinct()
+                        .collect(java.util.stream.Collectors.joining("、")));
+        if (app.getAppliedByUserId() != null) {
+            messageService.send(app.getCompanyUscc(), app.getAppliedByUserId(), app.getAppliedByName(),
+                    loginUser, "APP_APPROVED", "证书申请已批准",
+                    "您的申请单 " + app.getApplyNo() + " 已批准，等待签发", "CERT_APPLICATION", String.valueOf(app.getId()));
+        }
+        for (SysUser issuer : nextIssuers) {
+            messageService.send(app.getCompanyUscc(), issuer.getId(), issuer.getRealName(),
+                    loginUser, "APP_APPROVED", "证书申请已批准，待您签发",
+                    "申请单 " + app.getApplyNo() + " 已批准，请在「我的待办」中完成签发",
+                    "CERT_APPLICATION", String.valueOf(app.getId()));
+        }
         return app;
     }
 
@@ -482,10 +575,12 @@ public class CertApplicationService {
                 "驳回证书申请：" + app.getApplicantName(), ip, app.getCompanyUscc());
         trailService.record(app.getCompanyUscc(), app.getId(), app.getApplyNo(), "REJECT",
                 loginUser, "PENDING", "REJECTED", comment.trim());
-        messageService.send(app.getCompanyUscc(), app.getAppliedByUserId(), app.getAppliedByName(),
-                loginUser, "APP_REJECTED", "证书申请被驳回",
-                "您的申请单 " + app.getApplyNo() + " 被驳回" + (comment != null && !comment.isBlank() ? "：" + comment.trim() : ""),
-                "CERT_APPLICATION", String.valueOf(app.getId()));
+        if (app.getAppliedByUserId() != null) {
+            messageService.send(app.getCompanyUscc(), app.getAppliedByUserId(), app.getAppliedByName(),
+                    loginUser, "APP_REJECTED", "证书申请被驳回",
+                    "您的申请单 " + app.getApplyNo() + " 被驳回" + (comment != null && !comment.isBlank() ? "：" + comment.trim() : ""),
+                    "CERT_APPLICATION", String.valueOf(app.getId()));
+        }
         return app;
     }
 
@@ -528,9 +623,11 @@ public class CertApplicationService {
                 actor, "APPROVED", "ISSUED", null);
         // 签发是流程最后一个执行环节：业务动作完成后收尾流程
         engine.finish(app.getApplyNo(), actor, "按申请签发证书完成（证书 id=" + vo.getId() + "）");
-        messageService.send(app.getCompanyUscc(), app.getAppliedByUserId(), app.getAppliedByName(),
-                actor, "APP_ISSUED", "证书已签发",
-                "您的申请单 " + app.getApplyNo() + " 已签发（证书 id=" + vo.getId() + "）", "CERT_APPLICATION", String.valueOf(app.getId()));
+        if (app.getAppliedByUserId() != null) {
+            messageService.send(app.getCompanyUscc(), app.getAppliedByUserId(), app.getAppliedByName(),
+                    actor, "APP_ISSUED", "证书已签发",
+                    "您的申请单 " + app.getApplyNo() + " 已签发（证书 id=" + vo.getId() + "）", "CERT_APPLICATION", String.valueOf(app.getId()));
+        }
         return vo;
     }
 
@@ -580,6 +677,39 @@ public class CertApplicationService {
      *
      * @return 员工编号（DN 的 OU 值）
      */
+    /**
+     * 强制把工号写进证书主体 DN 的 OU=：覆盖掉 HIS 传进来的 OU 值（或没有就追加），
+     * 保证后续 checkSubjectDnCompany 提取的 employeeNo 就是工号本身，
+     * 同公司工号唯一性校验（ensureEmployeeNoUnique）直接生效。
+     * 非 OU 的 RDN（CN/O/emailAddress 等）原样保留，顺序不变。
+     */
+    private static String forceEmployeeNoInDn(String subjectDn, String employeeNo) {
+        X500Name name;
+        try {
+            name = new X500Name(subjectDn);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("主体DN格式无效（如 CN=张三,O=公司主体）: " + e.getMessage());
+        }
+        List<RDN> result = new ArrayList<>();
+        boolean replaced = false;
+        ASN1Encodable ouValue = new DERUTF8String(employeeNo);
+        for (RDN rdn : name.getRDNs()) {
+            AttributeTypeAndValue[] tvs = rdn.getTypesAndValues();
+            if (!replaced && tvs.length == 1 && BCStyle.OU.equals(tvs[0].getType())) {
+                result.add(new RDN(new AttributeTypeAndValue(BCStyle.OU, ouValue)));
+                replaced = true;
+            } else if (tvs.length == 1 && BCStyle.OU.equals(tvs[0].getType())) {
+                // 后续 OU 丢弃（本系统只用第一个 OU 做工号，其余 OU 不进证书）
+            } else {
+                result.add(rdn);
+            }
+        }
+        if (!replaced) {
+            result.add(new RDN(new AttributeTypeAndValue(BCStyle.OU, ouValue)));
+        }
+        return new X500Name(result.toArray(new RDN[0])).toString();
+    }
+
     private String checkSubjectDnCompany(String subjectDn, String company) {
         X500Name name;
         try {

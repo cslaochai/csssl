@@ -204,7 +204,7 @@ npm run dev                  # http://localhost:5175
 | AUDITOR 审计员 | 审计查询/验签/归档，只读独立 |
 | SECURITY_ADMIN 安全管理员 | 证书模板与策略（KeyUsage/EKU/策略OID） |
 | KEY_ADMIN 密钥管理员 | 根密钥门限分持/封存/解封、私钥导出开关 |
-| TENANT_ADMIN 租户管理员 | 新建租户直接执行；发起暂停/恢复/关闭/接入密钥重置变更单；API 客户端登记与轮换 |
+| TENANT_ADMIN 租户管理员 | 新建租户直接执行；发起暂停/恢复/关闭/接入密钥重置变更单；系统接入与凭证轮换 |
 | TENANT_APPROVER 租户审批员 | 审批租户变更单（暂停/恢复/关闭/接入密钥重置），批准即执行；不得与发起人同一人 |
 | USER_ADMIN / RA_ADMIN / CERT_OFFICER / AUDIT_ADMIN | 用户角色档案 / RA 流程配置 / 按已批准申请执行签发 / 审计策略（按需启用） |
 

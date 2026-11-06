@@ -72,10 +72,10 @@
             <div v-if="row.contactPhone" class="cell-sub">{{ maskPhone(row.contactPhone) }}</div>
           </template>
         </el-table-column>
-        <el-table-column align="right" fixed="right" label="操作" width="300">
+        <el-table-column align="right" fixed="right" label="操作" width="320">
           <template #default="{ row }">
             <el-button
-                v-for="a in companyActions(row)"
+                v-for="a in visibleRowActions(row)"
                 :key="a.label"
                 :disabled="a.disabled"
                 :type="a.type || 'primary'"
@@ -84,6 +84,14 @@
                 @click="a.run()"
             >{{ a.label }}
             </el-button>
+            <el-dropdown v-if="moreRowActions(row).length" trigger="click" @command="cmd => cmd.run()">
+              <el-button link size="small" type="primary">更多<el-icon class="el-icon--right"><ArrowDown/></el-icon></el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="a in moreRowActions(row)" :key="a.label" :command="a">{{ a.label }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -116,7 +124,7 @@
           <el-input v-model="form.companyName" placeholder="如 长沙麓康健康管理集团"/>
         </el-form-item>
         <el-form-item label="系统名称" prop="subjectO">
-          <el-input v-model="form.subjectO" maxlength="128" placeholder="如 HIS 生产核心（即证书主体 O，将创建该公司首个系统）"/>
+          <el-input v-model="form.subjectO" maxlength="64" placeholder="如 HIS 生产核心（即证书主体 O，将创建该公司首个系统）"/>
         </el-form-item>
         <el-form-item label="算法" prop="algorithm">
           <el-radio-group v-model="form.algorithm">
@@ -200,38 +208,93 @@
       </template>
     </el-dialog>
 
-    <!-- 公司详情（行点击） -->
+    <!-- 公司详情（行点击）：基本信息 + 公司下的系统/接入凭证 -->
     <el-dialog v-model="detailVisible" :title="`公司详情：${detail?.companyName || ''}`" width="900px">
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="统一社会信用代码">{{ detail?.uscc || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="公司名称">{{ detail?.companyName }}</el-descriptions-item>
-        <el-descriptions-item label="首个系统（主体O）">{{ detail?.subjectO || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="算法">{{ detail?.algorithm || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="公司状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
-        <el-descriptions-item label="根密钥状态">{{
-            detail?.rootKeyState ? rootKeyText(detail.rootKeyState) : '-'
-          }}
-        </el-descriptions-item>
-        <el-descriptions-item label="根CA有效期" :span="2">{{
-            detail ? validity(detail.rootValidFrom, detail.rootValidTo) : ''
-          }}
-        </el-descriptions-item>
-        <el-descriptions-item label="二级CA有效期（SUB_CA）" :span="2">
-          {{ detail ? validity(detail.subCaValidFrom, detail.subCaValidTo) : '' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="联系人">{{ detail?.contact || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="联系方式">{{ maskPhone(detail?.contactPhone) }}</el-descriptions-item>
-        <el-descriptions-item label="说明" :span="2">{{ detail?.description || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="密钥保管人" :span="2">
-          <template v-if="detail?.holders?.length">
-            <el-tag v-for="h in detail.holders" :key="h.shareIndex" size="small" style="margin-right: 6px">
-              第{{ h.shareIndex }}份 · {{ h.holderRealName }}
-            </el-tag>
-          </template>
-          <span v-else>尚未指定</span>
-        </el-descriptions-item>
-      </el-descriptions>
+      <el-tabs v-model="detailTab">
+        <el-tab-pane label="基本信息" name="basic">
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="统一社会信用代码">{{ detail?.uscc || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="公司名称">{{ detail?.companyName }}</el-descriptions-item>
+            <el-descriptions-item label="首个系统（主体O）">{{ detail?.subjectO || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="算法">{{ detail?.algorithm || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="公司状态">{{ detail ? statusText(detail.status) : '' }}</el-descriptions-item>
+            <el-descriptions-item label="根密钥状态">{{
+                detail?.rootStatus ? rootKeyText(detail.rootStatus.rootKeyState) : '-'
+              }}
+            </el-descriptions-item>
+            <el-descriptions-item label="根CA有效期" :span="2">{{
+                detail ? validity(detail.rootStatus?.rootValidFrom, detail.rootStatus?.rootValidTo) : ''
+              }}
+            </el-descriptions-item>
+            <el-descriptions-item label="二级CA有效期（SUB_CA）" :span="2">
+              {{ detail ? validity(detail.rootStatus?.subCaValidFrom, detail.rootStatus?.subCaValidTo) : '' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="联系人">{{ detail?.contact || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="联系方式">{{ maskPhone(detail?.contactPhone) }}</el-descriptions-item>
+            <el-descriptions-item label="说明" :span="2">{{ detail?.description || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ detail?.createdAt || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="密钥保管人" :span="2">
+              <template v-if="detail?.holders?.length">
+                <el-tag v-for="h in detail.holders" :key="h.shareIndex" size="small" style="margin-right: 6px">
+                  第{{ h.shareIndex }}份 · {{ h.holderRealName }}
+                </el-tag>
+              </template>
+              <span v-else>尚未指定</span>
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-tab-pane>
+        <el-tab-pane :label="`公司下面的系统${detail?.systems?.length ? `（${detail.systems.length}）` : ''}`" name="systems">
+          <el-table :data="detail?.systems || []" stripe size="small" style="width: 100%">
+            <el-table-column label="系统名称（证书主体O）" min-width="200">
+              <template #default="{ row }">
+                <div>{{ row.systemName }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column class-name="cell-mono" label="接入ID（App ID）" min-width="260" show-overflow-tooltip>
+              <template #default="{ row }">
+                <template v-if="row.appId">
+                  <span>{{ row.appId }}</span>
+                  <el-button link size="small" type="primary" @click="onCopy(row.appId)">复制</el-button>
+                </template>
+                <span v-else class="cell-sub">未登记凭证</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.appId" :type="row.status === 1 ? 'success' : 'info'" size="small">
+                  {{ row.status === 1 ? '启用' : '停用' }}
+                </el-tag>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="密钥版本" width="90">
+              <template #default="{ row }">{{ row.secretVersion ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="最近调用" width="160">
+              <template #default="{ row }">{{ row.lastUsedAt || '—' }}</template>
+            </el-table-column>
+          </el-table>
+          <div v-if="!detail?.systems?.length" class="empty-tip">该公司暂无系统</div>
+        </el-tab-pane>
+      </el-tabs>
+    </el-dialog>
+
+    <!-- 申请重建二级CA（从公司详情发起：已锁定公司，只填事由；5 名保管人 3-of-5 投票在待办里做） -->
+    <el-dialog v-model="rebuildVisible" title="申请重建二级CA" width="560px">
+      <el-alert type="warning" :closable="false" style="margin-bottom: 12px"
+                title="重建将用根私钥重新签发本公司二级CA（SUB_CA），需 5 名密钥保管人中 3 人同意；同意时各保管人须在待办里提交本人份额。"/>
+      <el-form label-width="90px">
+        <el-form-item label="所属公司">
+          <el-input :model-value="detail?.companyName" disabled/>
+        </el-form-item>
+        <el-form-item label="重建事由" required>
+          <el-input v-model="rebuildReason" type="textarea" :rows="3" placeholder="说明为什么需要重建二级CA（如SUB_CA即将到期、怀疑私钥泄露等）"/>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rebuildVisible = false">取消</el-button>
+        <el-button :loading="rebuilding" type="primary" @click="submitRebuild">提交申请</el-button>
+      </template>
     </el-dialog>
 
     <!-- 重新指派密钥保管人（发起变更单：原 5 名保管人投票 >3 同意后执行，不直接绑定） -->
@@ -298,63 +361,56 @@
       </template>
     </el-dialog>
 
-    <!-- 接入客户端管理（系统级接入凭证：公司 → 系统 → 每系统独立共享密钥） -->
+    <!-- 系统接入（公司 → 系统 → 每系统一套独立共享凭证） -->
     <el-dialog v-model="clientsVisible" :close-on-click-modal="false"
-               :title="`接入客户端管理：${clientsTarget?.companyName || ''}`" width="940px">
+               :title="`系统接入：${clientsTarget?.companyName || ''}`" width="940px">
       <div class="clients-toolbar">
-        <el-button v-perm="'apiclient:manage'" type="primary" @click="openCreateClient">新增接入客户端</el-button>
-        <el-button v-perm="'apiclient:manage'" @click="openCreateSystem">新增系统</el-button>
+        <el-button v-perm="'apiclient:manage'" type="primary" @click="openCreateSystem">新增系统</el-button>
         <span class="clients-tip">公司下每个系统一套独立共享密钥与专属二级 CA；系统名即证书主体 O，公司内不重名。</span>
       </div>
-      <el-table v-loading="clientsLoading" :data="companyClients" stripe style="width: 100%">
-        <el-table-column label="系统名称" prop="systemName" min-width="160"/>
-        <el-table-column label="客户端名称" prop="clientName" min-width="160"/>
-        <el-table-column class-name="cell-mono" label="App ID" prop="appId" min-width="260" show-overflow-tooltip/>
+      <el-table v-loading="clientsLoading" :data="systemRows" stripe style="width: 100%">
+        <el-table-column label="系统名称" min-width="180">
+          <template #default="{ row }">
+            <div>{{ row.systemName || row.clientName }}</div>
+            <div v-if="row.systemName && row.clientName && row.clientName !== row.systemName" class="cell-sub">{{ row.clientName }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column class-name="cell-mono" label="接入ID（App ID）" min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.appId">{{ row.appId }}</span>
+            <span v-else class="cell-sub">未登记凭证</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '停用' }}</el-tag>
+            <el-tag v-if="row.appId" :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '停用' }}</el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column align="right" fixed="right" label="操作" width="200">
           <template #default="{ row }">
-            <el-button v-if="hasPerm('apiclient:manage')" link size="small" type="primary" @click="onRotateClient(row)">轮换密钥</el-button>
-            <el-button v-if="hasPerm('apiclient:manage')" link :type="row.status === 1 ? 'warning' : 'success'" size="small"
-                       @click="onToggleClient(row)">{{ row.status === 1 ? '停用' : '启用' }}</el-button>
+            <el-button v-if="hasPerm('apiclient:manage') && !row.appId" link size="small" type="primary"
+                       @click="openCreateCredential(row)">登记凭证</el-button>
+            <template v-else-if="hasPerm('apiclient:manage')">
+              <el-button link size="small" type="primary" @click="onRotateClient(row)">轮换密钥</el-button>
+              <el-button link :type="row.status === 1 ? 'warning' : 'success'" size="small"
+                         @click="onToggleClient(row)">{{ row.status === 1 ? '停用' : '启用' }}</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!clientsLoading && companyClients.length === 0" description="该公司暂无接入客户端，点击「新增接入客户端」登记"/>
+      <el-empty v-if="!clientsLoading && systemRows.length === 0" description="该公司暂无系统，点击「新增系统」创建"/>
     </el-dialog>
 
-    <!-- 新增接入客户端 -->
-    <el-dialog v-model="clientCreateVisible" :close-on-click-modal="false" title="新增接入客户端" width="560px">
-      <el-form :model="clientForm" label-width="120px">
-        <el-form-item label="所属系统" required>
-          <el-select v-model="clientForm.systemName" filterable placeholder="请选择已登记的系统" style="width: 100%">
-            <el-option v-for="s in systems" :key="s.id" :label="s.systemName" :value="s.systemName"/>
-          </el-select>
-          <div class="cell-sub">还没有第二个系统？先点上方「新增系统」</div>
-        </el-form-item>
-        <el-form-item label="客户端名称" required>
-          <el-input v-model="clientForm.clientName" maxlength="64" placeholder="如 HIS 生产核心接入客户端"/>
+    <!-- 新增系统：建系统同时登记它的接入凭证，secret 只展示一次 -->
+    <el-dialog v-model="systemCreateVisible" :close-on-click-modal="false" title="新增系统" width="560px">
+      <el-form :model="systemForm" label-width="120px">
+        <el-form-item label="系统名称" required>
+          <el-input v-model="systemForm.systemName" maxlength="64" placeholder="如 影像系统 PACS（即证书主体 O）"/>
+          <div class="cell-sub">系统名进证书主体 O，签发后不可修改；同时作为该系统接入凭证的名称，最长 64 字符。</div>
         </el-form-item>
         <el-form-item label="IP 白名单">
-          <el-input v-model="clientForm.ipAllowlist" placeholder="可选，逗号分隔；留空表示不限制"/>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="clientCreateVisible = false">取消</el-button>
-          <el-button :loading="clientSubmitting" type="primary" @click="onCreateClient">创建并生成凭证</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- 新增系统（公司下多系统；系统名 = 证书主体 O，公司内唯一） -->
-    <el-dialog v-model="systemCreateVisible" :close-on-click-modal="false" title="新增系统" width="520px">
-      <el-form :model="systemForm" label-width="110px">
-        <el-form-item label="系统名称" required>
-          <el-input v-model="systemForm.systemName" maxlength="128" placeholder="如 影像系统 PACS（即证书主体 O）"/>
+          <el-input v-model="systemForm.ipAllowlist" placeholder="可选，逗号分隔；留空表示不限制"/>
         </el-form-item>
         <el-form-item label="说明">
           <el-input v-model="systemForm.description" maxlength="200" placeholder="可选"/>
@@ -363,7 +419,25 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="systemCreateVisible = false">取消</el-button>
-          <el-button :loading="systemSubmitting" type="primary" @click="onCreateSystem">创建系统</el-button>
+          <el-button :loading="systemSubmitting" type="primary" @click="onCreateSystem">创建并生成凭证</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 为尚无凭证的系统补登记接入凭证（凭证登记失败时用它续上） -->
+    <el-dialog v-model="clientCreateVisible" :close-on-click-modal="false" title="登记接入凭证" width="520px">
+      <el-form :model="clientForm" label-width="120px">
+        <el-form-item label="系统名称" required>
+          <el-input :model-value="clientForm.systemName" disabled/>
+        </el-form-item>
+        <el-form-item label="IP 白名单">
+          <el-input v-model="clientForm.ipAllowlist" placeholder="可选，逗号分隔；留空表示不限制"/>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="clientCreateVisible = false">取消</el-button>
+          <el-button :loading="clientSubmitting" type="primary" @click="onCreateClient">生成凭证</el-button>
         </div>
       </template>
     </el-dialog>
@@ -373,11 +447,13 @@
 <script setup>
 import {computed, onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {Plus, Refresh, Search} from '@element-plus/icons-vue'
+import {ArrowDown, Plus, Refresh, RefreshRight, Search} from '@element-plus/icons-vue'
 import {
+  applySubCaRebuild,
   createApiClient,
   createCompany,
   createSystem,
+  getCompany,
   listApiClients,
   listCompaniesCached,
   listFlowCandidates,
@@ -419,27 +495,55 @@ const opReason = ref('')
 const submitting = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
+const detailTab = ref('basic')
+
+// ===== 申请重建二级CA（公司列表操作列发起） =====
+const rebuildVisible = ref(false)
+const rebuildReason = ref('')
+const rebuilding = ref(false)
+async function submitRebuild() {
+  const reason = rebuildReason.value.trim()
+  if (!reason) { ElMessage.warning('请填写重建事由'); return }
+  rebuilding.value = true
+  try {
+    await applySubCaRebuild({companyUscc: detail.value.uscc, reason})
+    ElMessage.success('已发起二级CA重建申请，已通知 5 名密钥保管人审批')
+    rebuildVisible.value = false
+  } finally { rebuilding.value = false }
+}
 const credVisible = ref(false)
 const cred = ref(null)
 const formRef = ref()
 
-// ===== 接入客户端管理（公司 → 系统 → 每系统独立共享密钥） =====
+// ===== 系统接入（公司 → 系统 → 每系统一套独立共享凭证） =====
 const clientsVisible = ref(false)
 const clientsTarget = ref(null)
 const clients = ref([])
 const clientsLoading = ref(false)
 const clientCreateVisible = ref(false)
 const clientSubmitting = ref(false)
-const clientForm = reactive({systemName: '', clientName: '', ipAllowlist: ''})
+const clientForm = reactive({systemName: '', ipAllowlist: ''})
 
 // ===== 公司下的系统（证书域单元）：系统名 = 主体 O，公司内唯一 =====
 const systems = ref([])
 const systemCreateVisible = ref(false)
 const systemSubmitting = ref(false)
-const systemForm = reactive({systemName: '', description: ''})
+const systemForm = reactive({systemName: '', ipAllowlist: '', description: ''})
 
-const companyClients = computed(() =>
-    clients.value.filter(c => c.companyUscc === clientsTarget.value?.uscc))
+// 系统为行、凭证为列：一个系统多套凭证时各占一行；尚无凭证的系统也要出现在列表里
+const systemRows = computed(() => {
+  const list = clients.value.filter(c => c.companyUscc === clientsTarget.value?.uscc)
+  const taken = new Set()
+  const rows = []
+  for (const s of systems.value) {
+    const mine = list.filter(c => c.systemName === s.systemName && !taken.has(c.id))
+    mine.forEach(c => taken.add(c.id))
+    rows.push(...(mine.length ? mine : [{systemName: s.systemName}]))
+  }
+  // 存量凭证未归属任何系统（system_name 为空）时仍要展示，否则密钥既看不见也轮换不了
+  rows.push(...list.filter(c => !taken.has(c.id)))
+  return rows
+})
 const simpleUsers = ref([])
 // 保管人候选下拉只服务「新建公司」与「重新指派保管人」两个入口，无这两个权限点就不发请求
 const canPickHolders = computed(() => hasPerm('company:create') || hasPerm('ca:share:assign'))
@@ -531,9 +635,15 @@ function validity(from, to) {
   return `${from || '?'} ~ ${to || '?'}`
 }
 
-function onRowDetail(row) {
+async function onRowDetail(row) {
   detail.value = row
+  detailTab.value = 'basic'
   detailVisible.value = true
+  // 拉完整详情（含 systems 列表 + rootStatus + holders），列表行字段不全
+  try {
+    const res = await getCompany(row.uscc)
+    if (res?.data) detail.value = res.data
+  } catch (e) { /* 详情接口失败时保留列表行数据 */ }
 }
 
 // 重新指派保管人（发起变更单：原 5 名保管人投票 >3 同意后执行；不再直接 assignShares）
@@ -578,16 +688,12 @@ async function onSubmitReassign() {
   }
 }
 
-// 公司列表操作：全部是「提交变更单」，不直接执行；按钮全部平铺，不再收进「更多」下拉
+// 公司列表操作：全部是「提交变更单」，不直接执行；前 3 个短按钮平铺，长按钮收进「更多」（ACTION_VISIBLE=3）
 function companyActions(row) {
   const acts = [{label: '详情', run: () => onRowDetail(row)}]
-  // 接入客户端（系统级接入凭证）管理：仅接入凭证管理员（apiclient:manage）
+  // 系统接入（每系统一套共享凭证）：仅接入凭证管理员（apiclient:manage）
   if (hasPerm('apiclient:manage')) {
-    acts.push({label: '接入客户端', type: 'primary', run: () => openClients(row)})
-  }
-  // 重新指派保管人：仅公司管理员（ca:share:assign）；提交后由原保管人投票决定，不直接绑定
-  if (row.status === 'ACTIVE' && hasPerm('ca:share:assign')) {
-    acts.push({label: '重新指派保管人', type: 'primary', run: () => openReassignFlow(row)})
+    acts.push({label: '系统接入', type: 'primary', run: () => openClients(row)})
   }
   if (!hasPerm('company:op:apply')) return acts
   if (row.status === 'ACTIVE') {
@@ -597,13 +703,32 @@ function companyActions(row) {
     acts.push({label: '申请恢复', type: 'success', run: () => openOp('RESUME', row)})
   }
   if (row.status === 'CLOSED') {
-    // 关闭只停服务不动密钥，同码不能再新建（唯一键占位），要重新服务这家机构只能恢复
     acts.push({label: '申请恢复', type: 'success', run: () => openOp('RESUME', row)})
+  }
+  // 长按钮统一收进「更多」
+  if (row.status === 'ACTIVE' && hasPerm('ca:share:assign')) {
+    acts.push({label: '重新指派保管人', type: 'primary', run: () => openReassignFlow(row)})
   }
   if (row.status === 'ACTIVE') {
     acts.push({label: '申请关闭', type: 'danger', run: () => openOp('CLOSE', row)})
   }
+  // 重建二级CA：公司管理员/安全管理员发起，5 名保管人 3-of-5 投票在待办里做
+  if (row.status === 'ACTIVE' && hasPerm('ca:subca:rebuild:apply')) {
+    acts.push({label: '申请重建二级CA', type: 'warning', run: () => openRebuildFromRow(row)})
+  }
   return acts
+}
+
+// 操作列按钮切分：最多平铺 3 个，超出收进「更多」下拉
+const ACTION_VISIBLE = 3
+function visibleRowActions(row) { return companyActions(row).slice(0, ACTION_VISIBLE) }
+function moreRowActions(row) { return companyActions(row).slice(ACTION_VISIBLE) }
+
+// 从列表行发起重建：先填到临时 row，复用详情里的重建弹窗
+function openRebuildFromRow(row) {
+  detail.value = row
+  rebuildReason.value = ''
+  rebuildVisible.value = true
 }
 
 async function onCopy(text) {
@@ -623,7 +748,7 @@ function showCredential(payload) {
   credVisible.value = true
 }
 
-// 接入客户端：列表/新增/轮换/启停
+// 系统接入：列表/新增/凭证登记/轮换/启停
 async function openClients(row) {
   clientsTarget.value = row
   clientsVisible.value = true
@@ -656,10 +781,11 @@ async function loadSystems() {
 }
 
 function openCreateSystem() {
-  Object.assign(systemForm, {systemName: '', description: ''})
+  Object.assign(systemForm, {systemName: '', ipAllowlist: '', description: ''})
   systemCreateVisible.value = true
 }
 
+// 新增系统 = 建系统 + 登记该系统的接入凭证，一次做完只给一份一次性 secret
 async function onCreateSystem() {
   const name = systemForm.systemName.trim()
   if (!name) {
@@ -673,26 +799,29 @@ async function onCreateSystem() {
       systemName: name,
       description: systemForm.description.trim() || null
     })
-    systemCreateVisible.value = false
-    ElMessage.success('系统已创建，现在可以为它登记接入客户端')
     await loadSystems()
+    const res = await createApiClient({
+      companyUscc: clientsTarget.value.uscc,
+      systemName: name,
+      ipAllowlist: systemForm.ipAllowlist.trim() || null
+    })
+    systemCreateVisible.value = false
+    ElMessage.success('系统已创建，请立即保存接入凭证')
+    showCredential(res.data || {})
+    await loadClients()
   } finally {
     systemSubmitting.value = false
   }
 }
 
-function openCreateClient() {
-  if (systems.value.length === 0) {
-    ElMessage.warning('该公司暂无系统，请先点「新增系统」')
-    return
-  }
-  Object.assign(clientForm, {systemName: systems.value[0].systemName, clientName: '', ipAllowlist: ''})
+function openCreateCredential(row) {
+  Object.assign(clientForm, {systemName: row.systemName, ipAllowlist: ''})
   clientCreateVisible.value = true
 }
 
 async function onCreateClient() {
-  if (!clientForm.systemName || !clientForm.clientName.trim()) {
-    ElMessage.warning('请选择所属系统并填写客户端名称')
+  if (!clientForm.systemName) {
+    ElMessage.warning('请先选择系统')
     return
   }
   clientSubmitting.value = true
@@ -700,11 +829,10 @@ async function onCreateClient() {
     const res = await createApiClient({
       companyUscc: clientsTarget.value.uscc,
       systemName: clientForm.systemName,
-      clientName: clientForm.clientName.trim(),
       ipAllowlist: clientForm.ipAllowlist.trim() || null
     })
     clientCreateVisible.value = false
-    ElMessage.success('接入客户端已创建，请立即保存凭证')
+    ElMessage.success('接入凭证已生成，请立即保存')
     showCredential(res.data || {})
     await loadClients()
   } finally {

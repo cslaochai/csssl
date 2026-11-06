@@ -27,6 +27,16 @@ export function getWorkflowTodoBoard() {
   return request.post('/admin/workflows/todo', {})
 }
 
+/**
+ * 待办详情：一次返回待办行（含 actions）+ 完整业务行 + 审批轨迹 + 流程轨迹，
+ * 供「我的待办」抽屉直接渲染，不再跳转到各业务台账页。
+ * @param {string} bizType CERT_APPLICATION / CERT_OP / COMPANY_OP / SUB_CA_REBUILD
+ * @param {string|number} bizId 单据 id
+ */
+export function getWorkflowTodoDetail(bizType, bizId) {
+  return request.post('/admin/workflows/todo-detail', { bizType, bizId })
+}
+
 // ============ Warm-Flow 流程定义 CRUD（拖拽设计器用） ============
 
 /** 列出所有流程定义 */

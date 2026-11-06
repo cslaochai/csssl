@@ -50,6 +50,13 @@
 - 前端构建校验：`source/front` 下 `npx vite build --outDir .verify-build --emptyOutDir`。
 - Shell 为 Git Bash：**Bash 命令行内不要出现中文**（中文提交用 `git commit -F 临时文件`）；mvn 日志是 GBK；前端源文件保持 CRLF。
 
+## 密钥保险库（KEK）口径
+
+- `ssl_key_vault` 的密文**只认写入时那套主密钥**：default 域（`company_uscc IS NULL`，TSA/审计签名）认 `store-dir/master.key`，公司域认 `store-dir/companies/{uscc}/master.key`。表里没有 KEK 版本标识，所以「换启动目录 / 换 `SSL_STORE_DIR`」等于换了一把 KEK，症状是接口 500、日志 `BadPaddingException: pad block corrupted`。
+- dev 已把 `store-dir` 固定为绝对路径 `E:/work_source/his_cslk/data/certs`（`application-dev.yml`，仍可用 `SSL_STORE_DIR` 覆盖）。**不要拿另一套盘去写共享库**——多套 KEK 混写同一个库就是 2026-11-05 那次 TSA 解密失败的原因。
+- 启动日志有一行 `[密钥保险库] default 域 store-dir=… KEK 指纹=…`；两个实例指纹不一致，就是两套 KEK，别指望它们互相解得开。
+- 自救口径：**可再生的密钥**（`tsa`、`audit-sign`）删掉 `ssl_key_vault` 对应条目后重启即自动重建（TSA 会换公钥，历史令牌随之失效）；`SUB_CA` / `api-clients` 等**必须找回原 KEK**，重建等于废掉已签发证书与已分发凭证。若能找到"旧 KEK"文件，优先用旧 KEK 解密 + 当前 KEK 重新加密回写，密钥对不变、历史签名继续可验。
+
 ## 清库重建（历史数据清零）
 
 - 库表结构**不自动建**（`sql.init` 未开启）：清库后必须手工执行 `source/ssl_backend/db/` 下的脚本。

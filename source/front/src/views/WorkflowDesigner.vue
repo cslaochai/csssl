@@ -212,7 +212,6 @@ const rolePalette = [
   { code: 'OPERATOR', name: 'CA操作员' },
   { code: 'APPROVER', name: '审核员' },
   { code: 'RA_ADMIN', name: 'RA管理员' },
-  { code: 'CERT_OFFICER', name: '证书签发操作员' },
   { code: 'COMPANY_ADMIN', name: '公司管理员' },
   { code: 'COMPANY_APPROVER', name: '公司审批员' },
   { code: 'KEY_ADMIN', name: '密钥管理员' },

@@ -35,7 +35,7 @@ public class WorkflowRegistry {
         d.setSteps(List.of(
                 new WorkflowStep("SUBMIT", "提交申请", "录入员（OPERATOR）", List.of("OPERATOR"), AssignStrategyEnum.POOL, false),
                 new WorkflowStep("REVIEW", "审核审批", "审核员 / RA管理员", List.of("APPROVER", "RA_ADMIN"), AssignStrategyEnum.SINGLE_LEAST_BACKLOG, false),
-                new WorkflowStep("ISSUE", "签发证书", "操作员 / 证书操作员", List.of("OPERATOR", "CERT_OFFICER"), AssignStrategyEnum.POOL, false),
+                new WorkflowStep("ISSUE", "签发证书", "操作员（OPERATOR）", List.of("OPERATOR"), AssignStrategyEnum.POOL, false),
                 new WorkflowStep("DONE", "完成", "——", List.of(), AssignStrategyEnum.POOL, true)
         ));
         Map<String, String> m = new LinkedHashMap<>();
@@ -54,9 +54,9 @@ public class WorkflowRegistry {
         WorkflowDefinition d = new WorkflowDefinition();
         d.setBizType("CERT_OP");
         d.setName("证书操作单（吊销/挂起/恢复/换发/重签）");
-        d.setDescription("提交人（操作员/证书操作员）发起 → 审核员（APPROVER）审批即执行（批准后立即生效，进 CRL/OCSP）；提交与审批分离");
+        d.setDescription("提交人（操作员）发起 → 审核员（APPROVER）审批即执行（批准后立即生效，进 CRL/OCSP）；提交与审批分离");
         d.setSteps(List.of(
-                new WorkflowStep("SUBMIT", "提交操作", "操作员 / 证书操作员（OPERATOR/CERT_OFFICER）", List.of("OPERATOR", "CERT_OFFICER"), AssignStrategyEnum.POOL, false),
+                new WorkflowStep("SUBMIT", "提交操作", "操作员（OPERATOR）", List.of("OPERATOR"), AssignStrategyEnum.POOL, false),
                 new WorkflowStep("APPROVE", "审核执行", "审核员（APPROVER）", List.of("APPROVER"), AssignStrategyEnum.SINGLE_LEAST_BACKLOG, false),
                 new WorkflowStep("DONE", "完成", "——", List.of(), AssignStrategyEnum.POOL, true)
         ));
