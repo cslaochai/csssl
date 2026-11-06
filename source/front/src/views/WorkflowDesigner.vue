@@ -180,6 +180,7 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, MagicStick } from '@element-plus/icons-vue'
 import CustomNode from './CustomNode.vue'
 import { queryDesign, saveDef, saveAndPublishDef, listAssignableUsers } from '@/api/workflow'
+import { listRoles } from '@/api/system'
 
 // Vue Flow 必需样式，缺失会导致节点无法定位/拖动
 import '@vue-flow/core/dist/style.css'
@@ -208,15 +209,7 @@ const nodePalette = [
   { type: 'end', label: '结束节点', icon: '○', color: '#6b7280', nodeType: 2, permission: '', ratio: '0.000' }
 ]
 
-const rolePalette = [
-  { code: 'OPERATOR', name: 'CA操作员' },
-  { code: 'APPROVER', name: '审核员' },
-  { code: 'RA_ADMIN', name: 'RA管理员' },
-  { code: 'COMPANY_ADMIN', name: '公司管理员' },
-  { code: 'COMPANY_APPROVER', name: '公司审批员' },
-  { code: 'KEY_ADMIN', name: '密钥管理员' },
-  { code: 'SECURITY_ADMIN', name: '安全管理员' }
-]
+const rolePalette = ref([])
 
 const route = useRoute()
 const router = useRouter()
@@ -443,7 +436,19 @@ watch(() => route.params.id, (id, old) => {
 onMounted(() => {
   setupFromRoute()
   loadAssignableUsers()
+  loadRolePalette()
 })
+
+async function loadRolePalette() {
+  try {
+    const res = await listRoles()
+    rolePalette.value = (res.data || [])
+      .filter(r => r.status === 1)
+      .map(r => ({ code: r.roleCode, name: r.roleName }))
+  } catch (e) {
+    console.error('加载角色列表失败', e)
+  }
+}
 
 function buildAutoLayout(nodeList) {
   const map = {}

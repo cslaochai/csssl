@@ -1,0 +1,33 @@
+# 环境真值（.gitignore 已排除、不入库）。只写「与 pro 取值不同」的项：
+# 两环境同形的键（包括走环境变量注入的）在 application.yml 里声明一次。
+spring:
+  datasource:
+    # 去掉 createDatabaseIfNotExist=true：启动期不做任何建库动作，库必须手工建好。
+    url: jdbc:mysql://192.168.88.132:3306/ssl_ca?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: xz_feng
+    password: Feng123456!
+
+csssl:
+  # 密钥/证书落盘目录。写相对路径 ./data/certs，KeyVaultConfig 会基于 classpath root 解析为
+  # 项目内绝对路径 source/ssl_backend/data/certs——IDEA 与 mvn 工作目录不同也不再落两套盘。
+  # 如需临时起第二个实例做验证，用 SSL_STORE_DIR 显式覆盖为绝对路径。
+  store-dir: ${SSL_STORE_DIR:./data/certs}
+  # 对外公开基础地址：生成证书 CDP/AIA 扩展与 OCSP URL（业务系统可见地址，需可外访）
+  public-base-url: http://localhost:8092/ssl
+  # 私钥加密（SM4）主密钥：留空则首启生成随机密钥落盘 store-dir/master.key（本机联调可接受）
+  key-vault:
+    master-key: ""
+  # 私钥下载开关：开发期允许管理后台下载私钥
+  allow-private-key-download: true
+  security:
+    sm2:
+      # 固定私钥（与 132 部署同值）：重启不失效，避免前端缓存的公钥与后端新密钥对不上；公钥留空由私钥推导
+      private-key: b11554ae26326e07a066dcaaa622bc77da54926d4cc7e699567af1fd7a438c66
+      public-key: ""
+    jwt:
+      # JWT签名密钥（dev 固定值，本机联调用）
+      secret: csssl-ca-jwt-secret-change-me-in-prod-2026
+
+logging:
+  level:
+    com.csssl: debug

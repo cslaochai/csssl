@@ -5,23 +5,16 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-      CA根认证中心（csssl）：为 HIS 生态（cslk / csmig / csmis）提供根CA、证书签发、
-      吊销CRL与加密传输支撑（SM2/SM4 国密）。
-      独立工程，不继承、不聚合其他工程，单独构建、单独启动。
+      CA根认证中心（csssl）多模块父工程：
+      - csssl-push-sdk：对外推送 SDK（DTP + SM2 验签工具），供 HIS 等外部系统依赖
+      - csssl-server：Spring Boot 启动模块（证书服务、审批流、管理后台 API）
     -->
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.5</version>
-        <relativePath/>
-    </parent>
-
     <groupId>com.csssl</groupId>
-    <artifactId>ssl-backend</artifactId>
+    <artifactId>csssl-parent</artifactId>
     <version>1.0.0</version>
-    <packaging>jar</packaging>
-    <name>ssl-backend</name>
-    <description>CA根认证中心（csssl）：根CA初始化、证书签发（RSA/SM2）、吊销CRL、证书链校验与国密加密传输支撑。</description>
+    <packaging>pom</packaging>
+    <name>csssl-parent</name>
+    <description>CA根认证中心（csssl）多模块父工程</description>
 
     <properties>
         <java.version>21</java.version>
@@ -32,122 +25,23 @@
         <bouncycastle.version>1.78.1</bouncycastle.version>
     </properties>
 
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
+    <modules>
+        <module>csssl-sdk</module>
+        <module>csssl-server</module>
+    </modules>
 
-        <!-- 接口鉴权：过滤器链 + @PreAuthorize 方法级权限（配合 TokenAuthFilter 桥接 JWT） -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
-
-        <!-- 参数校验（DTO 上 jakarta.validation 注解 + 控制器 @Valid） -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-            <version>${mybatis-plus.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <optional>true</optional>
-        </dependency>
-
-        <!-- ===== 证书/X.509/国密算法（RSA + SM2 + SM3withSM2 + CRL） ===== -->
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk18on</artifactId>
-            <version>${bouncycastle.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcpkix-jdk18on</artifactId>
-            <version>${bouncycastle.version}</version>
-        </dependency>
-
-        <!-- ===== 登录鉴权（对齐 cslk HIS / csmig 方案：SM2 口令加密 + BCrypt 存密 + JWT 会话） ===== -->
-        <dependency>
-            <groupId>cn.hutool</groupId>
-            <artifactId>hutool-all</artifactId>
-            <version>${hutool.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-api</artifactId>
-            <version>${jjwt.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-impl</artifactId>
-            <version>${jjwt.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-jackson</artifactId>
-            <version>${jjwt.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <finalName>csssl-backend</finalName>
-        <plugins>
-            <!-- JDK21 下注解处理默认不再隐式开启，须显式声明 Lombok 处理器，否则 @Data 等不生成方法 -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                            <version>${lombok.version}</version>
-                        </path>
-                    </annotationProcessorPaths>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.csssl.CssslApplication</mainClass>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
-                </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcpkix-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 </project>

@@ -1,0 +1,111 @@
+server:
+  port: 8092
+  servlet:
+    context-path: /ssl
+
+spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  application:
+    name: ssl-backend
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-timeout: 30000
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-test-query: SELECT 1
+  # 系统启动不允许执行 DDL/重建表结构：建库建表用 db/schema.sql 手工导入。
+  # 种子/铺底数据同理：db/data/init-dml.sql + db/data/baseline-data.sql 手工导入，
+  # 启动流程一律不跑 schema.sql / data.sql，避免覆盖已有业务数据。
+  sql:
+    init:
+      mode: never
+      schema-locations: ""
+      data-locations: ""
+      continue-on-error: false
+  # 本工程未引入 spring-boot-starter-data-redis，不存在 redis 初始化/预热动作；
+  # 此处显式留空，后续若引入 redis 也默认不做启动期写入。
+  data:
+    redis:
+      repositories:
+        enabled: false
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: AUTO
+
+# ===== CA根认证中心业务参数 =====
+csssl:
+  # 证书/CRL/根密钥份额落盘目录（私钥密文已改落库 ssl_key_vault，SM4 加密）
+  store-dir: ${SSL_STORE_DIR:./data/certs}
+  # 根CA
+  root-ca:
+    # 根CA标识（证书CN用：省级 CA 认证中心 Root CA）
+    cn: ${SSL_ROOT_CN:省级 CA 认证中心 Root CA}
+    # 算法：RSA2048 / SM2（国密）
+    algorithm: ${SSL_ROOT_ALGORITHM:RSA2048}
+    # 根证书有效期（天）
+    validity-days: ${SSL_ROOT_VALIDITY_DAYS:3650}
+  # 服务签发二级CA（SUB_CA）：日常签发与CRL全部走它，根CA私钥可封存离线
+  sub-ca:
+    cn: ${SSL_SUBCA_CN:省级 CA 认证中心 SubCA}
+    # 二级CA有效期（天）
+    validity-days: ${SSL_SUBCA_VALIDITY_DAYS:730}
+    # 到期前多少天自动用根轮换新SUB_CA
+    renew-before-days: ${SSL_SUBCA_RENEW_DAYS:30}
+  # 签发默认值
+  issue:
+    # 默认证书有效期（天）
+    default-validity-days: ${SSL_ISSUE_VALIDITY_DAYS:365}
+  # OCSP 响应时效（小时）：依赖方缓存刷新周期，行业 24~168h（1~7天），默认 24h
+  ocsp-next-update-hours: ${SSL_OCSP_NEXT_UPDATE_HOURS:24}
+  # CRL 定时发布 cron：nextUpdate 进入续期窗口或吊销集合（指纹）变化时主动重签（默认每日 03:00）
+  crl-refresh-cron: ${SSL_CRL_REFRESH_CRON:0 0 3 * * ?}
+  # SUB_CA 到期预检 cron：进入 renew-before-days 窗口且根未封存时轮换（默认每日 03:30，签发路径不隐式轮换）
+  subca-precheck-cron: ${SSL_SUBCA_PRECHECK_CRON:0 30 3 * * ?}
+  # ===== 登录鉴权（对齐 csmig：SM2 口令加密 + BCrypt + JWT） =====
+  security:
+    jwt:
+      # 会话有效期（毫秒），默认24小时；签名密钥属环境项，落 profile 文件
+      expiration: 86400000
+  # ===== 外部系统直连 API（HIS 等；/ca/api/v1） =====
+  api:
+    # 总开关：关闭时对外 API 一律 503
+    enabled: ${SSL_API_ENABLED:true}
+    # 请求时间戳允许偏差（秒）
+    clock-skew-seconds: ${SSL_API_CLOCK_SKEW:300}
+    # nonce 保留时长（秒）
+    nonce-ttl-seconds: ${SSL_API_NONCE_TTL:600}
+    # 请求体上限（字节）
+    max-body-bytes: ${SSL_API_MAX_BODY:262144}
+    # 单客户端每分钟请求上限（≤0 关闭）
+    rate-limit-per-minute: ${SSL_API_RATE_LIMIT:120}
+  # ===== 申请单状态变更主动推送（外部系统只保留提交与吊销两个出站能力） =====
+  his-push:
+    # 总开关：关闭时不推送，外部系统只能等人工核对
+    enabled: ${SSL_HIS_PUSH_ENABLED:true}
+    # 回调地址（HIS 后端 context-path=/api）：dev 本机 8080；132 部署经 host.docker.internal 走宿主 8009
+    callback-url: ${SSL_HIS_PUSH_URL:http://localhost:8080/api/emr/signCert/caCallback}
+    # 推送签名 SM2 密钥对（非对称签名）：CA 保管私钥，HIS 只配公钥
+    # 留空则启动时自动生成一对并把公钥打到日志，运维复制到 HIS 侧 his.sign.ca.callback-public-key
+    # 生产必须用 SSL_HIS_PUSH_SIGN_KEY 注入私钥，否则重启即换密钥
+    sign-private-key: ${SSL_HIS_PUSH_SIGN_KEY:}
+    sign-public-key: ${SSL_HIS_PUSH_SIGN_PUB:}
+    # 单次推送超时（毫秒）
+    timeout-ms: ${SSL_HIS_PUSH_TIMEOUT_MS:5000}
+
+# 业务日志级别两环境同值，声明一次；dev 要开 SQL 调试就在 application-dev.yml 里覆盖成 debug
+logging:
+  level:
+    com.csssl: info

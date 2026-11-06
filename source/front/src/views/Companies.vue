@@ -868,7 +868,7 @@ async function load() {
       keyword: query.keyword.trim() || undefined
     })
     rows.value = res.data?.records || []
-    total.value = res.data?.total || 0
+    total.value = Number(res.data?.total) || 0
   } catch (e) {
     // 错误提示已由拦截器统一处理
   } finally {
