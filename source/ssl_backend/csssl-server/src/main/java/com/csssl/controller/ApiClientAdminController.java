@@ -2,6 +2,7 @@ package com.csssl.controller;
 
 import com.csssl.common.Result;
 import com.csssl.dto.ApiClientCreateDTO;
+import com.csssl.dto.ApiClientKeyDTO;
 import com.csssl.dto.BoolIdDTO;
 import com.csssl.dto.IdDTO;
 import com.csssl.entity.LoginUser;
@@ -52,7 +53,19 @@ public class ApiClientAdminController {
         LoginUser user = requireGlobalAdmin();
         return Result.success("登记成功，请立即保存 secret（仅展示一次）",
                 clientService.create(body.getCompanyUscc(), body.getClientName(), body.getSystemName(),
-                        body.getIpAllowlist(), body.getClientCertSha256(), user, clientIp(request)));
+                        body.getIpAllowlist(), body.getClientCertSha256(), body.getSignPublicKey(),
+                        user, clientIp(request)));
+    }
+
+    /**
+     * 换绑调用方 SM2 签名公钥：登记后该凭证改用非对称验签，CA 不再需要保存共享口令
+     */
+    @PostMapping("/rebind-key")
+    public Result<ApiClientVO> rebindKey(@Valid @RequestBody ApiClientKeyDTO body,
+                                         HttpServletRequest request) {
+        LoginUser user = requireGlobalAdmin();
+        return Result.success("已换绑公钥",
+                clientService.rebindSignKey(body.getId(), body.getSignPublicKey(), user, clientIp(request)));
     }
 
     /**

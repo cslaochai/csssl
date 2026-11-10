@@ -387,11 +387,20 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column align="right" fixed="right" label="操作" width="200">
+        <el-table-column label="鉴权方式" width="150">
+          <template #default="{ row }">
+            <el-tag v-if="row.appId" :type="row.signAuthType === 'SM2' ? 'success' : 'warning'" size="small">
+              {{ row.signAuthType === 'SM2' ? 'SM2 签名' : '共享口令' }}
+            </el-tag>
+            <div v-if="row.signKeyId" class="cell-sub cell-mono">{{ row.signKeyId }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column align="right" fixed="right" label="操作" width="300">
           <template #default="{ row }">
             <el-button v-if="hasPerm('apiclient:manage') && !row.appId" link size="small" type="primary"
                        @click="openCreateCredential(row)">登记凭证</el-button>
             <template v-else-if="hasPerm('apiclient:manage')">
+              <el-button link size="small" type="primary" @click="openRebindKey(row)">换绑公钥</el-button>
               <el-button link size="small" type="primary" @click="onRotateClient(row)">轮换密钥</el-button>
               <el-button link :type="row.status === 1 ? 'warning' : 'success'" size="small"
                          @click="onToggleClient(row)">{{ row.status === 1 ? '停用' : '启用' }}</el-button>
@@ -433,11 +442,39 @@
         <el-form-item label="IP 白名单">
           <el-input v-model="clientForm.ipAllowlist" placeholder="可选，逗号分隔；留空表示不限制"/>
         </el-form-item>
+        <el-form-item label="SM2 公钥">
+          <el-input v-model="clientForm.signPublicKey" :rows="3" type="textarea"
+                    placeholder="可选；130 字符 hex、04 前缀，留空则该凭证先用共享口令"/>
+          <div class="cell-sub">调用方本地生成密钥对后只交公钥；填了即走非对称验签，登记返回的口令只作过渡备用。</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="clientCreateVisible = false">取消</el-button>
           <el-button :loading="clientSubmitting" type="primary" @click="onCreateClient">生成凭证</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 换绑调用方 SM2 签名公钥：登记后走非对称验签，CA 不再保存共享口令 -->
+    <el-dialog v-model="keyBindVisible" :close-on-click-modal="false" title="换绑签名公钥" width="600px">
+      <el-form :model="keyForm" label-width="110px">
+        <el-form-item label="系统">
+          <el-input :model-value="keyForm.systemName" disabled/>
+        </el-form-item>
+        <el-form-item label="SM2 公钥" required>
+          <el-input v-model="keyForm.signPublicKey" :rows="3" type="textarea"
+                    placeholder="130 字符 hex、04 前缀，如 04a1b2……"/>
+          <div class="cell-sub">
+            调用方本地生成密钥对，只把公钥提交进来（CaRequestSigner.publicKeyOf(私钥) 即得）；
+            换绑立即生效、旧密钥作废，CA 之后只验签、无法伪造请求。
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="keyBindVisible = false">取消</el-button>
+          <el-button :loading="keyBindSubmitting" type="primary" @click="onRebindKey">确认换绑</el-button>
         </div>
       </template>
     </el-dialog>
@@ -460,6 +497,7 @@ import {
   listSimpleUsers,
   listSystems,
   pageCompanies,
+  rebindApiClientKey,
   rotateApiClient,
   setApiClientStatus,
   submitCompanyOp
@@ -522,7 +560,12 @@ const clients = ref([])
 const clientsLoading = ref(false)
 const clientCreateVisible = ref(false)
 const clientSubmitting = ref(false)
-const clientForm = reactive({systemName: '', ipAllowlist: ''})
+const clientForm = reactive({systemName: '', ipAllowlist: '', signPublicKey: ''})
+
+// 换绑调用方 SM2 签名公钥（登记后该凭证从共享口令切到非对称验签）
+const keyBindVisible = ref(false)
+const keyBindSubmitting = ref(false)
+const keyForm = reactive({id: null, systemName: '', signPublicKey: ''})
 
 // ===== 公司下的系统（证书域单元）：系统名 = 主体 O，公司内唯一 =====
 const systems = ref([])
@@ -815,7 +858,7 @@ async function onCreateSystem() {
 }
 
 function openCreateCredential(row) {
-  Object.assign(clientForm, {systemName: row.systemName, ipAllowlist: ''})
+  Object.assign(clientForm, {systemName: row.systemName, ipAllowlist: '', signPublicKey: ''})
   clientCreateVisible.value = true
 }
 
@@ -829,7 +872,8 @@ async function onCreateClient() {
     const res = await createApiClient({
       companyUscc: clientsTarget.value.uscc,
       systemName: clientForm.systemName,
-      ipAllowlist: clientForm.ipAllowlist.trim() || null
+      ipAllowlist: clientForm.ipAllowlist.trim() || null,
+      signPublicKey: clientForm.signPublicKey.trim().toLowerCase() || null
     })
     clientCreateVisible.value = false
     ElMessage.success('接入凭证已生成，请立即保存')
@@ -855,6 +899,33 @@ async function onToggleClient(row) {
   await setApiClientStatus(row.id, row.status !== 1)
   ElMessage.success(row.status === 1 ? '已停用' : '已启用')
   await loadClients()
+}
+
+// 换绑公钥：调用方本地生成 SM2 密钥对，只把公钥登记进来，CA 不再持有共享口令
+function openRebindKey(row) {
+  Object.assign(keyForm, {
+    id: row.id,
+    systemName: row.systemName || row.clientName,
+    signPublicKey: ''
+  })
+  keyBindVisible.value = true
+}
+
+async function onRebindKey() {
+  const key = keyForm.signPublicKey.trim().toLowerCase()
+  if (!/^04[0-9a-f]{128}$/.test(key)) {
+    ElMessage.warning('公钥应为 130 字符 hex、04 前缀（由 CaRequestSigner.publicKeyOf(私钥) 导出）')
+    return
+  }
+  keyBindSubmitting.value = true
+  try {
+    await rebindApiClientKey(keyForm.id, key)
+    keyBindVisible.value = false
+    ElMessage.success('已换绑公钥，该凭证改用 SM2 签名验签')
+    await loadClients()
+  } finally {
+    keyBindSubmitting.value = false
+  }
 }
 
 // ===== 公司列表加载 =====

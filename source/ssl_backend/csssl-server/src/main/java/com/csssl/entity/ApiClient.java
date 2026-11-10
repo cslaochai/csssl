@@ -55,6 +55,13 @@ public class ApiClient extends AuditColumns {
     private String clientCertSha256;
 
     /**
+     * 调用方 SM2 签名公钥（130 字符 hex，04 前缀）：
+     * 非空 = 该客户端走非对称签名验签（CA 只存公钥，私钥在调用方手里）；
+     * 空 = 仍走旧的 HMAC 共享口令（过渡期兼容存量接入方）。
+     */
+    private String signPublicKey;
+
+    /**
      * secret 版本（轮换 +1）
      */
     private Integer secretVersion;

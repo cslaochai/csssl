@@ -55,7 +55,7 @@ public class CompanyProvisionService {
         // 凭证名称留空：由服务端落系统名，与「系统接入」页的展示口径一致
         ApiClientSecretVO credential = apiClientService.create(company.getUscc(),
                 null, system.getSystemName(),
-                null, null, actor, ip);
+                null, null, null, actor, ip);
 
         auditService.record(actor, "COMPANY_CREATE", company.getUscc(),
                 "新建公司 " + company.getCompanyName() + "（统一社会信用代码=" + company.getUscc()

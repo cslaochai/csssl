@@ -32,4 +32,10 @@ public class ApiClientCreateDTO {
      * mTLS 客户端证书 SHA-256 指纹（可选；配置后请求必须携带该证书）
      */
     private String clientCertSha256;
+
+    /**
+     * 调用方 SM2 签名公钥（可选，130 字符 hex、04 前缀）：
+     * 填了就走非对称验签（私钥在调用方手里）；留空则该凭证仍用 HMAC 共享口令
+     */
+    private String signPublicKey;
 }

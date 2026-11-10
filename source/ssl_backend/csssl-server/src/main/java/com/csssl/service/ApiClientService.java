@@ -11,6 +11,7 @@ import com.csssl.mapper.ApiClientMapper;
 import com.csssl.config.CompanyVaultResolver;
 import com.csssl.vo.ApiClientSecretVO;
 import com.csssl.vo.ApiClientVO;
+import com.csssl.util.CaApiSign;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -65,10 +66,12 @@ public class ApiClientService {
      * 登记系统接入凭证（仅接入凭证管理员，控制器已校验）：必须指定已登记的系统，返回一次性 secret。
      */
     public ApiClientSecretVO create(String companyUscc, String clientName, String systemName,
-                                    String ipAllowlist, String clientCertSha256, LoginUser actor, String ip) {
+                                    String ipAllowlist, String clientCertSha256, String signPublicKey,
+                                    LoginUser actor, String ip) {
         if (companyUscc == null || companyUscc.isBlank()) {
             throw new IllegalArgumentException("必须指定凭证绑定的公司");
         }
+        String publicKey = normalizePublicKey(signPublicKey);
         String company = companyUscc.trim();
         CaCompany companyRow = companyService.get(company);
         if (!CompanyStatusEnum.ACTIVE.is(companyRow.getStatus())) {
@@ -90,6 +93,7 @@ public class ApiClientService {
         client.setSystemName(system.getSystemName());
         client.setIpAllowlist(blankToNull(ipAllowlist));
         client.setClientCertSha256(blankToNull(clientCertSha256));
+        client.setSignPublicKey(publicKey);
         client.setSecretVersion(1);
         client.setStatus(1);
         client.setCreatedAt(LocalDateTime.now());
@@ -99,11 +103,45 @@ public class ApiClientService {
         auditService.record(actor, "API_CLIENT_CREATE", appId,
                 "登记系统接入凭证：" + name + "（appId=" + appId + "，公司=" + company
                         + "，系统=" + system.getSystemName()
+                        + "，鉴权=" + (publicKey == null ? "HMAC 共享口令" : "SM2 公钥 " + CaApiSign.keyId(publicKey))
                         + (client.getIpAllowlist() == null ? "" : "，IP白名单=" + client.getIpAllowlist()) + "）",
                 ip, company);
-        log.info("[API客户端] 已登记 appId={}, company={}, system={}, name={}",
-                appId, company, system.getSystemName(), name);
+        log.info("[API客户端] 已登记 appId={}, company={}, system={}, name={}, 鉴权={}",
+                appId, company, system.getSystemName(), name, publicKey == null ? "HMAC" : "SM2");
         return secretVo(client, companyRow.getCompanyName(), secret);
+    }
+
+    /**
+     * 换绑调用方签名公钥：登记后调用方改用私钥签名，CA 用这把公钥验签。
+     */
+    public ApiClientVO rebindSignKey(Long id, String signPublicKey, LoginUser actor, String ip) {
+        ApiClient client = require(id);
+        String publicKey = normalizePublicKey(signPublicKey);
+        if (publicKey == null) {
+            throw new IllegalArgumentException("公钥不能为空（如需回退到共享口令鉴权，请使用停用后重新登记）");
+        }
+        client.setSignPublicKey(publicKey);
+        clientMapper.updateById(client);
+        auditService.record(actor, "API_CLIENT_REBIND_KEY", client.getAppId(),
+                "换绑调用方签名公钥：" + client.getClientName() + "（keyId=" + CaApiSign.keyId(publicKey) + "）",
+                ip, client.getCompanyUscc());
+        ApiClientVO vo = ApiClientVO.from(client);
+        vo.setCompanyName(companyName(client.getCompanyUscc()));
+        return vo;
+    }
+
+    /**
+     * 公钥规范化：空=不启用非对称鉴权；非空必须是合法 SM2 公钥，否则直接拒绝，避免登记一把永远验不过的钥匙。
+     */
+    private String normalizePublicKey(String signPublicKey) {
+        if (signPublicKey == null || signPublicKey.isBlank()) {
+            return null;
+        }
+        String key = signPublicKey.trim().toLowerCase();
+        if (!CaApiSign.validPublicKey(key)) {
+            throw new IllegalArgumentException("SM2 公钥格式不正确：应为 130 字符 hex、04 前缀、且落在 sm2p256v1 曲线上");
+        }
+        return key;
     }
 
     /**
@@ -173,7 +211,7 @@ public class ApiClientService {
         if (existing == null) {
             CaSystem system = caSystemService.firstOrCreateForCompany(companyUscc, actor, ip);
             return create(companyUscc, null, system.getSystemName(),
-                    null, null, actor, ip);
+                    null, null, null, actor, ip);
         }
         return rotate(existing.getId(), actor, ip);
     }

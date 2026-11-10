@@ -1,6 +1,7 @@
 package com.csssl.vo;
 
 import com.csssl.entity.ApiClient;
+import com.csssl.util.CaApiSign;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 
@@ -20,6 +21,10 @@ public class ApiClientVO {
     private String systemName;
     private String ipAllowlist;
     private String clientCertSha256;
+    /** 鉴权方式：SM2 / HMAC（前端据此显示"非对称签名"还是"共享口令"） */
+    private String signAuthType;
+    /** 已登记公钥的指纹前 16 位（便于核对换绑的是哪把钥匙） */
+    private String signKeyId;
     private Integer secretVersion;
     private Integer status;
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -39,6 +44,9 @@ public class ApiClientVO {
         vo.setSystemName(c.getSystemName());
         vo.setIpAllowlist(c.getIpAllowlist());
         vo.setClientCertSha256(c.getClientCertSha256());
+        boolean sm2 = c.getSignPublicKey() != null && !c.getSignPublicKey().isBlank();
+        vo.setSignAuthType(sm2 ? "SM2" : "HMAC");
+        vo.setSignKeyId(sm2 ? CaApiSign.keyId(c.getSignPublicKey()) : null);
         vo.setSecretVersion(c.getSecretVersion());
         vo.setStatus(c.getStatus());
         vo.setLastUsedAt(c.getLastUsedAt());

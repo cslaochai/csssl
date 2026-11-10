@@ -390,9 +390,13 @@ export function detailCertOp(id) {
 export function listApiClients() {
   return request.post('/admin/api-clients/list', {})
 }
-/** 登记系统接入凭证：{companyUscc, systemName, clientName?, ipAllowlist?, clientCertSha256?}（clientName 留空用系统名） */
+/** 登记系统接入凭证：{companyUscc, systemName, clientName?, ipAllowlist?, clientCertSha256?, signPublicKey?}（clientName 留空用系统名） */
 export function createApiClient(data) {
   return request.post('/admin/api-clients/create', data)
+}
+/** 换绑调用方 SM2 签名公钥：{id, signPublicKey}（130 字符 hex、04 前缀）→ 之后该凭证走非对称验签 */
+export function rebindApiClientKey(id, signPublicKey) {
+  return request.post('/admin/api-clients/rebind-key', { id, signPublicKey })
 }
 
 // ===== 公司下的系统（证书域单元，系统名 = 主体 O） =====

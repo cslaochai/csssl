@@ -17,7 +17,8 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 对外证书申请 API v1（供 HIS / EMR 等外部系统直连）。
  *
- * <p>鉴权由 {@link CaApiAuthFilter} 完成（HMAC-SHA256 + 防重放 + 限流 + IP/证书白名单）；
+ * <p>鉴权由 {@link CaApiAuthFilter} 完成：优先 SM2 客户端签名（公钥登记在接入凭证上，私钥在调用方手里），
+ * 未登记公钥的存量客户端回退 HMAC-SHA256；两者共用防重放 + 限流 + IP/证书白名单；
  * URL 不携带公司标识——公司由 appId 反查，调用方无法指定其他公司的数据域。</p>
  */
 @RestController
