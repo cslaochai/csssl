@@ -13,7 +13,9 @@ csssl:
   # 如需临时起第二个实例做验证，用 SSL_STORE_DIR 显式覆盖为绝对路径。
   store-dir: ${SSL_STORE_DIR:./data/certs}
   # 对外公开基础地址：生成证书 CDP/AIA 扩展与 OCSP URL（业务系统可见地址，需可外访）
-  public-base-url: http://localhost:8092/ssl
+  # 单机联调四个服务（8080/8090/8091/8092）都在本机，localhost 可达；一旦证书要发给别的机器，
+  # 必须用 SSL_PUBLIC_BASE_URL 覆盖成对端能访问的内网地址，否则对端按证书里的 URL 取 CRL 会打自己的 localhost。
+  public-base-url: ${SSL_PUBLIC_BASE_URL:http://localhost:8092/ssl}
   # 私钥加密（SM4）主密钥：留空则首启生成随机密钥落盘 store-dir/master.key（本机联调可接受）
   key-vault:
     master-key: ""
