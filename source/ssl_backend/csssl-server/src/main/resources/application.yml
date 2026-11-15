@@ -98,9 +98,11 @@ csssl:
     # 回调地址（HIS 后端 context-path=/api）：dev 本机 8080；132 部署经 host.docker.internal 走宿主 8009
     callback-url: ${SSL_HIS_PUSH_URL:http://localhost:8080/api/emr/signCert/caCallback}
     # 推送签名 SM2 密钥对（非对称签名）：CA 保管私钥，HIS 只配公钥
-    # 留空则启动时自动生成一对并把公钥打到日志，运维复制到 HIS 侧 his.sign.ca.callback-public-key
-    # 生产必须用 SSL_HIS_PUSH_SIGN_KEY 注入私钥，否则重启即换密钥
+    # 私钥必填：缺失时拒绝启动（不自动生成，避免重启换钥导致 HIS 侧验签全失败）
+    # 本机开发写 application-dev.yml 固定值，生产用 SSL_HIS_PUSH_SIGN_KEY 注入
+    # 生成一对：java -cp <classpath> com.csssl.util.Sm2KeyTool
     sign-private-key: ${SSL_HIS_PUSH_SIGN_KEY:}
+    # 公钥可留空（由私钥推导）；显式填写时必须与私钥同源，否则启动失败
     sign-public-key: ${SSL_HIS_PUSH_SIGN_PUB:}
     # 单次推送超时（毫秒）
     timeout-ms: ${SSL_HIS_PUSH_TIMEOUT_MS:5000}

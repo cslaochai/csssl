@@ -21,6 +21,12 @@ csssl:
     master-key: ""
   # 私钥下载开关：开发期允许管理后台下载私钥
   allow-private-key-download: true
+  # 申请单状态变更推送 HIS：签名私钥必填（缺失则拒绝启动，不再自动生成兜底）
+  # 本机开发写固定值，跨重启不变；生产由 SSL_HIS_PUSH_SIGN_KEY 注入，绝不复用本项
+  his-push:
+    sign-private-key: d7ada1d451c9f4a1f75c3ce371958040c8b4901e74af346e3d641ecd3ac33ce1
+    # 公钥（对应私钥，keyId=21c29d0a762aa7ef）：HIS 侧 his.sign.ca.callback-public-key 配这一把
+    sign-public-key: 0405818a8a48abff2477e90eb338e52a4acf2f0c879a1070b9497b763bf13f32b5892bcfb76e04d1ef518efaac32c1f91de46b9bcb26e44d2886e5b366a1e17b52
   security:
     sm2:
       # 固定私钥（与 132 部署同值）：重启不失效，避免前端缓存的公钥与后端新密钥对不上；公钥留空由私钥推导

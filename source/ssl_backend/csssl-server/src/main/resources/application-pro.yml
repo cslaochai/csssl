@@ -19,8 +19,9 @@ csssl:
     # 生产必须 https：报文含证书 PEM 与主体信息，明文传输等于对外泄露资产清单
     # 若 HIS 侧暂未启用 TLS，需用 SSL_HIS_PUSH_URL 显式覆盖（同时会在日志里收到告警）
     callback-url: ${SSL_HIS_PUSH_URL:https://host.docker.internal:8009/api/emr/signCert/caCallback}
-    # 报文签名密钥（HMAC-SHA256）：HIS 侧同值验签。**生产必须注入**，留空则拒绝推送
-    secret: ${SSL_HIS_PUSH_SECRET:}
+    # 报文签名：SM2 非对称签名，CA 持有私钥、HIS 只配公钥（his.sign.ca.callback-public-key）
+    # **生产必须注入 SSL_HIS_PUSH_SIGN_KEY**，缺失会拒绝启动（不再自动生成兜底）
+    sign-private-key: ${SSL_HIS_PUSH_SIGN_KEY:}
     timeout-ms: ${SSL_HIS_PUSH_TIMEOUT_MS:5000}
   security:
     sm2:

@@ -1,34 +1,23 @@
 package com.csssl.service;
 
 import cn.hutool.crypto.asymmetric.SM2;
-import cn.hutool.crypto.digest.DigestUtil;
 import com.csssl.config.CssslProperties;
 import com.csssl.entity.CaCert;
 import com.csssl.entity.CertApplication;
 import com.csssl.enums.CertApplicationStatusEnum;
 import com.csssl.util.SignUtil;
+import com.csssl.util.Sm2KeyTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.bouncycastle.asn1.gm.GMNamedCurves;
-import org.bouncycastle.asn1.x9.X9ECParameters;
-import org.bouncycastle.crypto.AsymmetricCipherKeyPair;
-import org.bouncycastle.crypto.generators.ECKeyPairGenerator;
-import org.bouncycastle.crypto.params.ECDomainParameters;
-import org.bouncycastle.crypto.params.ECKeyGenerationParameters;
-import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
-import org.bouncycastle.crypto.params.ECPublicKeyParameters;
-import org.bouncycastle.math.ec.ECPoint;
 import org.springframework.stereotype.Service;
 
-import java.math.BigInteger;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -47,7 +36,7 @@ import java.util.UUID;
  * <p><b>签名</b>：SM2 非对称签名（SM3withSM2）。CA 侧保管推送私钥，HIS 侧只配置推送公钥。
  * 每个推送带 {@code X-Ca-Timestamp} / {@code X-Ca-Nonce} / {@code X-Ca-Signature} / {@code X-Ca-Key-Id}，
  * 签名串为 {@code timestamp \n nonce \n sha256Hex(body)}，签名值 Base64 编码。
- * 私钥未配置时自动生成一对并打印公钥；公钥是公开的，泄露也只能验签不能伪造。</p>
+ * 私钥未配置时<b>拒绝启动</b>（不自动生成，避免重启换钥导致 HIS 侧验签全失败）；公钥是公开的，泄露也只能验签不能伪造。</p>
  */
 @Slf4j
 @Service
@@ -74,64 +63,54 @@ public class HisPushService {
     private volatile String pushKeyId;
 
     /**
-     * 启动时初始化推送签名密钥对：配了私钥就用它推导公钥，没配则自动生成一对并告警。
-     * 自动生成的密钥重启即换，生产必须显式配置。
+     * 启动时装载推送签名密钥：<b>私钥必填</b>，缺配置、格式非法、与显式配置的公钥不匹配，一律抛出异常中止启动。
+     *
+     * <p>这里不做任何自动生成。推送私钥必须跨重启稳定：自动生成时本次启动能正常跑，
+     * 下次重启 HIS 侧配的公钥就全部验签失败，故障要等重启后才暴露，比启动即失败难排查得多。
+     * 密钥对生成是一次性的运维动作，见 {@link Sm2KeyTool}（命令行工具），生成后固定注入配置。</p>
      */
     @PostConstruct
     public void initPushKey() {
         CssslProperties.HisPush cfg = props.getHisPush();
-        String prv = cfg.getSignPrivateKey();
-        if (prv == null || prv.isBlank()) {
-            String[] pair = generateSm2KeyPair();
-            this.pushPrivateKeyHex = pair[0];
-            this.pushPublicKeyHex = pair[1];
-            log.warn("[状态推送] 未配置 csssl.his-push.sign-private-key，已自动生成一对 SM2 推送密钥（重启即换）。"
-                    + "公钥={}，请把它配到 HIS 侧 his.sign.ca.callback-public-key，生产环境必须显式配置私钥。",
-                    pushPublicKeyHex);
-        } else {
-            this.pushPrivateKeyHex = prv.trim().toLowerCase();
-            String pub = cfg.getSignPublicKey();
-            this.pushPublicKeyHex = (pub == null || pub.isBlank())
-                    ? derivePublicKey(this.pushPrivateKeyHex) : pub.trim().toLowerCase();
-            log.info("[状态推送] SM2 推送签名密钥就绪，keyId={}，公钥={}...",
-                    pushKeyId, pushPublicKeyHex.substring(0, Math.min(32, pushPublicKeyHex.length())));
+        if (!cfg.isEnabled()) {
+            // 总开关关闭时根本不推送，密钥无意义；此时不校验，避免关了推送还被密钥卡住启动
+            log.info("[状态推送] csssl.his-push.enabled=false，推送已关闭，跳过签名密钥校验");
+            return;
         }
-        this.pushKeyId = DigestUtil.sha256Hex(this.pushPublicKeyHex).substring(0, 16);
-    }
-
-    /** 生成 SM2 密钥对，返回 [私钥hex, 公钥hex(04前缀)] */
-    private static String[] generateSm2KeyPair() {
-        ECDomainParameters domain = sm2Domain();
-        ECKeyPairGenerator generator = new ECKeyPairGenerator();
-        generator.init(new ECKeyGenerationParameters(domain, new SecureRandom()));
-        AsymmetricCipherKeyPair pair = generator.generateKeyPair();
-        ECPrivateKeyParameters priv = (ECPrivateKeyParameters) pair.getPrivate();
-        ECPublicKeyParameters pub = (ECPublicKeyParameters) pair.getPublic();
-        String prvHex = leftPad64(priv.getD().toString(16));
-        return new String[]{prvHex, pointToHex(pub.getQ())};
-    }
-
-    /** 由私钥推导公钥：Q = dG */
-    private static String derivePublicKey(String privateKeyHex) {
-        ECDomainParameters domain = sm2Domain();
-        ECPoint q = domain.getG().multiply(new BigInteger(privateKeyHex, 16)).normalize();
-        return pointToHex(q);
-    }
-
-    private static String pointToHex(ECPoint point) {
-        return "04"
-                + leftPad64(point.getAffineXCoord().toBigInteger().toString(16))
-                + leftPad64(point.getAffineYCoord().toBigInteger().toString(16));
-    }
-
-    private static ECDomainParameters sm2Domain() {
-        X9ECParameters params = GMNamedCurves.getByName("sm2p256v1");
-        return new ECDomainParameters(params.getCurve(), params.getG(), params.getN(), params.getH());
-    }
-
-    private static String leftPad64(String hex) {
-        if (hex.length() >= 64) return hex;
-        return "0".repeat(64 - hex.length()) + hex;
+        String prv = cfg.getSignPrivateKey() == null ? "" : cfg.getSignPrivateKey().trim().toLowerCase();
+        if (prv.startsWith("0x")) {
+            prv = prv.substring(2);
+        }
+        if (prv.isEmpty()) {
+            throw new IllegalStateException("[状态推送] 缺少推送签名私钥 csssl.his-push.sign-private-key："
+                    + "生产用环境变量 SSL_HIS_PUSH_SIGN_KEY 注入，本机开发写在 application-dev.yml。"
+                    + "私钥必须固定且跨重启不变，HIS 侧只配对应的公钥；"
+                    + "确实不需要推送的环境，请显式设置 SSL_HIS_PUSH_ENABLED=false 关闭总开关。"
+                    + "密钥对由 java -cp <classpath> com.csssl.util.Sm2KeyTool 手工生成一次。");
+        }
+        if (!Sm2KeyTool.isValidPrivateKey(prv)) {
+            throw new IllegalStateException("[状态推送] csssl.his-push.sign-private-key 格式非法："
+                    + "需要 64 位十六进制 SM2 私钥（且 0 < d < n），当前长度=" + prv.length() + "。");
+        }
+        String pub = cfg.getSignPublicKey() == null ? "" : cfg.getSignPublicKey().trim().toLowerCase();
+        String derived = Sm2KeyTool.derivePublicKey(prv);
+        if (!pub.isEmpty()) {
+            if (!Sm2KeyTool.isValidPublicKey(pub)) {
+                throw new IllegalStateException("[状态推送] csssl.his-push.sign-public-key 格式非法："
+                        + "需要 130 位十六进制未压缩公钥（04 前缀），当前长度=" + pub.length() + "。");
+            }
+            if (!pub.equals(derived)) {
+                throw new IllegalStateException("[状态推送] csssl.his-push.sign-public-key 与私钥推导的公钥不是同一对"
+                        + "（配置公钥 keyId=" + Sm2KeyTool.keyId(pub)
+                        + "，私钥推导 keyId=" + Sm2KeyTool.keyId(derived)
+                        + "）：HIS 侧必然验签失败。请把公钥项留空由私钥推导，或核对两端配置。");
+            }
+        }
+        this.pushPrivateKeyHex = prv;
+        this.pushPublicKeyHex = pub.isEmpty() ? derived : pub;
+        this.pushKeyId = Sm2KeyTool.keyId(this.pushPublicKeyHex);
+        log.info("[状态推送] SM2 推送签名密钥就绪（来自配置，非自动生成），keyId={}，公钥={}...",
+                pushKeyId, pushPublicKeyHex.substring(0, Math.min(32, pushPublicKeyHex.length())));
     }
 
     /**

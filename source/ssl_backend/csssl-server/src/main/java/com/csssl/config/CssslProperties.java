@@ -155,13 +155,14 @@ public class CssslProperties {
          */
         private String callbackUrl;
         /**
-         * 推送签名 SM2 私钥（64 hex 字符）。留空则启动时自动生成一对并把公钥打到日志，
-         * 运维把公钥配到 HIS 侧即可。生产必须显式配置（环境变量 HIS_PUSH_SIGN_KEY 注入），否则重启即换密钥。
+         * 推送签名 SM2 私钥（64 hex 字符）：<b>必填</b>，缺失则拒绝启动，不会自动生成。
+         * 必须跨重启固定，否则 HIS 侧配的公钥每次重启都失效。生产用环境变量 SSL_HIS_PUSH_SIGN_KEY 注入。
+         * 若把本环境的总开关 enabled 设为 false，则不再校验本项。
          */
         private String signPrivateKey = "";
         /**
-         * 推送签名 SM2 公钥（130 hex 字符，04 前缀）。留空则由私钥推导。
-         * 启动时打印到日志，供运维复制到 HIS 侧配置。
+         * 推送签名 SM2 公钥（130 hex 字符，04 前缀）：可留空，由私钥推导。
+         * 若显式填写，则必须与私钥推导出的公钥一致，否则启动失败（配错会让 HIS 验签全失败）。
          */
         private String signPublicKey = "";
         /**
