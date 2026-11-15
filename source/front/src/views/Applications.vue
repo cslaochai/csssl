@@ -282,7 +282,7 @@ import {
 import {getWorkflowDiagram} from '@/api/workflow'
 import WorkflowDiagram from '@/views/WorkflowDiagram.vue'
 import {hasPerm} from '@/lib/perm'
-import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
+import {DEFAULT_PAGE_SIZE, PAGE_SIZES, toTotal} from '@/lib/pagination'
 import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 
 const route = useRoute()
@@ -341,7 +341,7 @@ async function load() {
       keyword: query.keyword || undefined
     })
     rows.value = res.data.records || []
-    total.value = res.data.total || 0
+    total.value = toTotal(res.data?.total)
   } catch (e) {
     // 错误提示已由拦截器统一处理
   } finally {

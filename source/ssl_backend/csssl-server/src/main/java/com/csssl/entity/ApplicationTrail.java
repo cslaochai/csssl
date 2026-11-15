@@ -26,6 +26,7 @@ public class ApplicationTrail extends AuditColumns {
     private String companyUscc;
 
     /** 申请单 id */
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long applicationId;
 
     /** 申请单号（快照，便于检索） */

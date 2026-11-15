@@ -99,6 +99,7 @@
 <script setup>
 import {computed, onMounted, ref} from 'vue'
 import {getOverview, listCompaniesCached, pageApplications} from '@/api/system'
+import {toTotal} from '@/lib/pagination'
 
 const companyOptions = ref([])
 const companyUscc = ref('')
@@ -169,7 +170,7 @@ async function load() {
     ])
     overview.value = ov.data || {}
     root.value = ov.data?.root || {}
-    pending.value = apps.data?.total ?? 0
+    pending.value = toTotal(apps.data?.total)
   } catch (e) {
     // 错误提示已由拦截器统一处理
   }

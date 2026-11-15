@@ -502,7 +502,7 @@ import {
   setApiClientStatus,
   submitCompanyOp
 } from '@/api/system'
-import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
+import {DEFAULT_PAGE_SIZE, PAGE_SIZES, toTotal} from '@/lib/pagination'
 import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 import {hasPerm} from '@/lib/perm'
 import {copyText} from '@/lib/clipboard'
@@ -939,7 +939,7 @@ async function load() {
       keyword: query.keyword.trim() || undefined
     })
     rows.value = res.data?.records || []
-    total.value = Number(res.data?.total) || 0
+    total.value = toTotal(res.data?.total)
   } catch (e) {
     // 错误提示已由拦截器统一处理
   } finally {

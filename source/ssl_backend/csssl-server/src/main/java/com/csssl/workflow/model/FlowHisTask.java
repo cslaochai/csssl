@@ -21,6 +21,7 @@ public class FlowHisTask {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long definitionId;
 
     private String flowName;
@@ -28,6 +29,7 @@ public class FlowHisTask {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long instanceId;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long taskId;
 
     private String businessId;

@@ -21,6 +21,7 @@ public class FlowInstance {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long definitionId;
 
     private String flowName;

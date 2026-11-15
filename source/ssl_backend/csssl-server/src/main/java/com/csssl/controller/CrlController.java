@@ -41,7 +41,8 @@ public class CrlController {
     private final CaSystemService caSystemService;
 
     /**
-     * 吊销记录 + 当前 CRL PEM + thisUpdate/nextUpdate（管理页；body.companyUscc= 切公司域，缺省 default）
+     * 吊销记录 + 已发布 CRL PEM + thisUpdate/nextUpdate（管理页；body.companyUscc= 切公司域，缺省 default）。
+     * 只读：不触发签发、不解密 SUB_CA 私钥（需要新签发请走 /download 或等每日定时发布）。
      */
     @PostMapping("/view")
     public Result<CrlViewVO> view(@RequestBody(required = false) CompanyUsccDTO body) {
@@ -49,7 +50,7 @@ public class CrlController {
         String company = resolveCompany(companyUscc);
         String system = resolveSystem(company, body == null ? null : body.getSystemName());
         List<CaCert> revoked = crlService.revokedList(company, system);
-        CrlService.CrlInfo info = crlService.publishIfNeeded(company, system);
+        CrlService.CrlInfo info = crlService.currentInfo(company, system, revoked.size());
         CrlViewVO vo = new CrlViewVO();
         // default 域响应体不加 companyUscc 字段（存量 URL 逐字节兼容）；非 default 标注归属域与系统
         if (!CaCompany.LEGACY_NAMESPACE.equals(company)) {

@@ -100,7 +100,7 @@ import {
   pageMyMessages,
   pendingSubCaRebuild
 } from '@/api/system'
-import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
+import {DEFAULT_PAGE_SIZE, PAGE_SIZES, toTotal} from '@/lib/pagination'
 
 const router = useRouter()
 
@@ -159,7 +159,7 @@ async function loadMessages() {
       readFlag: unreadOnly.value ? 0 : undefined
     })
     rows.value = res.data.records || []
-    total.value = res.data.total || 0
+    total.value = toTotal(res.data?.total)
     hasUnread.value = rows.value.some(r => r.readFlag === 0)
   } catch (e) {
     // 错误提示已由拦截器统一处理

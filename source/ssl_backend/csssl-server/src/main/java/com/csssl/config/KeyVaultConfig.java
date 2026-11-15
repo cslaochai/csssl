@@ -61,23 +61,47 @@ public class KeyVaultConfig {
 
     /**
      * 把配置里的 storeDir 解析为绝对路径。
-     * 绝对路径原样返回；相对路径基于 classpath root（target/classes）向上推导到后端模块根，
-     * 再拼接相对路径——开发环境下恒等于 source/ssl_backend/data/certs，与启动方式无关。
-     * 生产打包后由 SSL_STORE_DIR 环境变量注入绝对路径，本方法不参与。
+     * 绝对路径原样返回；相对路径基于「后端父工程根」（含 &lt;modules&gt; 的 pom.xml 所在目录）拼接，
+     * 开发环境下恒等于 source/ssl_backend/data/certs，与启动方式（IDEA / mvn / 打包运行）、
+     * 模块拆分都无关。生产打包后由 SSL_STORE_DIR 环境变量注入绝对路径，本方法不参与。
      */
     static Path resolveStoreDir(String configured) {
         Path configuredPath = Path.of(configured);
         if (configuredPath.isAbsolute()) {
             return configuredPath.normalize().toAbsolutePath();
         }
+        return backendRoot().resolve(configuredPath).normalize().toAbsolutePath();
+    }
+
+    /**
+     * 后端父工程根：从 classpath root（…/csssl-server/target/classes）逐级向上，
+     * 取第一个 pom.xml 里声明了 &lt;modules&gt; 的目录 = ssl_backend。
+     * 原先固定「往上 2 级」在后端拆成 csssl-server 子模块后只到模块根，
+     * 于是多落一套盘（source/ssl_backend/csssl-server/data/certs）、换一把 KEK，
+     * 库内密文随之解不开——这里改为按父工程特征定位，不再依赖目录层级深度。
+     */
+    private static Path backendRoot() {
+        Path classpathRoot;
         try {
-            Path classpathRoot = Path.of(KeyVaultConfig.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-            // classpathRoot = source/ssl_backend/target/classes/；往上 2 级 = source/ssl_backend/
-            Path backendModuleRoot = classpathRoot.getParent().getParent();
-            return backendModuleRoot.resolve(configuredPath).normalize().toAbsolutePath();
+            classpathRoot = Path.of(KeyVaultConfig.class.getProtectionDomain().getCodeSource().getLocation().toURI());
         } catch (URISyntaxException e) {
             throw new IllegalStateException("store-dir 相对路径解析失败: " + e.getMessage(), e);
         }
+        for (Path p = classpathRoot; p != null; p = p.getParent()) {
+            Path pom = p.resolve("pom.xml");
+            if (!Files.isRegularFile(pom)) {
+                continue;
+            }
+            try {
+                if (Files.readString(pom, StandardCharsets.UTF_8).contains("<modules>")) {
+                    return p;
+                }
+            } catch (IOException ignored) {
+                // 读不到就当不是父工程，继续向上
+            }
+        }
+        // 兜底：旧口径（后端模块根），至少保证仍是项目内绝对路径、不是 user.dir
+        return classpathRoot.getParent().getParent();
     }
 
     /**

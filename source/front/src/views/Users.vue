@@ -140,7 +140,7 @@ import {computed, onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
 import {Plus, Refresh, Search} from '@element-plus/icons-vue'
 import {createUser, listRoles, pageUsers, updateUser} from '@/api/system'
-import {DEFAULT_PAGE_SIZE, PAGE_SIZES} from '@/lib/pagination'
+import {DEFAULT_PAGE_SIZE, PAGE_SIZES, toTotal} from '@/lib/pagination'
 import {useTableMaxHeight} from '@/lib/useTableMaxHeight'
 
 // 角色下拉的兜底清单（接口不可用时页面仍可操作；正常以角色配置页档案为准）
@@ -204,7 +204,7 @@ async function load() {
       roleCode: query.roleCode || undefined
     })
     rows.value = res.data.records || []
-    total.value = res.data.total || 0
+    total.value = toTotal(res.data?.total)
   } catch (e) {
     // 错误提示已由拦截器统一处理
   } finally {

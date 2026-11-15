@@ -12,6 +12,8 @@ import com.csssl.workflow.dto.StartRequest;
 import com.csssl.workflow.dto.TaskVO;
 import com.csssl.workflow.model.FlowHisTask;
 import com.csssl.workflow.model.FlowInstance;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
@@ -118,6 +120,8 @@ public class WorkflowEngineController {
 
     @Data
     public static class CandidateVO {
+        /** 用户 id：与其它接口一致按字符串下发，前端各处 id 比较才不会一串一数 */
+        @JsonSerialize(using = ToStringSerializer.class)
         private Long id;
         private String username;
         private String realName;

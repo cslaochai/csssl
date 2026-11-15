@@ -168,6 +168,33 @@ public class CrlService {
     }
 
     /**
+     * 只读视图：取「已发布」的 CRL 现状（不签发、不解密 SUB_CA 私钥、不推进 CRLNumber）。
+     * 管理端查看页只应展示现状；重签/续期由下载端点与每日定时任务负责——否则一次查看
+     * 就会解私钥、改状态行，KEK 一旦不匹配连吊销列表页都打不开（2026-11-15 现场）。
+     * 从未发布过 / 文件缺失时返回空 PEM，由调用方决定提示「请先下载或等待定时发布」。
+     */
+    public CrlInfo currentInfo(String companyUscc, String systemName, int entries) {
+        String issuerCn = CertUtil.subjectCn(caService.signingCert(companyUscc, systemName));
+        CrlState state = crlStateMapper.selectByCompanyAndSystem(companyUscc, systemName);
+        if (state == null || state.getCrlNumber() == null || state.getCrlNumber() <= 0) {
+            return new CrlInfo("", null, null, 0, issuerCn, 0L, null);
+        }
+        Path f = currentPemFile(companyUscc, systemName);
+        if (!Files.exists(f)) {
+            return new CrlInfo("", state.getThisUpdate(), state.getNextUpdate(), entries,
+                    issuerCn, state.getCrlNumber(), null);
+        }
+        try {
+            return new CrlInfo(Files.readString(f, StandardCharsets.UTF_8), state.getThisUpdate(),
+                    state.getNextUpdate(), entries, issuerCn, state.getCrlNumber(), null);
+        } catch (IOException e) {
+            log.warn("[CRL][{}][{}] 已发布 CRL 回读失败（只读视图返回空 PEM）: {}", companyUscc, systemName, e.getMessage());
+            return new CrlInfo("", state.getThisUpdate(), state.getNextUpdate(), entries,
+                    issuerCn, state.getCrlNumber(), null);
+        }
+    }
+
+    /**
      * 每日定时发布：遍历 default + 全部 ACTIVE 公司，公司下每个系统逐一主动续发/补发，
      * 把「吊销生效 → CRL 可见」窗口从"下次有人拉"收敛到至多下个调度点。
      * SUSPENDED/CLOSED 公司不进定时续发名单（其 CRL 由公开 GET 按需判重复用/续签，历史证书仍可验证）。

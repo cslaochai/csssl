@@ -53,7 +53,8 @@
 ## 密钥保险库（KEK）口径
 
 - `ssl_key_vault` 的密文**只认写入时那套主密钥**：default 域（`company_uscc IS NULL`，TSA/审计签名）认 `store-dir/master.key`，公司域认 `store-dir/companies/{uscc}/master.key`。表里没有 KEK 版本标识，所以「换启动目录 / 换 `SSL_STORE_DIR`」等于换了一把 KEK，症状是接口 500、日志 `BadPaddingException: pad block corrupted`。
-- dev 已把 `store-dir` 固定为绝对路径 `E:/work_source/his_cslk/data/certs`（`application-dev.yml`，仍可用 `SSL_STORE_DIR` 覆盖）。**不要拿另一套盘去写共享库**——多套 KEK 混写同一个库就是 2026-11-05 那次 TSA 解密失败的原因。
+- dev 的 `store-dir` 写的是相对路径 `./data/certs`（`application-dev.yml`），由 `KeyVaultConfig#resolveStoreDir` 锚定到**后端父工程根**（含 `<modules>` 的 pom 所在目录）解析，恒等于 `E:/work_source/his_cslk/csssl/source/ssl_backend/data/certs`，与 IDEA / mvn / 模块拆分无关；仍可用 `SSL_STORE_DIR` 覆盖（覆盖必须给绝对路径）。**不要拿另一套盘去写共享库**——多套 KEK 混写同一个库就是 2026-11-05 那次 TSA 解密失败、2026-11-15 那次 SUB_CA 解密失败的原因。
+- ⚠️ 解析口径**不要退回「classpath 往上两级」**：后端拆成 `csssl-server` 子模块后，那个写法只到模块根，会多落一套 `csssl-server/data/certs` 并换一把 KEK（2026-11-15 事故根因，留档见 `.workbuddy/backup/store-split-20261115/`）。
 - 启动日志有一行 `[密钥保险库] default 域 store-dir=… KEK 指纹=…`；两个实例指纹不一致，就是两套 KEK，别指望它们互相解得开。
 - 自救口径：**可再生的密钥**（`tsa`、`audit-sign`）删掉 `ssl_key_vault` 对应条目后重启即自动重建（TSA 会换公钥，历史令牌随之失效）；`SUB_CA` / `api-clients` 等**必须找回原 KEK**，重建等于废掉已签发证书与已分发凭证。若能找到"旧 KEK"文件，优先用旧 KEK 解密 + 当前 KEK 重新加密回写，密钥对不变、历史签名继续可验。
 

@@ -27,6 +27,7 @@ public class CaSubCaApproval extends AuditColumns {
     /**
      * 关联申请单 id
      */
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long ticketId;
 
     /**
