@@ -1,0 +1,60 @@
+package com.csssl.vo;
+
+import com.csssl.entity.ApiClient;
+import com.csssl.sdk.CaApiSign;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import lombok.Data;
+
+import java.time.LocalDateTime;
+
+/**
+ * 外部 API 客户端视图（管理端列表/登记回执）；绝不包含 secret。
+ */
+@Data
+public class ApiClientVO {
+
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long id;
+    private String appId;
+    private String companyUscc;
+    private String companyName;
+    private String clientName;
+    private String systemName;
+    private String ipAllowlist;
+    private String clientCertSha256;
+    /** 鉴权方式：SM2 / HMAC（前端据此显示"非对称签名"还是"共享口令"） */
+    private String signAuthType;
+    /** 已登记公钥的指纹前 16 位（便于核对换绑的是哪把钥匙） */
+    private String signKeyId;
+    private Integer secretVersion;
+    private Integer status;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime lastUsedAt;
+    private String createdBy;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime createdAt;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime rotatedAt;
+
+    public static ApiClientVO from(ApiClient c) {
+        ApiClientVO vo = new ApiClientVO();
+        vo.setId(c.getId());
+        vo.setAppId(c.getAppId());
+        vo.setCompanyUscc(c.getCompanyUscc());
+        vo.setClientName(c.getClientName());
+        vo.setSystemName(c.getSystemName());
+        vo.setIpAllowlist(c.getIpAllowlist());
+        vo.setClientCertSha256(c.getClientCertSha256());
+        boolean sm2 = c.getSignPublicKey() != null && !c.getSignPublicKey().isBlank();
+        vo.setSignAuthType(sm2 ? "SM2" : "HMAC");
+        vo.setSignKeyId(sm2 ? CaApiSign.keyId(c.getSignPublicKey()) : null);
+        vo.setSecretVersion(c.getSecretVersion());
+        vo.setStatus(c.getStatus());
+        vo.setLastUsedAt(c.getLastUsedAt());
+        vo.setCreatedAt(c.getCreatedAt());
+        vo.setRotatedAt(c.getRotatedAt());
+        return vo;
+    }
+}

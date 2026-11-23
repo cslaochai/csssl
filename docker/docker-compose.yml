@@ -9,6 +9,9 @@ services:
     env_file: .env
     environment:
       TZ: Asia/Shanghai
+      # 密钥/证书落盘目录：显式绝对路径，对应下面的 ./data:/app/data 挂载。
+      # 后端已改成「相对路径直接启动失败」，所以这一项不能省。
+      SSL_STORE_DIR: /app/data/certs
       JAVA_OPTS: -Xms384m -Xmx1g -XX:+UseG1GC -Duser.timezone=Asia/Shanghai
     ports:
       # 宿主 8012 → 容器 8092，context-path /ssl

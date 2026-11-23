@@ -8,10 +8,10 @@ spring:
     password: Feng123456!
 
 csssl:
-  # 密钥/证书落盘目录。写相对路径 ./data/certs，KeyVaultConfig 会基于 classpath root 解析为
-  # 项目内绝对路径 source/ssl_backend/data/certs——IDEA 与 mvn 工作目录不同也不再落两套盘。
-  # 如需临时起第二个实例做验证，用 SSL_STORE_DIR 显式覆盖为绝对路径。
-  store-dir: ${SSL_STORE_DIR:./data/certs}
+  # 密钥/证书落盘目录：显式绝对路径，指向后端工程下的 data/certs（master.key 就在这里）。
+  # 不要再改回相对路径——相对路径会随启动目录变化，等于换一把 KEK，库内密文将解不开。
+  # 起第二个实例做验证时，用 SSL_STORE_DIR 覆盖为另一个独立目录（不要复用本目录）。
+  store-dir: ${SSL_STORE_DIR:E:/work_source/his_cslk/csssl/source/ssl_backend/data/certs}
   # 对外公开基础地址：生成证书 CDP/AIA 扩展与 OCSP URL（业务系统可见地址，需可外访）
   # 单机联调四个服务（8080/8090/8091/8092）都在本机，localhost 可达；一旦证书要发给别的机器，
   # 必须用 SSL_PUBLIC_BASE_URL 覆盖成对端能访问的内网地址，否则对端按证书里的 URL 取 CRL 会打自己的 localhost。

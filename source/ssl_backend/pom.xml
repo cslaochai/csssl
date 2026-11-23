@@ -5,16 +5,41 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-      CA根认证中心（csssl）多模块父工程：
-      - csssl-push-sdk：对外推送 SDK（DTP + SM2 验签工具），供 HIS 等外部系统依赖
-      - csssl-server：Spring Boot 启动模块（证书服务、审批流、管理后台 API）
+      CA根认证中心（csssl）多模块父工程。依赖方向严格单向、无环：
+        csssl-sdk ─┐
+                   ├→ csssl-common → csssl-iam → csssl-workflow → csssl-ca → csssl-server
+        （sdk 与 common 为底座，workflow 依赖 iam 拿到 SysUser/LoginUser/UserUtils）
+
+      - csssl-sdk      ：对外协议与密码工具箱（DTP 签名 / SM2 验签 / 报文加解密），供 HIS 等外部系统单独依赖，
+                         只有 BouncyCastle，不带 Spring。禁止依赖任何其他内部模块。
+      - csssl-common   ：纯基础设施：通用返回/异常/分页、密码与证书工具、配置属性、枚举。不放业务 entity / DTO / VO。
+      - csssl-iam      ：用户与权限域（账号/角色/授权、登录态、审计、站内消息、密钥保险库）。
+      - csssl-workflow ：自研线性审批引擎（flow_* 表、引擎、流程定义注册表）。
+      - csssl-ca       ：证书域（根CA/SUB_CA、签发、吊销、CRL、OCSP、TSA、模板、审批单业务服务）。
+      - csssl-server   ：Spring Boot 启动模块（装配、安全过滤、管理后台与对外 API 控制器），唯一产出可执行 jar。
     -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
     <groupId>com.csssl</groupId>
     <artifactId>csssl-parent</artifactId>
     <version>1.0.0</version>
     <packaging>pom</packaging>
     <name>csssl-parent</name>
     <description>CA根认证中心（csssl）多模块父工程</description>
+
+    <modules>
+        <module>csssl-sdk</module>
+        <module>csssl-common</module>
+        <module>csssl-iam</module>
+        <module>csssl-workflow</module>
+        <module>csssl-ca</module>
+        <module>csssl-server</module>
+    </modules>
 
     <properties>
         <java.version>21</java.version>
@@ -25,12 +50,36 @@
         <bouncycastle.version>1.78.1</bouncycastle.version>
     </properties>
 
-    <modules>
-        <module>csssl-server</module>
-    </modules>
-
     <dependencyManagement>
         <dependencies>
+            <!-- 内部模块：版本一律由父工程统一给出 -->
+            <dependency>
+                <groupId>com.csssl</groupId>
+                <artifactId>csssl-sdk</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.csssl</groupId>
+                <artifactId>csssl-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.csssl</groupId>
+                <artifactId>csssl-iam</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.csssl</groupId>
+                <artifactId>csssl-workflow</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.csssl</groupId>
+                <artifactId>csssl-ca</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- 三方依赖 -->
             <dependency>
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-jdk18on</artifactId>
@@ -41,6 +90,52 @@
                 <artifactId>bcpkix-jdk18on</artifactId>
                 <version>${bouncycastle.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-all</artifactId>
+                <version>${hutool.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <build>
+        <plugins>
+            <!-- 全模块统一用 lombok 注解处理（子模块只在 dependencies 里加 optional lombok 即可） -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

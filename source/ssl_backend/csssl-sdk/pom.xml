@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.csssl</groupId>
+        <artifactId>csssl-parent</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>csssl-sdk</artifactId>
+    <packaging>jar</packaging>
+    <name>csssl-sdk</name>
+    <description>对外协议与密码工具箱：DTP 报文签名、SM2 验签、请求体加解密。供 HIS 等外部系统单独依赖（仅 BouncyCastle，不含 Spring）。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

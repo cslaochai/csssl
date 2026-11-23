@@ -44,17 +44,34 @@
 - **不得新增任何直接签发端点/服务方法/权限点**：`POST /admin/certs`、`/admin/certs/csr`、`/admin/certs/public-key` 与 `cert:issue` 已删除（含 `IssueCertRequestDTO`/`CsrIssueRequestDTO`、前端签发按钮与 `issueCert*` 封装），对外 API 通道 `/ca/api/v1` 也只有 apply/cancel/revoke。
 - 「证书管理」页是台账不是发证入口：不要在那儿加签发按钮；`CertService#issueWithPublicKey(companyUscc, req, policy, ...)` 是唯一发证出口，且只允许 `CertApplicationService#issue` 调用。
 
+## 后端模块结构（6 模块）
+
+`source/ssl_backend` 是真正的 Maven 多模块父工程（2026-11-23 拆分完成），依赖严格单向、无环：
+`csssl-sdk` 与 `csssl-common` 是底座（互不依赖）→ `csssl-iam` 依赖 common → `csssl-workflow` 依赖 common + iam → `csssl-ca` 依赖 common + iam + workflow + sdk → `csssl-server` 依赖以上全部。
+
+**分层原则：common 只放基础设施，不放业务 entity / DTO / VO。** 业务模型一律下沉到它真正归属的域模块，避免 common 变成第二个单体。
+
+- **`csssl-sdk` 是叶子**：只放对外协议/密码工具（包 `com.csssl.sdk`：`SignUtil`、`CaApiSign`、`ApiBodyCrypto`、`Sm2KeyTool`），仅依赖 BouncyCastle、不带 Spring，供 HIS 等外部系统单独 `dependency` 引入。**禁止它依赖任何内部模块**，也禁止把带 Spring 注解的类挪进来。
+- **`csssl-common`（24 个类，纯基础设施）**：`Result`/`ApiException`/`GlobalExceptionHandler`/`PageParam`、`CssslProperties` 与 `Jackson/MyBatis/Scheduling/Web` 四个配置、`enums`、`util`（`Sm2Util`/`PemUtil`/`Sm4Util`/`ShamirUtil`/`JwtUtil`/`CertUtil`/`PermissionCatalog`）。**不允许再往这里放 entity / mapper / service / dto / vo。**
+- **`csssl-iam`（用户与权限域）**：`SysUser`/`SysRole`/`RolePerm`/`LoginUser`/`AuditColumns`/`AuditLog`/`Message`/`KeyVaultEntry` + 对应 mapper + `AuthService`/`PermissionService`/`MessageService`/`AuditService`/`AuditSigner` + `UserUtils`/`KeyVault` + `KeyVaultConfig`/`AuditMetaObjectHandler` + 登录/用户/角色/审计/消息的 DTO 与 VO。workflow 依赖它拿 `SysUser`/`UserUtils`，所以它必须在 workflow 之下。
+- **`csssl-workflow`**：审批引擎与 `flow_*` 模型、`com.csssl.workflow.mapper`、工作流 DTO/VO。**待办聚合 `WorkflowTodoService` 必须留在 server**——它 import 证书域实体，搬进 workflow 就成环。
+- **`csssl-ca`（证书域）**：证书 entity/mapper/service + `CompanyVaultResolver` + `UsccValidator` + 证书域 DTO/VO（对外 API 入参、申请单、证书、CRL、OCSP、TSA、公司、份额、模板）。
+- **`csssl-server`**：只有启动类、3 个安全/过滤器 config、19 个后台 controller、3 个对外 api controller、`WorkflowTodoService` 与 `application*.yml`。
+- 只有 `csssl-server` 声明 `spring-boot-maven-plugin`（`repackage`）；其余模块一律普通 jar，**不要**在子模块加该插件。
+- `@MapperScan` 必须同时列 `com.csssl.mapper` 与 `com.csssl.workflow.mapper`；新增 mapper 包时同步补上，漏写会在启动时报 `required a bean of type XxxMapper`。
+
 ## 常用命令
 
-- 后端：`source/ssl_backend` 下 `mvn -q -DskipTests compile`；本机 8092 是开发实例，验证新接口另起 8093：`mvn -q spring-boot:run -Dspring-boot.run.arguments=--server.port=8093`（测完只杀自己起的进程，勿动 8092）。
+- 后端构建（`source/ssl_backend` 下，父工程 reactor 会按依赖顺序构建 5 个模块）：`mvn -q -DskipTests compile`；打包 `mvn -q -DskipTests package`，产物 `csssl-server/target/csssl-backend.jar`。
+- 本机 8092 是开发实例；验证新接口另起 8093：`java -jar csssl-server/target/csssl-backend.jar --server.port=8093`。**不要用 `mvn spring-boot:run`**——多模块下父工程会对每个模块都执行该 goal，而只有 server 有 main class（测完只杀自己起的进程，勿动 8092）。
 - 前端构建校验：`source/front` 下 `npx vite build --outDir .verify-build --emptyOutDir`。
 - Shell 为 Git Bash：**Bash 命令行内不要出现中文**（中文提交用 `git commit -F 临时文件`）；mvn 日志是 GBK；前端源文件保持 CRLF。
 
 ## 密钥保险库（KEK）口径
 
 - `ssl_key_vault` 的密文**只认写入时那套主密钥**：default 域（`company_uscc IS NULL`，TSA/审计签名）认 `store-dir/master.key`，公司域认 `store-dir/companies/{uscc}/master.key`。表里没有 KEK 版本标识，所以「换启动目录 / 换 `SSL_STORE_DIR`」等于换了一把 KEK，症状是接口 500、日志 `BadPaddingException: pad block corrupted`。
-- dev 的 `store-dir` 写的是相对路径 `./data/certs`（`application-dev.yml`），由 `KeyVaultConfig#resolveStoreDir` 锚定到**后端父工程根**（含 `<modules>` 的 pom 所在目录）解析，恒等于 `E:/work_source/his_cslk/csssl/source/ssl_backend/data/certs`，与 IDEA / mvn / 模块拆分无关；仍可用 `SSL_STORE_DIR` 覆盖（覆盖必须给绝对路径）。**不要拿另一套盘去写共享库**——多套 KEK 混写同一个库就是 2026-11-05 那次 TSA 解密失败、2026-11-15 那次 SUB_CA 解密失败的原因。
-- ⚠️ 解析口径**不要退回「classpath 往上两级」**：后端拆成 `csssl-server` 子模块后，那个写法只到模块根，会多落一套 `csssl-server/data/certs` 并换一把 KEK（2026-11-15 事故根因，留档见 `.workbuddy/backup/store-split-20261115/`）。
+- dev 的 `store-dir`（`application-dev.yml`）写的是**显式绝对路径** `E:/work_source/his_cslk/csssl/source/ssl_backend/data/certs`；`KeyVaultConfig#resolveStoreDir` 只接受绝对路径，相对路径或空值直接 fail-fast 启动失败。容器侧由 compose 的 `SSL_STORE_DIR=/app/data/certs` 注入。这样与 IDEA / mvn / 启动目录 / 模块拆分彻底解耦。**不要拿另一套盘去写共享库**——多套 KEK 混写同一个库就是 2026-11-05 那次 TSA 解密失败、2026-11-15 那次 SUB_CA 解密失败的原因。
+- ⚠️ 解析口径**不要再引入任何「推断」**：既不要退回「classpath 往上两级」，也不要再按「含 `<modules>` 的 pom」去找父工程——那两代写法都会随目录结构变化而悄悄指向别的目录。改路径只改配置值，不改推断逻辑（事故留档 `.workbuddy/backup/store-split-20261115/`）。
 - 启动日志有一行 `[密钥保险库] default 域 store-dir=… KEK 指纹=…`；两个实例指纹不一致，就是两套 KEK，别指望它们互相解得开。
 - 自救口径：**可再生的密钥**（`tsa`、`audit-sign`）删掉 `ssl_key_vault` 对应条目后重启即自动重建（TSA 会换公钥，历史令牌随之失效）；`SUB_CA` / `api-clients` 等**必须找回原 KEK**，重建等于废掉已签发证书与已分发凭证。若能找到"旧 KEK"文件，优先用旧 KEK 解密 + 当前 KEK 重新加密回写，密钥对不变、历史签名继续可验。
 

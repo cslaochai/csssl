@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.csssl</groupId>
+        <artifactId>csssl-parent</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>csssl-iam</artifactId>
+    <packaging>jar</packaging>
+    <name>csssl-iam</name>
+    <description>用户与权限域：登录态与账号/角色/授权实体、认证与授权服务、6 个通用审计列与审计签名验签、站内消息、密钥保险库（KeyVault 及其主密钥配置）。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.csssl</groupId>
+            <artifactId>csssl-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

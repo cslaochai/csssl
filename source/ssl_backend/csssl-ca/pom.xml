@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.csssl</groupId>
+        <artifactId>csssl-parent</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>csssl-ca</artifactId>
+    <packaging>jar</packaging>
+    <name>csssl-ca</name>
+    <description>证书域：根CA/SUB_CA、证书签发与吊销、CRL、OCSP、TSA、模板、到期扫描、公司密钥份额与审批单业务服务。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.csssl</groupId>
+            <artifactId>csssl-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.csssl</groupId>
+            <artifactId>csssl-iam</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.csssl</groupId>
+            <artifactId>csssl-workflow</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.csssl</groupId>
+            <artifactId>csssl-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

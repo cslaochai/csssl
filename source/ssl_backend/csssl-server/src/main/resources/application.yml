@@ -48,7 +48,9 @@ mybatis-plus:
 # ===== CA根认证中心业务参数 =====
 csssl:
   # 证书/CRL/根密钥份额落盘目录（私钥密文已改落库 ssl_key_vault，SM4 加密）
-  store-dir: ${SSL_STORE_DIR:./data/certs}
+  # 必须是绝对路径，且各环境必须显式指定：dev 见 application-dev.yml，容器见 compose 的 SSL_STORE_DIR。
+  # 刻意不提供相对路径默认值——相对路径 = 配置错误，启动即失败（见 KeyVaultConfig#resolveStoreDir）。
+  store-dir: ${SSL_STORE_DIR}
   # 根CA
   root-ca:
     # 根CA标识（证书CN用：省级 CA 认证中心 Root CA）
