@@ -113,10 +113,10 @@ csssl/
 # 1. 首次：手工在库执行建表脚本（幂等可重复跑；系统启动不执行任何 DDL）
 mysql -h <host> -u <user> -p ssl_ca < source/ssl_backend/src/main/resources/db/schema.sql
 
-# 2. 后端（Maven 多模块父工程：sdk / common / iam / workflow / ca / server，只有 server 产可执行 jar）
+# 2. 后端（Maven 多模块父工程：sdk / common / system / workflow / ca / web，只有 web 产可执行 jar）
 cd source/ssl_backend
 mvn -q -DskipTests package
-java -jar csssl-server/target/csssl-backend.jar   # http://localhost:8092/ssl
+java -jar csssl-web/target/csssl-backend.jar   # http://localhost:8092/ssl
 # store-dir 必须是绝对路径：dev 已在 application-dev.yml 写死 source/ssl_backend/data/certs，
 # 容器由 compose 的 SSL_STORE_DIR=/app/data/certs 注入；相对路径会直接启动失败
 

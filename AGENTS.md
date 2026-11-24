@@ -47,23 +47,24 @@
 ## 后端模块结构（6 模块）
 
 `source/ssl_backend` 是真正的 Maven 多模块父工程（2026-11-23 拆分完成），依赖严格单向、无环：
-`csssl-sdk` 与 `csssl-common` 是底座（互不依赖）→ `csssl-iam` 依赖 common → `csssl-workflow` 依赖 common + iam → `csssl-ca` 依赖 common + iam + workflow + sdk → `csssl-server` 依赖以上全部。
+`csssl-sdk` 与 `csssl-common` 是底座（互不依赖）→ `csssl-system` 依赖 common → `csssl-workflow` 依赖 common + system → `csssl-ca` 依赖 common + system + workflow + sdk → `csssl-web` 依赖以上全部。
 
-**分层原则：common 只放基础设施，不放业务 entity / DTO / VO。** 业务模型一律下沉到它真正归属的域模块，避免 common 变成第二个单体。
+**分层原则：common 只放基础设施；web 只放启动类与 config；controller/服务/DTO 随业务域下沉。**
 
-- **`csssl-sdk` 是叶子**：只放对外协议/密码工具（包 `com.csssl.sdk`：`SignUtil`、`CaApiSign`、`ApiBodyCrypto`、`Sm2KeyTool`），仅依赖 BouncyCastle、不带 Spring，供 HIS 等外部系统单独 `dependency` 引入。**禁止它依赖任何内部模块**，也禁止把带 Spring 注解的类挪进来。
-- **`csssl-common`（24 个类，纯基础设施）**：`Result`/`ApiException`/`GlobalExceptionHandler`/`PageParam`、`CssslProperties` 与 `Jackson/MyBatis/Scheduling/Web` 四个配置、`enums`、`util`（`Sm2Util`/`PemUtil`/`Sm4Util`/`ShamirUtil`/`JwtUtil`/`CertUtil`/`PermissionCatalog`）。**不允许再往这里放 entity / mapper / service / dto / vo。**
-- **`csssl-iam`（用户与权限域）**：`SysUser`/`SysRole`/`RolePerm`/`LoginUser`/`AuditColumns`/`AuditLog`/`Message`/`KeyVaultEntry` + 对应 mapper + `AuthService`/`PermissionService`/`MessageService`/`AuditService`/`AuditSigner` + `UserUtils`/`KeyVault` + `KeyVaultConfig`/`AuditMetaObjectHandler` + 登录/用户/角色/审计/消息的 DTO 与 VO。workflow 依赖它拿 `SysUser`/`UserUtils`，所以它必须在 workflow 之下。
-- **`csssl-workflow`**：审批引擎与 `flow_*` 模型、`com.csssl.workflow.mapper`、工作流 DTO/VO。**待办聚合 `WorkflowTodoService` 必须留在 server**——它 import 证书域实体，搬进 workflow 就成环。
-- **`csssl-ca`（证书域）**：证书 entity/mapper/service + `CompanyVaultResolver` + `UsccValidator` + 证书域 DTO/VO（对外 API 入参、申请单、证书、CRL、OCSP、TSA、公司、份额、模板）。
-- **`csssl-server`**：只有启动类、3 个安全/过滤器 config、19 个后台 controller、3 个对外 api controller、`WorkflowTodoService` 与 `application*.yml`。
-- 只有 `csssl-server` 声明 `spring-boot-maven-plugin`（`repackage`）；其余模块一律普通 jar，**不要**在子模块加该插件。
+- **`csssl-sdk`（4 个类）**：只放对外协议/密码工具（包 `com.csssl.sdk`：`SignUtil`、`CaApiSign`、`ApiBodyCrypto`、`Sm2KeyTool`），仅依赖 BouncyCastle、不带 Spring，供 HIS 等外部系统单独 `dependency` 引入。**禁止它依赖任何内部模块**，也禁止把带 Spring 注解的类挪进来。
+- **`csssl-common`（24 个类，纯基础设施）**：`Result`/`ApiException`/`GlobalExceptionHandler`/`PageParam`、`CssslProperties` 与 `Jackson/MyBatis/Scheduling/Web` 四个配置、`enums`、`util`（`Sm2Util`/`PemUtil`/`Sm4Util`/`ShamirUtil`/`JwtUtil`/`CertUtil`/`PermissionCatalog`）。**不允许再往这里放 entity / mapper / service / controller / dto / vo。**
+- **`csssl-system`（用户与权限域，56 个类）**：`SysUser`/`SysRole`/`RolePerm`/`LoginUser`/`AuditColumns`/`AuditLog`/`Message`/`KeyVaultEntry` + mapper + `AuthService`/`PermissionService`/`MessageService`/`AuditService`/`AuditSigner` + `UserUtils`/`KeyVault` + `KeyVaultConfig`/`AuditMetaObjectHandler` + 登录/用户/角色/审计/消息的 DTO/VO + `AuthController`/`AdminUserController`/`RoleController`/`AuditController`/`MessageController`。
+- **`csssl-workflow`（38 个类）**：审批引擎与 `flow_*` 模型、`com.csssl.workflow.mapper`、工作流 DTO/VO + `WorkflowDefController`/`WorkflowEngineController`（纯引擎接口，不碰证书域）。
+- **`csssl-ca`（证书域，128 个类）**：证书 entity/mapper/service + `CompanyVaultResolver`/`UsccValidator`/`CaApiAuthFilter` + 证书域 DTO/VO + 12 个后台 controller + 3 个对外 `api/controller` + `WorkflowTodoService` + `WorkflowController`。后两者必须在这里：`WorkflowTodoService` 要 import 证书域实体（放 workflow 就成环），而 `WorkflowController` 依赖它，只能一起上来。
+- **`csssl-web`（3 个类）**：**只有** `CssslApplication`、`config/SecurityConfig`、`config/TokenAuthFilter`，以及 `application*.yml`。不要再往 web 放 controller / service / dto / vo。
+- 只有 `csssl-web` 声明 `spring-boot-maven-plugin`（`repackage`）；其余模块一律普通 jar，**不要**在子模块加该插件。
 - `@MapperScan` 必须同时列 `com.csssl.mapper` 与 `com.csssl.workflow.mapper`；新增 mapper 包时同步补上，漏写会在启动时报 `required a bean of type XxxMapper`。
+- 跨域通用入参按「最低使用方」放：`IdDTO` 在 workflow（ca 的 controller 复用），`CodeDTO`/`CompanyUsccDTO` 在 system（角色/用户/审计复用）。新增通用 DTO 前先看谁在更下层用它。
 
 ## 常用命令
 
-- 后端构建（`source/ssl_backend` 下，父工程 reactor 会按依赖顺序构建 5 个模块）：`mvn -q -DskipTests compile`；打包 `mvn -q -DskipTests package`，产物 `csssl-server/target/csssl-backend.jar`。
-- 本机 8092 是开发实例；验证新接口另起 8093：`java -jar csssl-server/target/csssl-backend.jar --server.port=8093`。**不要用 `mvn spring-boot:run`**——多模块下父工程会对每个模块都执行该 goal，而只有 server 有 main class（测完只杀自己起的进程，勿动 8092）。
+- 后端构建（`source/ssl_backend` 下，父工程 reactor 会按依赖顺序构建 6 个模块）：`mvn -q -DskipTests compile`；打包 `mvn -q -DskipTests package`，产物 `csssl-web/target/csssl-backend.jar`。
+- 本机 8092 是开发实例；验证新接口另起 8093：`java -jar csssl-web/target/csssl-backend.jar --server.port=8093`。**不要用 `mvn spring-boot:run`**——多模块下父工程会对每个模块都执行该 goal，而只有 web 有 main class（测完只杀自己起的进程，勿动 8092）。
 - 前端构建校验：`source/front` 下 `npx vite build --outDir .verify-build --emptyOutDir`。
 - Shell 为 Git Bash：**Bash 命令行内不要出现中文**（中文提交用 `git commit -F 临时文件`）；mvn 日志是 GBK；前端源文件保持 CRLF。
 

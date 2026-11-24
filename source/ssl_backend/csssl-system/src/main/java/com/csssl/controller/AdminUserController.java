@@ -16,7 +16,6 @@ import com.csssl.vo.UserSimpleVO;
 import com.csssl.mapper.SysUserMapper;
 import com.csssl.service.AuditService;
 import com.csssl.service.AuthService;
-import com.csssl.service.CompanyService;
 import com.csssl.enums.RoleCodeEnum;
 import cn.hutool.crypto.digest.BCrypt;
 import com.csssl.util.UserUtils;
@@ -58,7 +57,6 @@ public class AdminUserController {
     private final SysUserMapper userMapper;
     private final SysRoleMapper roleMapper;
     private final AuditService auditService;
-    private final CompanyService companyService;
 
     /**
      * 用户列表（分页 + 角色/公司筛选；公司用户强制本公司，全局用户 companyUscc 缺省=跨公司总览只读）

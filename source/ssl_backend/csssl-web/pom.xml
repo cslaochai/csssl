@@ -10,10 +10,10 @@
         <version>1.0.0</version>
     </parent>
 
-    <artifactId>csssl-server</artifactId>
+    <artifactId>csssl-web</artifactId>
     <packaging>jar</packaging>
-    <name>csssl-server</name>
-    <description>Spring Boot 启动模块：装配、安全过滤、管理后台 API 与对外 /ca/api/v1 控制器。全工程唯一产出可执行 jar 的模块。</description>
+    <name>csssl-web</name>
+    <description>Spring Boot 启动模块：只放启动类与 config（装配、安全过滤），全工程唯一产出可执行 jar 的模块；controller 全部下沉到所属业务模块。</description>
 
     <dependencies>
         <dependency>
@@ -22,7 +22,7 @@
         </dependency>
         <dependency>
             <groupId>com.csssl</groupId>
-            <artifactId>csssl-iam</artifactId>
+            <artifactId>csssl-system</artifactId>
         </dependency>
         <dependency>
             <groupId>com.csssl</groupId>

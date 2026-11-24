@@ -7,16 +7,16 @@
     <!--
       CA根认证中心（csssl）多模块父工程。依赖方向严格单向、无环：
         csssl-sdk ─┐
-                   ├→ csssl-common → csssl-iam → csssl-workflow → csssl-ca → csssl-server
-        （sdk 与 common 为底座，workflow 依赖 iam 拿到 SysUser/LoginUser/UserUtils）
+                   ├→ csssl-common → csssl-system → csssl-workflow → csssl-ca → csssl-web
+        （sdk 与 common 为底座，workflow 依赖 system 拿到 SysUser/LoginUser/UserUtils）
 
       - csssl-sdk      ：对外协议与密码工具箱（DTP 签名 / SM2 验签 / 报文加解密），供 HIS 等外部系统单独依赖，
                          只有 BouncyCastle，不带 Spring。禁止依赖任何其他内部模块。
       - csssl-common   ：纯基础设施：通用返回/异常/分页、密码与证书工具、配置属性、枚举。不放业务 entity / DTO / VO。
-      - csssl-iam      ：用户与权限域（账号/角色/授权、登录态、审计、站内消息、密钥保险库）。
+      - csssl-system   ：用户与权限域（账号/角色/授权、登录态、审计、站内消息、密钥保险库）。
       - csssl-workflow ：自研线性审批引擎（flow_* 表、引擎、流程定义注册表）。
       - csssl-ca       ：证书域（根CA/SUB_CA、签发、吊销、CRL、OCSP、TSA、模板、审批单业务服务）。
-      - csssl-server   ：Spring Boot 启动模块（装配、安全过滤、管理后台与对外 API 控制器），唯一产出可执行 jar。
+      - csssl-web      ：Spring Boot 启动模块，只放启动类与 config（装配、安全过滤），唯一产出可执行 jar；controller 一律下沉到所属业务模块。
     -->
     <parent>
         <groupId>org.springframework.boot</groupId>
@@ -35,10 +35,10 @@
     <modules>
         <module>csssl-sdk</module>
         <module>csssl-common</module>
-        <module>csssl-iam</module>
+        <module>csssl-system</module>
         <module>csssl-workflow</module>
         <module>csssl-ca</module>
-        <module>csssl-server</module>
+        <module>csssl-web</module>
     </modules>
 
     <properties>
@@ -65,7 +65,7 @@
             </dependency>
             <dependency>
                 <groupId>com.csssl</groupId>
-                <artifactId>csssl-iam</artifactId>
+                <artifactId>csssl-system</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

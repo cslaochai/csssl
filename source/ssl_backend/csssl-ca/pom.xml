@@ -22,7 +22,7 @@
         </dependency>
         <dependency>
             <groupId>com.csssl</groupId>
-            <artifactId>csssl-iam</artifactId>
+            <artifactId>csssl-system</artifactId>
         </dependency>
         <dependency>
             <groupId>com.csssl</groupId>

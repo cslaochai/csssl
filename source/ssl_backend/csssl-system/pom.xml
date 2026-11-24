@@ -10,9 +10,9 @@
         <version>1.0.0</version>
     </parent>
 
-    <artifactId>csssl-iam</artifactId>
+    <artifactId>csssl-system</artifactId>
     <packaging>jar</packaging>
-    <name>csssl-iam</name>
+    <name>csssl-system</name>
     <description>用户与权限域：登录态与账号/角色/授权实体、认证与授权服务、6 个通用审计列与审计签名验签、站内消息、密钥保险库（KeyVault 及其主密钥配置）。</description>
 
     <dependencies>
