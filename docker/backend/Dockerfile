@@ -6,7 +6,7 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai
 ENV JAVA_OPTS=""
 
-COPY csssl-backend.jar /app/app.jar
+COPY csssl-backend.jar /app/his-csssl.jar
 EXPOSE 8092
 
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/his-csssl.jar"]
