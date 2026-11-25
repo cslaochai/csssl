@@ -84,13 +84,8 @@
                         </exclude>
                     </excludes>
                 </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
+                <!-- repackage 的单次绑定由 spring-boot-starter-parent 的 pluginManagement 提供，
+                     此处再写 execution 会让 jar 被 repackage 两遍（第二次把第一次的产物改名成 .original）。 -->
             </plugin>
         </plugins>
     </build>
