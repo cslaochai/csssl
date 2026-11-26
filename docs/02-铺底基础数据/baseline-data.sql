@@ -27,7 +27,7 @@ TRUNCATE TABLE `ssl_key_vault`;
 TRUNCATE TABLE `ssl_crl_state`;
 TRUNCATE TABLE `ssl_ca_cert`;
 TRUNCATE TABLE `ssl_ca_company`;
--- 只保留平台级系统账号（admin / keyman1~5 / securityadmin1），业务用户全清
-DELETE FROM `ssl_sys_user` WHERE id NOT IN (1,2,3,4,5,2117495840921632769,2117500000000000015);
+-- 只保留平台级系统账号（admin / keyman1~5），业务用户全清
+DELETE FROM `ssl_sys_user` WHERE id NOT IN (1,2,3,4,5,2117495840921632769);
 
 SET FOREIGN_KEY_CHECKS=1;
