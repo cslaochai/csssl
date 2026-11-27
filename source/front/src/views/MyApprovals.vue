@@ -16,10 +16,6 @@
           <div class="summary-label">已办</div>
         </div>
       </div>
-      <div class="summary-tip">
-        四条审批流（RA 申请 / 证书操作单 / 公司变更单 / SUB_CA 重建）统一在这里处理：
-        批准、驳回、签发、投票贴份额、执行重建、领取回执，全部就地完成，不再跳转到各业务台账。
-      </div>
     </el-card>
 
     <!-- 待办列表 -->
