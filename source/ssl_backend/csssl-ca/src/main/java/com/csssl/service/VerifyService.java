@@ -20,7 +20,8 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 证书链在线校验：业务系统（cslk / csmig）调用 /ca/public/verify 校验对方证书。
+ * 证书链在线校验：业务系统（cslk / csmig）调用 POST /ca/public/verify 校验对方证书，
+ * companyUscc / systemName 由请求 DTO 带入（路径不带参数）。
  * 支持多级链：叶子 → 服务签发二级CA（SUB_CA）→ 根CA。
     /**
      * 校验项：签发者=本站CA → 逐级验签 → 未吊销 → 未过期 → 用途匹配（TLS/SIGN）。
@@ -94,13 +95,6 @@ import java.util.Locale;
     private static void fail(VerifyResultVO r, String message) {
         r.setValid(false);
         r.setMessage(message);
-    }
-
-    /**
-     * 校验（公司域版）：沿该公司 根CA ← SUB_CA ← 叶子 链验证
-     */
-    public VerifyResultVO verify(VerifyQueryDTO req, String companyUscc) {
-        return verify(req, companyUscc, null);
     }
 
     /**

@@ -26,8 +26,9 @@ import java.util.Base64;
  * 业务系统公开接口（无需登录，供 cslk / csmig / csmis 等子系统对接）：
  * 根证书下载、证书链在线校验、CRL 下载、OCSP 三态查询（RFC 6960）。
  *
- * <p>路线A多公司：公司域公开端点 /ca/public/{companyUscc}/...（root/subca/crl/crl/delta/ocsp/verify），
- * 全部委托 per-company 服务方法；无 {companyUscc} 的现存端点保持 default 域行为，一行不动。
+ * <p>路线A多公司：root/subca/crl/crl/delta/ocsp 为标准 PKI 协议端点，保留 /ca/public/{companyUscc}/{systemName}/...
+ * 路径段（URL 需写入证书 CDP/AIA 扩展）；verify 在线校验统一为 POST /ca/public/verify，
+ * companyUscc / systemName 走 body，路径上不带路径参数。
  * 合规点：公司不存在按现有异常口径抛 IllegalArgumentException（404/400 语义统一走全局异常处理），
  * 但 SUSPENDED/CLOSED 公司仍允许查 root/crl/ocsp/verify——历史证书必须持续可验证，
  * 只读端点绝不因公司状态关闭（公司状态门禁只作用于签发，见 CertService）。</p>
@@ -62,11 +63,17 @@ public class VerifyController {
     }
 
     /**
-     * 证书链在线校验（TLS/SIGN 用途可选）
+     * 证书链在线校验（TLS/SIGN 用途可选）。
+     * 公司域 / 系统名走 body：companyUscc 留空回落 default 主域；systemName 留空不限定系统归属。
      */
     @PostMapping("/verify")
     public Result<VerifyResultVO> verify(@RequestBody VerifyQueryDTO req) {
-        return Result.success("校验完成", verifyService.verify(req, "default"));
+        String companyUscc = (req.getCompanyUscc() == null || req.getCompanyUscc().isBlank())
+                ? "default" : req.getCompanyUscc().trim();
+        if (!"default".equals(companyUscc)) {
+            requireCompanyExists(companyUscc);
+        }
+        return Result.success("校验完成", verifyService.verify(req, companyUscc, req.getSystemName()));
     }
 
     /**
@@ -125,16 +132,6 @@ public class VerifyController {
     public String companySubCa(@PathVariable String companyUscc) {
         requireCompanyExists(companyUscc);
         return caService.exportSubCaPem(companyUscc);
-    }
-
-    /**
-     * 公司域证书链在线校验（沿该公司根链验证；按 systemName 定位具体系统的 SUB_CA 链）
-     */
-    @PostMapping("/{companyUscc}/{systemName}/verify")
-    public Result<VerifyResultVO> companyVerify(@PathVariable String companyUscc, @PathVariable String systemName,
-                                               @RequestBody VerifyQueryDTO req) {
-        requireCompanyExists(companyUscc);
-        return Result.success("校验完成", verifyService.verify(req, companyUscc, systemName));
     }
 
     /**

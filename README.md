@@ -140,10 +140,10 @@ npm run dev                  # http://localhost:5175
 | 接口 | 说明 |
 |---|---|
 | `GET /ca/public/root` · `/subca` | 主租户根证书 / SUB_CA 证书 PEM |
-| `POST /ca/public/verify` | 证书链在线校验（叶子→SUB_CA→根逐级验签/有效期/吊销/用途） |
+| `POST /ca/public/verify` | 证书链在线校验（叶子→SUB_CA→根逐级验签/有效期/吊销/用途）；`companyUscc`/`systemName` 走 body，路径不带参数 |
 | `GET /ca/public/crl` · `/crl/delta` | 全量 CRL / 增量 CRL（dCRL）下载 |
 | `POST /ca/public/ocsp` · `GET /ca/public/ocsp/{b64url}` | OCSP 三态查询（good/revoked/unknown，RFC 6960） |
-| `/ca/public/{tenantUscc}/…` | 上述全部接口的按租户域变体（root/subca/verify/crl/crl/delta/ocsp） |
+| `/ca/public/{tenantUscc}/{systemName}/…` | root/subca/crl/crl/delta/ocsp 的按租户域变体（标准 PKI 协议 URL，需写入证书 CDP/AIA 扩展）；verify 不区分路径变体，公司域由 body 声明 |
 
 ### RA 申请单（`/ssl/admin/applications`）
 

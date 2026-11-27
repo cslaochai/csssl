@@ -432,7 +432,7 @@ export function getTsaPublicKey() {
 }
 
 // ===== 公开验证端点（按公司域，无需登录；PKI 协议保留路径段） =====
-/** 证书在线验证三态：POST /ca/public/{companyUscc}/verify，body {certPem, purpose} */
+/** 证书在线验证三态：POST /ca/public/verify，body {companyUscc, systemName?, certPem, purpose}（路径不带参数） */
 export function verifyCertPublic(companyUscc, data) {
-  return request.post(`/ca/public/${companyUscc}/verify`, data)
+  return request.post('/ca/public/verify', { ...data, companyUscc })
 }
